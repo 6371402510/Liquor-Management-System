@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime
+from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime, UniqueConstraint  # ← ADD UniqueConstraint
 from sqlalchemy.sql import func
 from database import Base
 
@@ -8,9 +8,13 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, unique=True, index=True, nullable=True) 
     company_id = Column(Integer, nullable=True, index=True) 
+    
     # Basic Info
-    item_code = Column(String, unique=True, index=True, nullable=False)
+    # ↓↓↓ REMOVED unique=True from item_code ↓↓↓
+    item_code = Column(String, index=True, nullable=False)
+    # ↓↓↓ barcode was not unique=True, but we'll constrain it per company below ↓↓↓
     barcode = Column(String, index=True, nullable=True)
+    
     name = Column(String, nullable=False, index=True)
     short_name = Column(String, nullable=True)
     brand = Column(String, nullable=True)
@@ -24,7 +28,6 @@ class Product(Base):
     packing_type = Column(String, nullable=True)
     
     # Pricing & Tax
-    # ─── FIX: default=False → default=0.0 ───
     purchase_rate = Column(Float, default=0.0, nullable=True)
     landing_cost = Column(Float, default=0.0)
     mrp = Column(Float, default=0.0)
@@ -73,3 +76,9 @@ class Product(Base):
     modified_by = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # ↓↓↓ ADD COMPOSITE CONSTRAINTS ↓↓↓
+    __table_args__ = (
+        UniqueConstraint("company_id", "item_code", name="uq_product_company_item_code"),
+        UniqueConstraint("company_id", "barcode", name="uq_product_company_barcode"),
+    )

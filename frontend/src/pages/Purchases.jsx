@@ -552,7 +552,7 @@ export default function Purchases() {
     if (val.length > 1) {
       setIsSearching(true)
       try {
-        const results = await searchProducts(val)
+        const results = await searchProducts(val, companyId)
         const isBarcodeLike = /^\d{4,}$/.test(val.trim())
         if (isBarcodeLike && results.length === 1) {
           selectProduct(results[0])
@@ -704,33 +704,11 @@ export default function Purchases() {
     try {
       await createPurchase(payload)
 
-      // ─── NEW: UPDATE INVENTORY PURCHASE RATE FOR EACH PRODUCT ───
-      for (const item of items) {
-        if (item.productId) {
-          const bpc = Number(item.bottlesPerCase) || 0
-          const ratePerCase = Number(item.purchaseRatePerCase) || 0
-          const ratePerUnit = bpc > 0 ? ratePerCase / bpc : 0
-          const purchasedQty = Number(item.totalQty) || 0
-
-          try {
-            const currentProduct = await getProductById(item.productId)
-            const newGodownStock = (Number(currentProduct.godown_stock) || 0) + purchasedQty
-            const newCounterStock = Number(currentProduct.counter_stock) || 0
-            const newCurrentStock = newGodownStock + newCounterStock
-
-            await updateProduct(item.productId, {
-              purchase_rate: ratePerUnit > 0 ? ratePerUnit : currentProduct.purchase_rate,
-              landing_cost: ratePerUnit > 0 ? ratePerUnit : currentProduct.landing_cost,
-              godown_stock: newGodownStock,
-              counter_stock: newCounterStock,
-              current_stock: newCurrentStock,
-              opening_stock: newCurrentStock,
-            })
-          } catch (err) {
-            console.warn(`Failed to update product ${item.productId}:`, err)
-          }
-        }
-      }
+      // ╔══════════════════════════════════════════════════╗
+      // ║  REMOVED: Frontend stock update loop             ║
+      // ║  Backend already handles stock updates in        ║
+      // ║  create_purchase() — no need to double-add       ║
+      // ╚══════════════════════════════════════════════════╝
 
       setShowForm(false)
       setSelectedSupplier(''); setInvoiceNumber(''); setItems([])
@@ -740,7 +718,7 @@ export default function Purchases() {
       fetchPurchases()
     } catch (err) { setError(err.message || 'Failed to save purchase') }
     finally { setSaving(false) }
-  } // ← ← ← THIS CLOSING BRACE WAS MISSING! It closes `handleSubmit`
+}// ← ← ← THIS CLOSING BRACE WAS MISSING! It closes `handleSubmit`
 
   const loadItems = async (id) => {
     if (expandedId === id) { setExpandedId(null); return }

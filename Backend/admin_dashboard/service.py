@@ -5,11 +5,11 @@ from typing import List, Optional
 
 from company.model import Company
 from employee.model import Employee
-from expenses.model import Expense
+from expenses.model import Expense, ExpenseCategory
 from sales_counter.model import Sale
 from sales_godown.model import GodownSale
 from employee_attendance.model import Attendance
-from inventory.model import Product  # ← CHANGED: use Product model
+from inventory.model import Product
 
 from . import schema
 
@@ -227,11 +227,14 @@ def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, 
 
     # ─── EXPENSES BREAKDOWN ───
     monthly_expenses_db = db.query(
-        Expense.category,
+        ExpenseCategory.name.label('category'),
         func.coalesce(func.sum(Expense.amount), 0).label('total_amount')
+    ).join(
+        ExpenseCategory,
+        Expense.category_id == ExpenseCategory.id
     ).filter(
         Expense.expense_date.between(start_date, end_date)
-    ).group_by(Expense.category).all()
+    ).group_by(ExpenseCategory.name).all()
 
     monthly_expenses = [
         schema.ExpenseCategoryBreakdown(

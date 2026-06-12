@@ -71,7 +71,9 @@ export default function Sidebar({ open, onClose }) {
     { to: '/suppliers', icon: Truck, label: 'Supplier', roles: ['ADMIN', 'MANAGER'] },
     
     { to: '/salary-report', icon: FileText, label: 'Salary Report', roles: ['ADMIN', 'MANAGER'] },
-    { to: '/settings', icon: Settings, label: 'Settings', roles: ['ADMIN', 'MANAGER'] },
+    { to: '/cash-deposit', icon: FileText, label: 'Cash Deposit', roles: ['ADMIN', 'MANAGER'] },
+
+    // { to: '/settings', icon: Settings, label: 'Settings', roles: ['ADMIN', 'MANAGER'] },
   ]
 
   // ─── FILTER ITEMS BASED ON ROLE ───

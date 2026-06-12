@@ -68,8 +68,12 @@ def create_purchase(db: Session, purchase_data: PurchaseCreate):
                     if (product.opening_stock or 0) == 0:
                         product.opening_stock = total_bottles
 
-                    if (product.purchase_rate or 0) == 0 and item_data.unit_cost:
+                    # if (product.purchase_rate or 0) == 0 and item_data.unit_cost:
+                    #     product.purchase_rate = item_data.unit_cost
+
+                    if item_data.unit_cost and item_data.unit_cost > 0:
                         product.purchase_rate = item_data.unit_cost
+                        product.landing_cost = item_data.unit_cost
 
         db.commit()
         db.refresh(db_purchase)

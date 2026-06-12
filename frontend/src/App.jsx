@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useState, useEffect } from 'react' // 👈 Added useState and useEffect
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { Loader2 } from 'lucide-react'
@@ -26,7 +27,49 @@ import EmployeeAttendance from './pages/EmployeeAttendance.jsx'
 import AttendanceReports from './pages/AttendanceReports.jsx'
 import AdminDashboard from './pages/admindashboard.jsx'
 import SalaryReport from './pages/SalaryReport.jsx'
-import StaffManagement from './pages/StaffManagement.jsx' // Ensure .jsx is here
+import StaffManagement from './pages/StaffManagement.jsx' 
+import CashDeposit from './pages/CashDeposit.jsx' 
+
+// ══════════════════════════════════════════════════
+// 👇 NEW: Component to wait for FastAPI to start
+// ══════════════════════════════════════════════════
+function BackendReady({ children }) {
+  const [backendReady, setBackendReady] = useState(false);
+
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        // Pings the root route of your FastAPI backend
+        const res = await fetch("http://127.0.0.1:8000/");
+        if (res.ok) {
+          setBackendReady(true);
+        }
+      } catch (err) {
+        // FastAPI is not up yet, will try again in 1 second
+        console.log("Waiting for Python backend to start...");
+      }
+    };
+
+    const interval = setInterval(checkHealth, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Show a loading screen while FastAPI boots up
+  if (!backendReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Starting Local Database...</h2>
+          <p className="text-sm text-gray-500 mt-1">Please wait a moment while the system boots up.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Once FastAPI is ready, render the actual React App
+  return children;
+}
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -73,9 +116,8 @@ function AppRoutes() {
         <Route path="/employee-attendance" element={<EmployeeAttendance />} />
         <Route path="/attendance-reports" element={<AttendanceReports />} />
         <Route path="/salary-report" element={<SalaryReport />} />
-
+        <Route path="/cash-deposit" element={<CashDeposit />} />
         {/* ─── ADMIN ROUTES ─── */}
-
       </Route>
 
       <Route path="/" element={<Navigate to="/companies" replace />} />
@@ -87,11 +129,14 @@ function AppRoutes() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </AuthProvider>
+      {/* 👇 Wrapping the app in BackendReady prevents network errors on startup */}
+      <BackendReady>
+        <AuthProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </AuthProvider>
+      </BackendReady>
     </ThemeProvider>
   )
 }

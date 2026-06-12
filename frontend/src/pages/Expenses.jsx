@@ -10,7 +10,8 @@ const PAYMENT_METHODS = ['CASH', 'UPI', 'BANK_TRANSFER', 'CARD', 'CHEQUE']
 
 const emptyForm = {
   expense_date: new Date().toISOString().slice(0, 10),
-  category: '', 
+  category: '',
+  category_id: null, 
   amount: '',
   payment_method: 'CASH',
   description: '',
@@ -120,7 +121,7 @@ export default function Expenses() {
     try {
       const newCat = await apiCreateCategory(val, Number(companyId))
       setCategories([...categories, newCat])
-      setForm(prev => ({ ...prev, category: newCat.name }))
+      setForm(prev => ({ ...prev, category: newCat.name, category_id: newCat.id }))
       setShowCategoryDropdown(false)
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to add category')
@@ -153,6 +154,7 @@ export default function Expenses() {
     setForm({
       expense_date: expense.expense_date || '',
       category: expense.category || '',
+      category_id: expense.category_id || null,  // ← ADDED
       amount: expense.amount || '',
       payment_method: expense.payment_method || 'CASH',
       description: expense.description || '',
@@ -177,16 +179,21 @@ export default function Expenses() {
       const emp = employees.find(e => e.id === empId);
       const baseSalary = emp?.salary || 0;
       
-      if (baseSalary > 0) {
-        const workingDays = attRecord ? attRecord.total_working_days : 0;
-        const calculatedAmount = (baseSalary / 30) * workingDays;
-        
-        setForm(prev => ({ 
-          ...prev, 
-          amount: calculatedAmount.toFixed(2),
-          category: prev.category || 'SALARY_PAYOUT' 
-        }));
-      }
+      // Inside calculateSalary, when setting SALARY_PAYOUT:
+if (baseSalary > 0) {
+  const workingDays = attRecord ? attRecord.total_working_days : 0;
+  const calculatedAmount = (baseSalary / 30) * workingDays;
+
+  // Find the SALARY_PAYOUT category ID
+  const salaryCat = categories.find(c => c.name === 'SALARY_PAYOUT');
+
+  setForm(prev => ({
+    ...prev,
+    amount: calculatedAmount.toFixed(2),
+    category: prev.category || 'SALARY_PAYOUT',
+    category_id: salaryCat ? salaryCat.id : prev.category_id,  // ← ADDED
+  }));
+}
     } catch (err) {
       console.error("Could not calculate salary automatically", err);
     } finally {
@@ -217,31 +224,43 @@ export default function Expenses() {
     }
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    setError('')
+ const handleSave = async (e) => {
+  e.preventDefault()
+  setSaving(true)
+  setError('')
 
-    const payload = {
-      ...form,
-      company_id: Number(companyId),  // ← ADDED
-      amount: Number(form.amount) || 0,
-    }
-
-    try {
-      if (editingId) {
-        await updateExpense(editingId, payload, Number(companyId))
-      } else {
-        await createExpense(payload)
-      }
-      setShowModal(false)
-      fetchExpenses()
-    } catch (err) {
-      setError(err.message || 'Failed to save expense')
-    } finally {
-      setSaving(false)
-    }
+  if (!form.category_id) {
+    setError('Please select a valid category')
+    setSaving(false)
+    return
   }
+
+  const payload = {
+    expense_date: form.expense_date,
+    category_id: form.category_id,    // ← SEND category_id
+    amount: Number(form.amount) || 0,
+    payment_method: form.payment_method,
+    description: form.description || null,
+    employee_name: form.employee_name || null,
+    designation: form.designation || null,
+    receipt_number: form.receipt_number || null,
+    company_id: Number(companyId),
+  }
+
+  try {
+    if (editingId) {
+      await updateExpense(editingId, payload, Number(companyId))
+    } else {
+      await createExpense(payload)
+    }
+    setShowModal(false)
+    fetchExpenses()
+  } catch (err) {
+    setError(err.message || 'Failed to save expense')
+  } finally {
+    setSaving(false)
+  }
+}
 
   const handleDelete = async (id) => {
     if (!confirm('Are you sure you want to delete this expense record?')) return
@@ -478,7 +497,7 @@ export default function Expenses() {
                         required
                         type="text" 
                         value={form.category}
-                        onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                        onChange={e => setForm(f => ({ ...f, category: e.target.value, category_id: null }))}
                         onFocus={() => setShowCategoryDropdown(true)}
                         onBlur={() => setTimeout(() => setShowCategoryDropdown(false), 200)} 
                         placeholder="Type or select..."
@@ -501,7 +520,7 @@ export default function Expenses() {
                           <div 
                             key={c.id} 
                             className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer group"
-                            onMouseDown={() => setForm(f => ({ ...f, category: c.name }))}
+                            onMouseDown={() => setForm(f => ({ ...f, category: c.name, category_id: c.id }))}
                           >
                             <span className="text-sm text-gray-700 dark:text-gray-200">{c.name.replace(/_/g, ' ')}</span>
                             <button 

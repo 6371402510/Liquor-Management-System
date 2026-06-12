@@ -67,7 +67,7 @@ export default function StockTransfer() {
     if (val.length > 1) {
       setIsSearching(true)
       try {
-        const results = await searchProducts(val)
+        const results = await searchProducts(val, companyId)
         const availableResults = results.filter(p => (p.godown_stock || 0) > 0)
         setSearchResults(availableResults)
         setShowDropdown(availableResults.length > 0)

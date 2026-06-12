@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func, cast, Date, and_
+from sqlalchemy import func, and_
 from typing import Optional
 
 from company.model import Company
@@ -84,24 +84,24 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     # ═══════════════════════════════════════
     # 2. CHARTS
     # ═══════════════════════════════════════
-    counter_daily_db = db.query(cast(Sale.created_at, Date).label('date'), func.coalesce(func.sum(Sale.total_amount), 0).label('sales')).filter(and_(Sale.created_at >= seven_days_ago, Sale.created_at <= today_start + timedelta(days=1), company_filter(Sale))).group_by(cast(Sale.created_at, Date)).all()
-    godown_daily_db = db.query(cast(GodownSale.created_at, Date).label('date'), func.coalesce(func.sum(GodownSale.total_amount), 0).label('sales')).filter(and_(GodownSale.created_at >= seven_days_ago, GodownSale.created_at <= today_start + timedelta(days=1), company_filter(GodownSale))).group_by(cast(GodownSale.created_at, Date)).all()
+    counter_daily_db = db.query(func.date(Sale.created_at).label('date'), func.coalesce(func.sum(Sale.total_amount), 0).label('sales')).filter(and_(Sale.created_at >= seven_days_ago, Sale.created_at <= today_start + timedelta(days=1), company_filter(Sale))).group_by(func.date(Sale.created_at)).all()
+    godown_daily_db = db.query(func.date(GodownSale.created_at).label('date'), func.coalesce(func.sum(GodownSale.total_amount), 0).label('sales')).filter(and_(GodownSale.created_at >= seven_days_ago, GodownSale.created_at <= today_start + timedelta(days=1), company_filter(GodownSale))).group_by(func.date(GodownSale.created_at)).all()
     
     sales_map = {}
     for row in counter_daily_db: sales_map[str(row.date)] = float(row.sales)
     for row in godown_daily_db: sales_map[str(row.date)] = sales_map.get(str(row.date), 0) + float(row.sales)
     daily_sales_list = [schema.DailySale(date=(today_date - timedelta(days=i)).strftime('%b %d'), sales=sales_map.get(str(today_date - timedelta(days=i)), 0)) for i in range(6, -1, -1)]
 
-    daily_purchases_db = db.query(cast(Purchase.created_at, Date).label('date'), func.coalesce(func.sum(Purchase.total_amount), 0).label('purchases')).filter(and_(Purchase.created_at >= seven_days_ago, Purchase.created_at <= today_start + timedelta(days=1), company_filter(Purchase))).group_by(cast(Purchase.created_at, Date)).all()
+    daily_purchases_db = db.query(func.date(Purchase.created_at).label('date'), func.coalesce(func.sum(Purchase.total_amount), 0).label('purchases')).filter(and_(Purchase.created_at >= seven_days_ago, Purchase.created_at <= today_start + timedelta(days=1), company_filter(Purchase))).group_by(func.date(Purchase.created_at)).all()
     purchases_map = {str(row.date): float(row.purchases) for row in daily_purchases_db}
     daily_purchases_list = [schema.DailyPurchase(date=(today_date - timedelta(days=i)).strftime('%b %d'), purchases=purchases_map.get(str(today_date - timedelta(days=i)), 0)) for i in range(6, -1, -1)]
 
     category_data_db = db.query(Product.category.label('name'), func.count(Product.id).label('value')).filter(company_filter(Product)).group_by(Product.category).all()
     category_data = [schema.CategoryData(name=row.name or 'OTHER', value=row.value) for row in category_data_db]
 
-    expense_breakdown_db = db.query(Expense.category.label('category'), func.coalesce(func.sum(Expense.amount), 0).label('total_amount')).filter(and_(Expense.expense_date >= month_start.date(), Expense.expense_date <= today_date, company_filter(Expense))).group_by(Expense.category).all()
+    expense_breakdown_db = db.query( ExpenseCategory.name.label('category'), func.coalesce(func.sum(Expense.amount), 0).label('total_amount') ).join( ExpenseCategory, Expense.category_id == ExpenseCategory.id ).filter( and_(Expense.expense_date >= month_start.date(), Expense.expense_date <= today_date, company_filter(Expense))).group_by(ExpenseCategory.name).all()
+       
     expense_breakdown = [schema.ExpenseBreakdown(category=row.category or 'OTHER', total_amount=float(row.total_amount)) for row in expense_breakdown_db]
-
     # ═══════════════════════════════════════
     # 3. LISTS
     # ═══════════════════════════════════════

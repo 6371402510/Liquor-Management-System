@@ -22,9 +22,17 @@ router = APIRouter(
 # SEARCH ROUTE (Must be before /{product_id} to work!)
 # =========================================================
 @router.get("/search/", response_model=List[ProductResponse])
-def search_products(q: str, db: Session = Depends(get_db)):
+def search_products(
+    q: str, 
+    company_id: int | None = None,  # ← ADD THIS
+    db: Session = Depends(get_db)
+):
     """Search products by name, barcode, or item code"""
     query = db.query(Product).filter(Product.is_active == True)
+    
+    # ← ADD THIS FILTER
+    if company_id is not None:
+        query = query.filter(Product.company_id == company_id)
     
     if q:
         search_term = f"%{q}%"
@@ -42,7 +50,7 @@ def search_products(q: str, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=List[ProductResponse])
 def list_products(
-    company_id: int | None = None,   # <--- FIX: Use int | None instead of Optional[int]
+    company_id: int | None = None,
     skip: int = 0, 
     limit: int = 1000, 
     db: Session = Depends(get_db)
@@ -67,21 +75,25 @@ def read_product(product_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 def create_new_product(product_data: ProductCreate, db: Session = Depends(get_db)):
     """Create a new product"""
-    product = create_product(db, product_data)
-    if not product:
-        raise HTTPException(
-            status_code=400, 
-            detail="Product with this Item Code or Barcode already exists."
-        )
-    return product
+    try:
+        product = create_product(db, product_data)
+        return product
+    except ValueError as e:
+        # Catches the specific ValueError from service.py 
+        # (e.g., "Item Code 'ITM001' already exists for this company.")
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.put("/{product_id}", response_model=ProductResponse)
 def update_existing_product(product_id: int, product_data: ProductUpdate, db: Session = Depends(get_db)):
     """Update a product"""
-    product = update_product(db, product_id, product_data)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found or update failed")
-    return product
+    try:
+        product = update_product(db, product_id, product_data)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        return product
+    except ValueError as e:
+        # Catches duplicate item_code/barcode within the same company on update
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_product(product_id: int, db: Session = Depends(get_db)):

@@ -3,11 +3,10 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date, datetime
-
 class ExpenseBase(BaseModel):
-    company_id: int  # ← ADDED
+    company_id: int
     expense_date: date
-    category: str
+    category_id: int        # ← CHANGED from `category: str`
     amount: float
     payment_method: str = "CASH"
     description: Optional[str] = None
@@ -22,16 +21,35 @@ class ExpenseBase(BaseModel):
 class ExpenseCreate(ExpenseBase):
     pass
 
-class ExpenseUpdate(ExpenseBase):
+class ExpenseUpdate(BaseModel):
     expense_date: Optional[date] = None
-    category: Optional[str] = None
+    category_id: Optional[int] = None   # ← CHANGED
     amount: Optional[float] = None
     payment_method: Optional[str] = None
+    description: Optional[str] = None
+    employee_name: Optional[str] = None
+    designation: Optional[str] = None
+    vendor_name: Optional[str] = None
+    receipt_number: Optional[str] = None
     status: Optional[str] = None
-    # company_id is NOT optional on update — it stays required
+    company_id: int
 
-class ExpenseResponse(ExpenseBase):
+
+
+class ExpenseResponse(BaseModel):
     id: int
+    company_id: int
+    category_id: int           # ← ADDED
+    category: Optional[str] = None  # ← ADDED (populated from relationship property)
+    expense_date: date
+    amount: float
+    payment_method: str
+    description: Optional[str] = None
+    employee_name: Optional[str] = None
+    designation: Optional[str] = None
+    vendor_name: Optional[str] = None
+    receipt_number: Optional[str] = None
+    status: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

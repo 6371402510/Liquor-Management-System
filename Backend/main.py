@@ -1,3 +1,35 @@
+
+import sys
+import os
+
+if len(sys.argv) > 1:
+    app_data_dir = sys.argv[1]
+    os.makedirs(app_data_dir, exist_ok=True)
+    os.environ["DB_DIR"] = app_data_dir
+else:
+    os.environ["DB_DIR"] = os.path.dirname(os.path.abspath(__file__))
+
+
+
+
+# import sys
+# import os
+# from pathlib import Path
+
+# def get_db_dir():
+#     """Parse --db-dir from args, otherwise default to script directory."""
+#     for i, arg in enumerate(sys.argv):
+#         if arg == "--db-dir" and i + 1 < len(sys.argv):
+#             return sys.argv[i + 1]
+#         if arg.startswith("--db-dir="):
+#             return arg.split("=", 1)[1]
+#     return os.path.dirname(os.path.abspath(__file__))
+
+# app_data_dir = get_db_dir()
+# os.makedirs(app_data_dir, exist_ok=True)
+# os.environ["DB_DIR"] = app_data_dir
+
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +53,7 @@ from admin_dashboard.router import router as admin_dashboard_router
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+app = FastAPI(title="Liquor Desktop System")
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,16 +78,32 @@ app.include_router(category_router, prefix="/api")
 app.include_router(attendance_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 app.include_router(admin_dashboard_router, prefix="/api")
-app.mount(
-    "/assets",
-    StaticFiles(directory="../frontend/dist/assets"),
-    name="assets"
-)
+# app.mount(
+#     "/assets",
+#     StaticFiles(directory="../frontend/dist/assets"),
+#     name="assets"
+# )
+
+# @app.get("/")
+# async def root():
+#     return FileResponse("../frontend/dist/index.html")
+
+# @app.get("/{path:path}")
+# async def spa(path: str):
+#     return FileResponse("../frontend/dist/index.html")
 
 @app.get("/")
-async def root():
-    return FileResponse("../frontend/dist/index.html")
+def root():
+    return {
+        "app":"Liquor Desktop",
+        "status":"running"
+    }
 
-@app.get("/{path:path}")
-async def spa(path: str):
-    return FileResponse("../frontend/dist/index.html")
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=8000
+    )

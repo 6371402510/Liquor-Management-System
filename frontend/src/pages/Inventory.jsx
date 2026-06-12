@@ -459,58 +459,63 @@ export default function Inventory() {
     XLSX.writeFile(wb, `Inventory_Export_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
-  const handleExcelUpload = (e) => {
+   const handleExcelUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return
+    
+    if (!companyId) {
+      alert('Please select a company first before importing.')
+      return
+    }
+
     const reader = new FileReader()
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       const bstr = evt.target.result
       const wb = XLSX.read(bstr, { type: 'binary', cellDates: true })
       const wsname = wb.SheetNames[0]
       const ws = wb.Sheets[wsname]
       const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' })
-      if (data.length > 0) {
-        const row = data[0]
-        const mappedForm = { ...emptyForm }
-        Object.keys(row).forEach((excelHeader) => {
-          const normalizedHeader = excelHeader.toLowerCase().trim()
-          const formKey = EXCEL_HEADER_MAP[normalizedHeader]
-          if (formKey) {
-            let value = row[excelHeader]
-            if (['discount_allowed', 'favourite_item', 'allow_return', 'allow_exchange', 'auto_barcode_generate', 'transfer_allowed'].includes(formKey)) {
-              value = value === true || value === 1 || String(value).toUpperCase() === 'TRUE' || String(value).toUpperCase() === 'YES'
-            } else { value = String(value) }
-            mappedForm[formKey] = value
-          }
-        })
-        if (!mappedForm.item_code) mappedForm.item_code = generateItemCode()
-        if (!mappedForm.traditional_name || mappedForm.traditional_name === '') {
-          const tradData = getTraditionalData(mappedForm.bottle_size)
-          mappedForm.traditional_name = tradData.traditionalName
+      
+      if (data.length === 0) {
+        alert('No data found in the Excel file.')
+        return
+      }
+
+      setLoading(true)
+      let successCount = 0
+      let failCount = 0
+      const errors = []
+
+      // Loop through all rows
+      for (let i = 0; i < data.length; i++) {
+        const payload = mapRowToProduct(data[i])
+        
+        try {
+          await createProduct(payload)
+          successCount++
+        } catch (err) {
+          failCount++
+          // Capture the error and row number for the summary
+          errors.push(`Row ${i + 2}: ${err.message || 'Unknown error'}`)
         }
-        if (!mappedForm.bottles_per_case || mappedForm.bottles_per_case === '' || mappedForm.bottles_per_case === '0') {
-          const tradData = getTraditionalData(mappedForm.bottle_size)
-          if (tradData.bottlesPerCase !== '') mappedForm.bottles_per_case = String(tradData.bottlesPerCase)
-        }
-        const validSubCategories = getSubCategories(mappedForm.category)
-        if (!validSubCategories.includes(mappedForm.sub_category)) {
-          mappedForm.sub_category = validSubCategories[0]
-        }
-        const gs = Number(mappedForm.godown_stock) || 0
-        const cs = Number(mappedForm.counter_stock) || 0
-        if (gs > 0 || cs > 0) {
-          mappedForm.current_stock = String(gs + cs)
-        }
-        setForm(mappedForm)
-        setEditingId(null)
-        setEditingItemId(null)
-        setAuditData({})
-        setShowModal(true)
-        if (data.length > 1) alert(`Note: Excel contains ${data.length} rows. Only the first row was loaded into the form.`)
-      } else { alert('No data found in the Excel file.') }
+      }
+
+      setLoading(false)
+      fetchProducts() // Refresh the table with new products
+      
+      // Show Import Summary
+      let summaryMessage = `Import Complete!\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}`
+      if (errors.length > 0 && errors.length <= 5) {
+        summaryMessage += `\n\nErrors:\n${errors.join('\n')}`
+      } else if (errors.length > 5) {
+        summaryMessage += `\n\nFirst 5 errors:\n${errors.slice(0, 5).join('\n')}\n...and ${errors.length - 5} more.`
+      }
+      
+      alert(summaryMessage)
     }
+    
     reader.readAsBinaryString(file)
-    e.target.value = ''
+    e.target.value = '' // Reset file input
   }
 
   const handleSave = async (e) => {
@@ -681,6 +686,60 @@ export default function Inventory() {
     printWindow.document.close()
     printWindow.focus()
     printWindow.print()
+  }
+
+
+
+    // ─── HELPER: Map Excel Row to Product Payload ───
+  const mapRowToProduct = (row) => {
+    const mappedForm = { ...emptyForm }
+    Object.keys(row).forEach((excelHeader) => {
+      const normalizedHeader = excelHeader.toLowerCase().trim()
+      const formKey = EXCEL_HEADER_MAP[normalizedHeader]
+      if (formKey) {
+        let value = row[excelHeader]
+        if (['discount_allowed', 'favourite_item', 'allow_return', 'allow_exchange', 'auto_barcode_generate', 'transfer_allowed'].includes(formKey)) {
+          value = value === true || value === 1 || String(value).toUpperCase() === 'TRUE' || String(value).toUpperCase() === 'YES'
+        } else { value = String(value) }
+        mappedForm[formKey] = value
+      }
+    })
+
+    if (!mappedForm.item_code) mappedForm.item_code = generateItemCode()
+    if (!mappedForm.traditional_name || mappedForm.traditional_name === '') {
+      const tradData = getTraditionalData(mappedForm.bottle_size)
+      mappedForm.traditional_name = tradData.traditionalName
+    }
+    if (!mappedForm.bottles_per_case || mappedForm.bottles_per_case === '' || mappedForm.bottles_per_case === '0') {
+      const tradData = getTraditionalData(mappedForm.bottle_size)
+      if (tradData.bottlesPerCase !== '') mappedForm.bottles_per_case = String(tradData.bottlesPerCase)
+    }
+    const validSubCategories = getSubCategories(mappedForm.category)
+    if (!validSubCategories.includes(mappedForm.sub_category)) {
+      mappedForm.sub_category = validSubCategories[0]
+    }
+    const gs = Number(mappedForm.godown_stock) || 0
+    const cs = Number(mappedForm.counter_stock) || 0
+    if (gs > 0 || cs > 0) {
+      mappedForm.current_stock = String(gs + cs)
+    }
+
+    return {
+      ...mappedForm,
+      company_id: Number(companyId),
+      purchase_rate: Number(mappedForm.purchase_rate) || 0, landing_cost: Number(mappedForm.landing_cost) || 0,
+      mrp: Number(mappedForm.mrp) || 0, sale_price: Number(mappedForm.sale_price) || 0,
+      discount_percent: Number(mappedForm.discount_percent) || 0, VAT_rate: Number(mappedForm.VAT_rate) || 0,
+      margin_percent: Number(mappedForm.margin_percent) || 0, opening_stock: Number(mappedForm.opening_stock) || 0,
+      current_stock: Number(mappedForm.current_stock) || 0,
+      godown_stock: Number(mappedForm.godown_stock) || 0,
+      counter_stock: Number(mappedForm.counter_stock) || 0,
+      reorder_level: Number(mappedForm.reorder_level) || 0,
+      maximum_stock: Number(mappedForm.maximum_stock) || 0, damage_stock: Number(mappedForm.damage_stock) || 0,
+      reserved_stock: Number(mappedForm.reserved_stock) || 0, barcode_print_qty: Number(mappedForm.barcode_print_qty) || 1,
+      bottles_per_case: Number(mappedForm.bottles_per_case) || 0,
+      store_id: mappedForm.store_id || null,
+    }
   }
 
   return (

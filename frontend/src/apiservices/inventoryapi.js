@@ -71,11 +71,16 @@ export const deleteProduct = async (id) => {
   return true
 }
 
-export const searchProducts = async (query) => {
+// ─── UPDATED: Now accepts companyId parameter ───
+export const searchProducts = async (query, companyId = null) => {
   const token = localStorage.getItem('token')
 
+  const params = new URLSearchParams()
+  params.append('q', query)
+  if (companyId) params.append('company_id', companyId)
+
   const res = await fetch(
-    `${API_BASE}/products/search/?q=${query}`,
+    `${API_BASE}/products/search/?${params.toString()}`,
     {
       method: 'GET',
       headers: {
