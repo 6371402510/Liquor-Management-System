@@ -76,3 +76,10 @@ class PurchaseResponse(PurchaseBase):
 
     class Config:
         from_attributes = True
+
+
+# Add this after PurchaseCreate class
+
+class PurchaseUpdate(PurchaseBase):
+    """Same as PurchaseCreate — used for editing"""
+    items: List[PurchaseItemCreate]

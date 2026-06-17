@@ -35,3 +35,29 @@ def create_new_company(
     return company
 
 # (Keep update and delete, but add dependency: current_user: User = Depends(require_admin))
+
+
+@router.put("/{company_id}", response_model=CompanyResponse)
+def update_existing_company(
+    company_id: int,
+    company_data: CompanyUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin) # Only Admins can update
+):
+    """Update an existing company by ID"""
+    updated_company = update_company(db, company_id, company_data)
+    if not updated_company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return updated_company
+
+@router.delete("/{company_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_existing_company(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin) # Only Admins can delete
+):
+    """Delete a company by ID"""
+    success = delete_company(db, company_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return None

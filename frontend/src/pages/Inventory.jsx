@@ -3,6 +3,8 @@ import { Plus, Search, CreditCard as Edit2, Trash2, X, Loader as Loader2, Triang
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../context/AuthContext'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API functions
 import { getProducts, createProduct, updateProduct, deleteProduct } from '../apiservices/inventoryapi'
@@ -23,13 +25,13 @@ const SUB_CATEGORIES_BY_CATEGORY = {
 
 const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE']
 
-const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE', 'COUNTRY LIQUOR']
+const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE']
 
 const BOTTLE_SIZES_BY_TYPE = {
   'IMFL': ['90ml', '180ml','200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
   'BEER': ['275ml', '330ml', '500ml', '650ml'],
   'WINE': ['375ml', '500ml', '750ml', '1000ml', '2000ml'],
-  'COUNTRY LIQUOR': ['200ml', '300ml', '500ml', '750ml'],
+  
 }
 const DEFAULT_SIZES = BOTTLE_SIZES_BY_TYPE['IMFL']
 
@@ -72,27 +74,42 @@ const emptyForm = {
   status: 'ACTIVE',
 }
 
-const EXCEL_HEADER_MAP = {
-  'item code': 'item_code', 'barcode': 'barcode', 'product name': 'name', 'name': 'name',
-  'short name': 'short_name', 'brand name': 'brand', 'brand': 'brand', 'category': 'category',
-  'sub category': 'sub_category', 'product type': 'product_type', 'bottle size': 'bottle_size',
-  'size': 'bottle_size',
-  'traditional name': 'traditional_name',
-  'bottles per case': 'bottles_per_case',
-  'unit': 'unit', 'packing type': 'packing_type',
-  'purchase rate': 'purchase_rate', 'purchase price': 'purchase_rate', 'landing cost': 'landing_cost',
-  'mrp': 'mrp', 'sale price': 'sale_price', 'selling price': 'sale_price',
-  'discount allowed': 'discount_allowed', 'discount %': 'discount_percent', 'discount': 'discount_percent',
-  'vat %': 'VAT_rate', 'vat': 'VAT_rate', 'margin %': 'margin_percent', 'margin': 'margin_percent',
-  'hsn code': 'hsn_code', 'opening stock': 'opening_stock', 'current stock': 'current_stock',
-  'stock': 'current_stock', 'godown stock': 'godown_stock', 'godown': 'godown_stock',
-  'counter stock': 'counter_stock', 'counter': 'counter_stock',
-  'reorder level': 'reorder_level', 'maximum stock': 'maximum_stock',
-  'damage stock': 'damage_stock', 'reserved stock': 'reserved_stock', 'stock location': 'stock_location',
-  'batch number': 'batch_number', 'expiry date': 'expiry_date', 'manufacture date': 'manufacture_date',
-  'fast billing key': 'fast_billing_key', 'print name': 'print_name',
-}
+// ─── CENTRALIZED EXCEL COLUMN CONFIG ───
+// Change columns here once, and it automatically updates Template, Export, and Import mapping!
+const EXCEL_COLUMNS = [
+  { header: 'Item Code', key: 'item_code', sample: 'ITM001' },
+  { header: 'Barcode', key: 'barcode', sample: '8901234567890' },
+  { header: 'Product Name', key: 'name', sample: 'Royal Stag 750ml' },
+  { header: 'Short Name', key: 'short_name', sample: 'RS750' },
+  { header: 'Brand', key: 'brand', sample: 'Royal Stag' },
+  { header: 'Category', key: 'category', sample: 'WHISKY' },
+  { header: 'Sub Category', key: 'sub_category', sample: 'REGULAR' },
+  { header: 'Product Type', key: 'product_type', sample: 'IMFL' },
+  { header: 'Bottle Size', key: 'bottle_size', sample: '750ml' },
+  { header: 'Traditional Name', key: 'traditional_name', sample: 'Quart / Bottle' },
+  { header: 'Bottles Per Case', key: 'bottles_per_case', sample: '12' },
+  { header: 'Godown Stock', key: 'godown_stock', sample: '70' },
+  { header: 'Counter Stock', key: 'counter_stock', sample: '30' },
+  { header: 'Total Stock', key: 'current_stock', sample: '100' },
+  { header: 'Purchase Rate', key: 'purchase_rate', sample: '650' },
+  { header: 'Landing Cost', key: 'landing_cost', sample: '680' },
+  { header: 'MRP', key: 'mrp', sample: '850' },
+  { header: 'Sale Price', key: 'sale_price', sample: '800' },
+  { header: 'Discount %', key: 'discount_percent', sample: '5' },
+  { header: 'VAT %', key: 'VAT_rate', sample: '35' },
+  { header: 'Margin %', key: 'margin_percent', sample: '23' },
+  { header: 'HSN Code', key: 'hsn_code', sample: '2208' },
+  { header: 'Reorder Level', key: 'reorder_level', sample: '5' },
+  { header: 'Maximum Stock', key: 'maximum_stock', sample: '500' },
+  { header: 'Stock Location', key: 'stock_location', sample: 'Rack-A1' },
+  { header: 'Status', key: 'status', sample: 'ACTIVE' }
+];
 
+// Auto-generate the header map for imports
+const EXCEL_HEADER_MAP = EXCEL_COLUMNS.reduce((acc, col) => {
+  acc[col.header.toLowerCase()] = col.key;
+  return acc;
+}, {});
 function getTraditionalData(bottleSize) {
   return SIZE_TRADITIONAL_MAP[bottleSize] || { traditionalName: '', bottlesPerCase: '' }
 }
@@ -182,8 +199,11 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const [sortField, setSortField] = useState('name')
-  const [sortDir, setSortDir] = useState('asc')
+  // const [sortField, setSortField] = useState('name')
+  // const [sortDir, setSortDir] = useState('asc')
+
+    const [sortField, setSortField] = useState('updated_at')
+  const [sortDir, setSortDir] = useState('desc')
 
   const fileInputRef = useRef(null)
 
@@ -380,84 +400,100 @@ export default function Inventory() {
     setShowModal(true)
   }
 
-  const downloadTemplate = () => {
-    const headers = [
-      'Item Code', 'Barcode', 'Product Name', 'Short Name', 'Brand Name', 'Category',
-      'Sub Category', 'Product Type', 'Bottle Size', 'Traditional Name', 'Bottles Per Case',
-      'Unit', 'Packing Type', 'Purchase Rate', 'Landing Cost', 'MRP', 'Sale Price',
-      'Discount Allowed', 'Discount %', 'VAT %', 'Margin %', 'HSN Code',
-      'Opening Stock', 'Current Stock', 'Godown Stock', 'Counter Stock',
-      'Reorder Level', 'Maximum Stock',
-      'Damage Stock', 'Reserved Stock', 'Stock Location', 'Batch Number',
-      'Expiry Date', 'Manufacture Date', 'Fast Billing Key', 'Print Name',
-    ]
-    const sampleRow = [
-      'ITM001', '8901234567890', 'Royal Stag 750ml', 'RS750', 'Royal Stag', 'WHISKY',
-      'REGULAR', 'IMFL', '750ml', 'Quart / Bottle', '12',
-      'BOTTLE', 'BOTTLE', '650', '680', '850', '800',
-      'TRUE', '5', '18', '23', '2208',
-      '100', '100', '70', '30',
-      '5', '500',
-      '0', '0', 'Rack-A1', 'B2024-001',
-      '2026-12-31', '2024-01-01', 'F1', 'Royal Stag',
-    ]
+   const downloadTemplate = async () => {
+    const headers = EXCEL_COLUMNS.map(c => c.header)
+    const sampleRow = EXCEL_COLUMNS.map(c => c.sample || '')
+
     const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Product Template')
-    XLSX.writeFile(wb, 'Product_Import_Template.xlsx')
-  }
 
-  const handleExportExcel = () => {
+    const fileName = 'Product_Import_Template.xlsx'
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+    // Check if Tauri is available
+    const isTauri = typeof window !== 'undefined' && window.__TAURI_INTERNALS__;
+
+    if (isTauri) {
+      try {
+        const filePath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        })
+        if (filePath) {
+          await writeFile(filePath, new Uint8Array(wbout))
+        }
+      } catch (err) {
+        console.error('Tauri export error:', err)
+        alert('Export failed: ' + (err?.message || err))
+      }
+    } else {
+      // Standard Browser Fallback
+      const blob = new Blob([wbout], { type: 'application/octet-stream' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(link.href)
+    }
+  }
+     const handleExportExcel = async () => {
     if (sorted.length === 0) {
       alert('No data to export')
       return
     }
 
-    const exportData = sorted.map(p => ({
-      'Item Code': p.item_code || '',
-      'Barcode': p.barcode || '',
-      'Product Name': p.name || '',
-      'Short Name': p.short_name || '',
-      'Brand': p.brand || '',
-      'Category': p.category || '',
-      'Sub Category': p.sub_category || '',
-      'Product Type': p.product_type || '',
-      'Bottle Size': p.bottle_size || '',
-      'Traditional Name': p.traditional_name || '',
-      'Bottles Per Case': p.bottles_per_case || '',
-      'Unit': p.unit || '',
-      'Packing Type': p.packing_type || '',
-      'Purchase Rate': p.purchase_rate || 0,
-      'Landing Cost': p.landing_cost || 0,
-      'MRP': p.mrp || 0,
-      'Sale Price': p.sale_price || 0,
-      'Discount Allowed': p.discount_allowed ? 'TRUE' : 'FALSE',
-      'Discount %': p.discount_percent || 0,
-      'VAT %': p.VAT_rate || p.vat_rate || 0,
-      'Margin %': p.margin_percent || 0,
-      'HSN Code': p.hsn_code || '',
-      'Opening Stock': p.opening_stock || 0,
-      'Godown Stock': p.godown_stock || 0,
-      'Counter Stock': p.counter_stock || 0,
-      'Current Stock': p.current_stock || 0,
-      'Reorder Level': p.reorder_level || 0,
-      'Maximum Stock': p.maximum_stock || 0,
-      'Damage Stock': p.damage_stock || 0,
-      'Reserved Stock': p.reserved_stock || 0,
-      'Stock Location': p.stock_location || '',
-      'Batch Number': p.batch_number || '',
-      'Expiry Date': p.expiry_date || '',
-      'Manufacture Date': p.manufacture_date || '',
-      'Fast Billing Key': p.fast_billing_key || '',
-      'Print Name': p.print_name || '',
-      'Status': p.status || 'ACTIVE',
-    }))
+    const exportData = sorted.map(p => {
+      const row = {}
+      EXCEL_COLUMNS.forEach(col => {
+        if (typeof p[col.key] === 'boolean') {
+          row[col.header] = p[col.key] ? 'TRUE' : 'FALSE'
+        } else {
+          row[col.header] = p[col.key] !== undefined && p[col.key] !== null ? p[col.key] : ''
+        }
+      })
+      return row
+    })
 
     const ws = XLSX.utils.json_to_sheet(exportData)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Inventory Data')
-    XLSX.writeFile(wb, `Inventory_Export_${new Date().toISOString().slice(0, 10)}.xlsx`)
+
+    const fileName = `Inventory_Export_${new Date().toISOString().slice(0, 10)}.xlsx`
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+    // Check if Tauri is available
+    const isTauri = typeof window !== 'undefined' && window.__TAURI_INTERNALS__;
+
+    if (isTauri) {
+      try {
+        const filePath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        })
+        if (filePath) {
+          await writeFile(filePath, new Uint8Array(wbout))
+        }
+      } catch (err) {
+        console.error('Tauri export error:', err)
+        alert('Export failed: ' + (err?.message || err))
+      }
+    } else {
+      // Standard Browser Fallback
+      const blob = new Blob([wbout], { type: 'application/octet-stream' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(link.href)
+    }
   }
+
+
 
    const handleExcelUpload = async (e) => {
     const file = e.target.files[0]
@@ -582,7 +618,7 @@ export default function Inventory() {
   const fastMovingCount = stockCounts['fast_moving'] || 0
   const totalDamageStock = products.reduce((acc, p) => acc + (p.damage_stock || 0), 0)
 
-  const sorted = [...products]
+   const sorted = [...products]
     .filter(p => {
       const q = search.toLowerCase()
       const matchSearch = !q || p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || (p.barcode || '').includes(q) || (p.item_code || '').toLowerCase().includes(q)
@@ -591,9 +627,19 @@ export default function Inventory() {
     })
     .sort((a, b) => {
       let av = a[sortField], bv = b[sortField]
-      if (typeof av === 'string') av = av.toLowerCase()
-      if (typeof bv === 'string') bv = bv.toLowerCase()
-      return sortDir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1)
+      
+      // Handle date fields properly
+      if (sortField === 'updated_at' || sortField === 'created_at') {
+        av = av ? new Date(av).getTime() : 0
+        bv = bv ? new Date(bv).getTime() : 0
+      } else {
+        if (typeof av === 'string') av = av.toLowerCase()
+        if (typeof bv === 'string') bv = bv.toLowerCase()
+      }
+
+      if (av < bv) return sortDir === 'asc' ? -1 : 1
+      if (av > bv) return sortDir === 'asc' ? 1 : -1
+      return 0
     })
 
   const SortIcon = ({ field }) => (
@@ -633,8 +679,8 @@ export default function Inventory() {
   }
 
   // ─── PRINT HANDLER ───
+   // ─── PRINT HANDLER ───
   const handlePrint = () => {
-    const printWindow = window.open('', '_blank')
     const currentCompanyName = localStorage.getItem('selectedCompanyName') || 'Store'
 
     let tableRows = sorted.map(p => `
@@ -648,7 +694,19 @@ export default function Inventory() {
       </tr>
     `).join('')
 
-    const html = `
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+
+    doc.write(`
       <html>
         <head>
           <title>Print Inventory - ${currentCompanyName}</title>
@@ -680,14 +738,16 @@ export default function Inventory() {
           </table>
         </body>
       </html>
-    `
+    `);
 
-    printWindow.document.write(html)
-    printWindow.document.close()
-    printWindow.focus()
-    printWindow.print()
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+    }, 500);
   }
-
 
 
     // ─── HELPER: Map Excel Row to Product Payload ───
@@ -817,9 +877,12 @@ export default function Inventory() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-100 dark:border-gray-800">
-                {[
+                {[{ label: 'Item Code', field: 'item_code' },
                   { label: 'Product', field: 'name' },
-                  { label: 'Item Code', field: 'item_code' },
+                  
+                  { label: 'Godown', field: 'godown_stock' },
+                  { label: 'Counter', field: 'counter_stock' },
+                  { label: 'Total Stock', field: 'current_stock' },
                   { label: 'Category', field: 'category' },
                   { label: 'Sub Cat.', field: 'sub_category' },
                   { label: 'Type', field: 'product_type' },
@@ -827,12 +890,9 @@ export default function Inventory() {
                   { label: 'Trad. Name', field: 'traditional_name' },
                   { label: 'Btls/Case', field: 'bottles_per_case' },
                   { label: 'Sale ₹', field: 'sale_price' },
-                  { label: 'Godown', field: 'godown_stock' },
-                  { label: 'Counter', field: 'counter_stock' },
-                  { label: 'Total Stock', field: 'current_stock' },
                   { label: 'Status', field: 'status' },
                 ].map(({ label, field }) => (
-                  <th key={field} onClick={() => handleSort(field)} className="table-header text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none whitespace-nowrap">
+                  <th key={field} onClick={() => handleSort(field)} className="table-header text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none whitespace-nowrap  ${field === 'name' ? 'w-72 min-w-[280px]' : ''}">
                     <span className="flex items-center gap-1">{label} <SortIcon field={field} /></span>
                   </th>
                 ))}
@@ -850,19 +910,18 @@ export default function Inventory() {
                 const counter = p.counter_stock ?? 0
                 return (
                   <tr key={p.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-                    <td className="table-cell">
-                      <p className="font-medium text-gray-800 dark:text-gray-200">{p.name}</p>
-                      <p className="text-xs text-gray-400">{p.brand}{p.short_name ? ` · ${p.short_name}` : ''}</p>
-                    </td>
+
                     <td className="table-cell font-mono text-xs text-gray-500">{p.item_code || '—'}</td>
-                    <td className="table-cell"><span className="badge-info">{p.category}</span></td>
-                    <td className="table-cell"><span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{p.sub_category || '—'}</span></td>
-                    <td className="table-cell text-xs text-gray-500">{p.product_type || '—'}</td>
-                    <td className="table-cell text-xs text-gray-500">{p.bottle_size || '—'}</td>
-                    <td className="table-cell text-xs text-gray-500">{p.traditional_name || '—'}</td>
-                    <td className="table-cell text-xs text-gray-500 font-mono">{p.bottles_per_case || '—'}</td>
-                    <td className="table-cell font-medium">₹{p.sale_price || 0}</td>
+                   <td className="table-cell w-72 min-w-[280px]">
+  <p className="font-medium text-gray-800 dark:text-gray-200">
+    {p.name}
+  </p>
+  <p className="text-xs text-gray-400">
+    {p.brand}{p.short_name ? ` · ${p.short_name}` : ''}
+  </p>
+</td>
                     
+                      
                     {/* ─── GODOWN STOCK COLUMN ─── */}
                     <td className="table-cell">
                       {isAdmin ? (
@@ -874,8 +933,6 @@ export default function Inventory() {
                         </div>
                       )}
                     </td>
-
-                    {/* ─── COUNTER STOCK COLUMN ─── */}
                     <td className="table-cell">
                       {isAdmin ? (
                         <StockInput productId={p.id} field="counter_stock" value={counter} onSave={handleInlineStockUpdate} />
@@ -886,12 +943,24 @@ export default function Inventory() {
                         </div>
                       )}
                     </td>
-
                     <td className="table-cell">
                       <span className={clsx('font-semibold', stock <= reorder ? 'text-red-500' : stock <= reorder * 2 ? 'text-amber-500' : 'text-emerald-500')}>{stock}</span>
                       {stock <= reorder && stock > 0 && <AlertTriangle className="w-3 h-3 text-amber-500 inline ml-1" />}
                       {stock <= 0 && <span className="ml-1 text-[10px] text-red-400 font-medium">OUT</span>}
                     </td>
+                    <td className="table-cell"><span className="badge-info">{p.category}</span></td>
+                    <td className="table-cell"><span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{p.sub_category || '—'}</span></td>
+                    <td className="table-cell text-xs text-gray-500">{p.product_type || '—'}</td>
+                    <td className="table-cell text-xs text-gray-500">{p.bottle_size || '—'}</td>
+                    <td className="table-cell text-xs text-gray-500">{p.traditional_name || '—'}</td>
+                    <td className="table-cell text-xs text-gray-500 font-mono">{p.bottles_per_case || '—'}</td>
+                    <td className="table-cell font-medium">₹{p.sale_price || 0}</td>
+                  
+
+                    {/* ─── COUNTER STOCK COLUMN ─── */}
+                    
+
+                    
                     <td className="table-cell">
                       <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', p.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400')}>{p.status || 'ACTIVE'}</span>
                     </td>

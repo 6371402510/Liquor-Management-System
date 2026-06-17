@@ -11,11 +11,15 @@ import {
   Package,
   PackageCheck,
   BarChart3,
-   UserPlus
+  UserPlus,
+  ShoppingCart,
+  TrendingUp,
+  RotateCcw,
+   LogOut, // ← NEW IMPORT for reset button
 } from "lucide-react";
 import { getOperationsDashboard } from "../apiservices/admindashboardapi";
-import { format, startOfMonth } from "date-fns";
-import { useNavigate } from "react-router-dom"; // Import useNavigate
+import { format, startOfMonth, endOfMonth } from "date-fns"; // ← ADDED endOfMonth
+import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
 
 export default function AdminDashboard() {
@@ -24,28 +28,33 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
 
   const [period, setPeriod] = useState("monthly");
-  
-  // ─── NEW: Tax Toggle State ───
-  const [includeTax, setIncludeTax] = useState(false);
-    const navigate = useNavigate(); // Initialize navigator
+  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd")); // ← NEW STATE
 
+  const [includeTax, setIncludeTax] = useState(false);
+  const navigate = useNavigate();
+
+  // ─── Fetch data when period or selectedDate changes ───
   useEffect(() => {
     fetchDashboard();
-  }, [period]);
+  }, [period, selectedDate]); // ← DEPENDENCY ADDED
 
   const fetchDashboard = async () => {
     setLoading(true);
     setError("");
 
     try {
-      const today = format(new Date(), "yyyy-MM-dd");
       let dateFrom = "";
-      let dateTo = today;
+      let dateTo = "";
 
       if (period === "daily") {
-        dateFrom = today;
+        // For daily, both from and to are the selected date
+        dateFrom = selectedDate;
+        dateTo = selectedDate;
       } else {
-        dateFrom = format(startOfMonth(new Date()), "yyyy-MM-dd");
+        // For monthly, calculate the start and end of the selected date's month
+        const dateObj = new Date(selectedDate + "T00:00:00"); // Prevents timezone shift
+        dateFrom = format(startOfMonth(dateObj), "yyyy-MM-dd");
+        dateTo = format(endOfMonth(dateObj), "yyyy-MM-dd"); // ← USES END OF MONTH
       }
 
       const result = await getOperationsDashboard(dateFrom, dateTo);
@@ -56,12 +65,19 @@ export default function AdminDashboard() {
       setLoading(false);
     }
   };
-
+ const handleLogout = () => {
+    // Clear authentication data from localStorage
+    localStorage.removeItem("token");          // Adjust key name if you use a different one (e.g., 'access_token')
+    localStorage.removeItem("isAdmin");        // Remove any admin session flags if you use them
+    localStorage.removeItem("selectedCompanyId");
+    localStorage.removeItem("selectedCompanyName");
+    
+    // Redirect to login page
+    navigate("/login");                        // Adjust route if your login path is different
+  };
   const fmt = (n) =>
     new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n || 0);
 
-  // ─── NEW: Tax Calculation Logic ───
-  // IMFL standard: VAT on Base, then TCS on (Base + VAT)
   const VAT_RATE = 0.35;
   const TCS_RATE = 0.027;
 
@@ -70,11 +86,9 @@ export default function AdminDashboard() {
     const costWithVat = baseCost * (1 + VAT_RATE);
     const costWithVatAndTcs = costWithVat * (1 + TCS_RATE);
     return costWithVatAndTcs;
-    
-    // NOTE: If TCS in your state is calculated on BASE cost only (not Base+VAT), 
-    // replace the above 3 lines with:
-    // return baseCost * (1 + VAT_RATE + TCS_RATE);
   };
+
+  const resetToToday = () => setSelectedDate(format(new Date(), "yyyy-MM-dd")); // ← RESET FUNCTION
 
   if (loading) {
     return (
@@ -154,50 +168,72 @@ export default function AdminDashboard() {
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 shadow p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          IMFL Off Shop WONER Dashboard
+           OWNER DASHBOARD
         </h1>
 
-
-        <div className="flex items-center gap-3">
-          {/* ─── NAVIGATE TO STAFF PAGE BUTTON ─── */}
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => navigate("/admin-staff")}
             className="btn-primary flex items-center gap-2 text-sm"
           >
             <UserPlus size={16} /> Manage Staff
           </button>
-  {/* ─── NEW: NAVIGATE TO COMPANY LIST BUTTON ─── */}
           <button
             onClick={() => navigate("/companies")}
             className="btn-primary flex items-center gap-2 text-sm"
           >
             <Building2 size={16} /> Company List
           </button>
-        <div className="flex items-center bg-slate-200 dark:bg-gray-700 rounded-lg p-1">
           <button
-            onClick={() => setPeriod("daily")}
-            className={clsx(
-              "px-4 py-1.5 rounded-md text-sm font-medium transition-all",
-              period === "daily"
-                ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm"
-                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-            )}
+            onClick={handleLogout}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
           >
-            Daily
+            <LogOut size={16} /> Logout
           </button>
-          <button
-            onClick={() => setPeriod("monthly")}
-            className={clsx(
-              "px-4 py-1.5 rounded-md text-sm font-medium transition-all",
-              period === "monthly"
-                ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm"
-                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+          
+          {/* ─── DATE PICKER & PERIOD TOGGLE ─── */}
+          <div className="flex items-center gap-2">
+            <input 
+              type="date" 
+              value={selectedDate} 
+              onChange={(e) => setSelectedDate(e.target.value)} 
+              className="input-field text-sm w-40" 
+            />
+            {selectedDate !== format(new Date(), "yyyy-MM-dd") && (
+              <button 
+                onClick={resetToToday} 
+                className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 flex items-center gap-1 font-medium transition-colors"
+              >
+                <RotateCcw className="w-3 h-3" /> Today
+              </button>
             )}
-          >
-            Monthly
-          </button>
-        </div>
           </div>
+
+          <div className="flex items-center bg-slate-200 dark:bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={() => setPeriod("daily")}
+              className={clsx(
+                "px-4 py-1.5 rounded-md text-sm font-medium transition-all",
+                period === "daily"
+                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              )}
+            >
+              Daily
+            </button>
+            <button
+              onClick={() => setPeriod("monthly")}
+              className={clsx(
+                "px-4 py-1.5 rounded-md text-sm font-medium transition-all",
+                period === "monthly"
+                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              )}
+            >
+              Monthly
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Top Stats */}
@@ -210,7 +246,7 @@ export default function AdminDashboard() {
               className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex justify-between items-center"
             >
               <div>
-                <p className="text-gray-500 dark:text-gray-400 text-xs leading-tight">
+                <p className="text-white-500 dark:text-grey-400 text-xs leading-tight font-bold">
                   {item.title}
                 </p>
                 <h2 className="text-lg font-bold text-gray-900 dark:text-white mt-1">
@@ -230,7 +266,7 @@ export default function AdminDashboard() {
           ═══════════════════════════════════════════════════ */}
       <div className="p-4">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
-          
+
           {/* ─── Header with Toggle ─── */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
             <h2 className="font-bold flex gap-2 items-center text-gray-900 dark:text-white">
@@ -429,7 +465,7 @@ export default function AdminDashboard() {
       <div className="grid md:grid-cols-2 gap-4 p-4">
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
           <h2 className="font-bold mb-4 text-gray-900 dark:text-white">
-            STORE PERFORMANCE ({period === "daily" ? "Today" : "This Month"})
+            STORE PERFORMANCE ({period === "daily" ? selectedDate : `Month of ${selectedDate}`})
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -437,7 +473,11 @@ export default function AdminDashboard() {
                 <tr className="border-b dark:border-gray-700 text-gray-500 dark:text-gray-400">
                   <th className="text-left py-2">Store</th>
                   <th className="text-right py-2">Sales</th>
+                  <th className="text-right py-2">COGS</th>
+                  <th className="text-right py-2">VAT (35%)</th>
+                  <th className="text-right py-2">TCS (2.7%)</th>
                   <th className="text-right py-2">Expense</th>
+                  <th className="text-right py-2">Profit</th>
                   <th className="text-right py-2">Staff</th>
                 </tr>
               </thead>
@@ -447,12 +487,27 @@ export default function AdminDashboard() {
                     key={store.id}
                     className="border-b dark:border-gray-700 text-gray-800 dark:text-gray-200"
                   >
-                    <td className="py-2 font-medium">{store.name}</td>
+                    <td className="py-2 font-medium whitespace-nowrap">{store.name}</td>
                     <td className="text-right text-emerald-600 font-semibold">
                       ₹{fmt(store.sales)}
                     </td>
+                    <td className="text-right text-gray-500">
+                      ₹{fmt(store.cogs)}
+                    </td>
+                    <td className="text-right text-orange-500">
+                      ₹{fmt(store.vat)}
+                    </td>
+                    <td className="text-right text-yellow-600">
+                      ₹{fmt(store.tcs)}
+                    </td>
                     <td className="text-right text-red-500">
                       ₹{fmt(store.expense)}
+                    </td>
+                    <td className={clsx(
+                      "text-right font-bold",
+                      store.profit >= 0 ? "text-green-600" : "text-red-600"
+                    )}>
+                      ₹{fmt(store.profit)}
                     </td>
                     <td className="text-right">{store.employees}</td>
                   </tr>
@@ -461,7 +516,6 @@ export default function AdminDashboard() {
             </table>
           </div>
         </div>
-
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
           <h2 className="font-bold mb-4 text-gray-900 dark:text-white">
             ATTENDANCE ({period === "daily" ? "Today" : "Period Summary"})
@@ -492,11 +546,10 @@ export default function AdminDashboard() {
                       <td className="py-2">{emp.store}</td>
                       <td className="py-2">
                         <span
-                          className={`px-2 py-1 rounded text-white text-xs font-semibold ${
-                            emp.status === "PRESENT"
+                          className={`px-2 py-1 rounded text-white text-xs font-semibold ${emp.status === "PRESENT"
                               ? "bg-green-500"
                               : "bg-red-500"
-                          }`}
+                            }`}
                         >
                           {emp.status}
                         </span>
@@ -515,7 +568,7 @@ export default function AdminDashboard() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
           <h2 className="font-bold flex gap-2 items-center mb-4 text-gray-900 dark:text-white">
             <Receipt size={18} />
-            EXPENSES ({period === "daily" ? "Today" : "This Month"})
+            EXPENSES ({period === "daily" ? selectedDate : `Month of ${selectedDate}`})
           </h2>
           <div className="space-y-2 text-sm">
             {monthly_expenses.length === 0 ? (
@@ -545,7 +598,7 @@ export default function AdminDashboard() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4">
           <h2 className="font-bold flex gap-2 items-center mb-4 text-gray-900 dark:text-white">
             <IndianRupee size={18} />
-            PAYROLL SUMMARY ({period === "daily" ? "Today" : "This Month"})
+            PAYROLL SUMMARY ({period === "daily" ? selectedDate : `Month of ${selectedDate}`})
           </h2>
           <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
             <div className="flex justify-between">

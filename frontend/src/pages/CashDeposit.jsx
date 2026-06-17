@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Banknote, Building2, Wallet, Plus, Trash2, TrendingUp,
   Store, Warehouse, AlertCircle, Loader as Loader2, Save,
@@ -10,7 +10,7 @@ import { format, subDays, addDays } from 'date-fns'
 import * as XLSX from 'xlsx'
 import { getCounterSales } from '../apiservices/sales-counter'
 import { getGodownSales } from '../apiservices/godown-counter'
-import { getExpenses } from '../apiservices/expensesapi' // 👈 IMPORT EXPENSES API
+import { getExpenses } from '../apiservices/expensesapi'
 
 // ─── LocalStorage Helpers ───
 const recordsKey = (cid) => `cashRecords_${cid}`
@@ -40,11 +40,13 @@ export default function CashDeposit() {
   // ─── Cash Sales & Expenses from API ───
   const [counterCash, setCounterCash] = useState(0)
   const [godownCash, setGodownCash] = useState(0)
-  const [apiExpenses, setApiExpenses] = useState([]) // 👈 Holds fetched CASH expenses
+  const [apiExpenses, setApiExpenses] = useState([])
 
-  // ─── Manual Entries ───
-  const [bankDepositInput, setBankDepositInput] = useState('')
-  // Removed: expDesc, expAmt (No longer manually adding expenses here)
+  // ─── Deposit Form State ───
+  const [depositMethod, setDepositMethod] = useState('bank') // 'bank' or 'cdm'
+  const [bankNameInput, setBankNameInput] = useState('')
+  const [depositAmountInput, setDepositAmountInput] = useState('')
+  const [bankSlipInput, setBankSlipInput] = useState(null)
 
   // ─── Persisted Records ───
   const [records, setRecords] = useState(() => loadRecords(companyId))
@@ -85,7 +87,7 @@ export default function CashDeposit() {
       const [counterData, godownData, expenseData] = await Promise.all([
         getCounterSales(Number(companyId), selectedDate, selectedDate),
         getGodownSales(Number(companyId), selectedDate, selectedDate),
-        getExpenses(Number(companyId), selectedDate, selectedDate) // 👈 FETCH EXPENSES
+        getExpenses(Number(companyId), selectedDate, selectedDate)
       ])
 
       const cc = (counterData || []).filter(s => s.payment_mode === 'CASH').reduce((s, r) => s + (r.total_amount || 0), 0)
@@ -93,7 +95,6 @@ export default function CashDeposit() {
       setCounterCash(cc)
       setGodownCash(gc)
 
-      // 👇 FILTER ONLY CASH EXPENSES FROM EXPENSES API
       const cashExps = (expenseData || [])
         .filter(e => e.payment_method === 'CASH')
         .map(e => ({
@@ -119,13 +120,17 @@ export default function CashDeposit() {
   useEffect(() => {
     const rec = records[selectedDate]
     if (rec) {
-      setBankDepositInput(rec.bankDeposit ? String(rec.bankDeposit) : '')
       setSaved(true)
     } else {
-      setBankDepositInput('')
       setSaved(false)
     }
     setExpandedRow(null)
+    
+    // Reset form fields when date changes
+    setDepositAmountInput('')
+    setDepositMethod('bank')
+    setBankNameInput('')
+    setBankSlipInput(null)
   }, [selectedDate, records])
 
   // ─── Opening Balance ───
@@ -138,20 +143,110 @@ export default function CashDeposit() {
   }, [selectedDate, records, initialBalance])
 
   // ─── Derived Calculations ───
-  const bankDeposit = Number(bankDepositInput) || 0
+  const bankDeposits = records[selectedDate]?.bankDeposits || []
+  const bankDeposit = bankDeposits.reduce((s, d) => s + d.amount, 0)
   const totalCashSale = counterCash + godownCash
-  const totalExpenses = apiExpenses.reduce((s, e) => s + e.amount, 0) // 👈 Calculated from API
+  const totalExpenses = apiExpenses.reduce((s, e) => s + e.amount, 0)
   const closingBalance = openingBalance + totalCashSale - bankDeposit - totalExpenses
 
-  // ─── Save Record ───
+  // ─── File Upload Handler ───
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    
+    if (file.size > 1048576) { // 1MB limit to prevent localStorage overflow
+      alert("File size cannot exceed 1MB")
+      e.target.value = "" 
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setBankSlipInput({
+        name: file.name,
+        base64: reader.result
+      })
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // ─── Add Deposit Entry ───
+  const handleAddDeposit = () => {
+    const amount = Number(depositAmountInput) || 0
+    if (amount <= 0) return
+
+    const newDeposit = {
+      id: Date.now(),
+      method: depositMethod,
+      bankName: bankNameInput,
+      amount: amount,
+      slip: bankSlipInput
+    }
+
+    const existingRecord = records[selectedDate] || {}
+    const existingDeposits = existingRecord.bankDeposits || []
+    const updatedDeposits = [...existingDeposits, newDeposit]
+    const totalDepositAmount = updatedDeposits.reduce((s, d) => s + d.amount, 0)
+
+    const newRecordData = {
+      ...existingRecord,
+      counterCash,
+      godownCash,
+      bankDeposits: updatedDeposits,
+      bankDeposit: totalDepositAmount, // Total sum for history table
+      expenses: apiExpenses,
+      totalExpenses,
+      openingBalance,
+      closingBalance: openingBalance + totalCashSale - totalDepositAmount - totalExpenses,
+      savedAt: new Date().toISOString()
+    }
+
+    const newRecords = { ...records, [selectedDate]: newRecordData }
+    setRecords(newRecords)
+    saveRecordsToStorage(companyId, newRecords)
+
+    // Reset form fields
+    setDepositAmountInput('')
+    setDepositMethod('bank')
+    setBankNameInput('')
+    setBankSlipInput(null)
+    setSaved(true)
+  }
+
+  // ─── Delete Deposit Entry ───
+  const handleDeleteDeposit = (depId) => {
+    const existingRecord = records[selectedDate] || {}
+    const existingDeposits = existingRecord.bankDeposits || []
+    const updatedDeposits = existingDeposits.filter(d => d.id !== depId)
+    const totalDepositAmount = updatedDeposits.reduce((s, d) => s + d.amount, 0)
+
+    const newRecordData = {
+      ...existingRecord,
+      bankDeposits: updatedDeposits,
+      bankDeposit: totalDepositAmount,
+      closingBalance: openingBalance + totalCashSale - totalDepositAmount - totalExpenses,
+      savedAt: new Date().toISOString()
+    }
+
+    const newRecords = { ...records, [selectedDate]: newRecordData }
+    setRecords(newRecords)
+    saveRecordsToStorage(companyId, newRecords)
+  }
+
+  // ─── Save Main Record Snapshot ───
   const handleSave = () => {
+    const existingRecord = records[selectedDate] || {}
+    const existingDeposits = existingRecord.bankDeposits || []
+    
     const newRecords = {
       ...records,
       [selectedDate]: {
+        ...existingRecord,
         counterCash,
         godownCash,
-        bankDeposit,
-        expenses: apiExpenses, // Save snapshot of expenses for history view
+        bankDeposits: existingDeposits,
+        bankDeposit: existingDeposits.reduce((s, d) => s + d.amount, 0),
+        expenses: apiExpenses,
         totalExpenses,
         openingBalance,
         closingBalance,
@@ -312,25 +407,142 @@ export default function CashDeposit() {
       {/* BANK DEPOSIT & EXPENSES ENTRY */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        {/* Bank Deposit (Manual Input - Remains the same) */}
+        {/* Bank Deposit (Multiple Entries) */}
         <div className="card p-5 border dark:border-slate-700 shadow-sm">
           <h3 className="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2 mb-4">
             <div className="p-1.5 rounded-lg bg-cyan-100 dark:bg-cyan-900/30"><Building2 className="w-4 h-4 text-cyan-600 dark:text-cyan-400" /></div>
-            Bank Deposit
+            Bank Deposits
           </h3>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1.5">Deposit Amount (₹)</label>
-            <input type="number" value={bankDepositInput} onChange={e => { setBankDepositInput(e.target.value); setSaved(false) }} placeholder="Enter amount deposited in bank" className="input-field text-sm" min="0" />
-          </div>
-          {bankDeposit > 0 && (
-            <div className="mt-4 p-3 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 flex items-start gap-2">
-              <Building2 className="w-4 h-4 text-cyan-500 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-cyan-700 dark:text-cyan-300">₹{bankDeposit.toLocaleString()} deposited in bank</p>
-                <p className="text-xs text-cyan-600/70 dark:text-cyan-400/70 mt-0.5">This amount is deducted from closing cash balance</p>
+
+          {/* List of added deposits */}
+         {bankDeposits.map((dep) => (
+  <div
+    key={dep.id}
+    className="p-2.5 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-100 dark:border-cyan-900/40"
+  >
+    <div className="flex items-center justify-between gap-2">
+
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+
+        <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300 whitespace-nowrap">
+          ₹{dep.amount.toLocaleString()}
+        </span>
+
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-200 dark:bg-cyan-800 text-cyan-800 dark:text-cyan-200 uppercase font-semibold">
+          {dep.method === 'bank' ? 'Bank' : 'CDM'}
+        </span>
+
+        {dep.bankName && (
+          <span className="text-xs text-gray-600 dark:text-gray-400 truncate">
+            {dep.bankName}
+          </span>
+        )}
+
+          {dep.slip && (
+      <a
+        href={dep.slip.base64}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1 dark:text-blue-400"
+      >
+        📎 {dep.slip.name}
+      </a>
+    )}
+
+
+      </div>
+
+    
+      <button
+        onClick={() => handleDeleteDeposit(dep.id)}
+        className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
+
+    </div>
+
+
+    
+
+  </div>
+))}
+
+          {/* Form to add new deposit */}
+          <div className={clsx("space-y-3 pt-4", bankDeposits.length > 0 && "border-t dark:border-gray-700")}>
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Add New Deposit</p>
+            
+            <div>
+              <label className="block text-xs text-gray-500 mb-1.5">Deposit Method</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                  <input type="radio" name="depositMethod" value="bank" checked={depositMethod === 'bank'} onChange={(e) => setDepositMethod(e.target.value)} className="text-cyan-600 focus:ring-cyan-500" />
+                  Deposit through Bank
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                  <input type="radio" name="depositMethod" value="cdm" checked={depositMethod === 'cdm'} onChange={(e) => setDepositMethod(e.target.value)} className="text-cyan-600 focus:ring-cyan-500" />
+                  Cash Deposit Machine
+                </label>
               </div>
             </div>
-          )}
+
+            <div className="grid grid-cols-2 gap-4">
+  
+  <div>
+    <label className="block text-xs text-gray-500 mb-1.5">
+      {depositMethod === 'bank' ? 'Deposit Bank Name' : 'CDM Bank Name'}
+    </label>
+    <input 
+      type="text" 
+      value={bankNameInput} 
+      onChange={e => setBankNameInput(e.target.value)} 
+      placeholder={depositMethod === 'bank' ? "Enter bank name" : "Enter CDM bank name"} 
+      className="input-field text-sm" 
+    />
+  </div>
+
+
+  <div>
+    <label className="block text-xs text-gray-500 mb-1.5">
+      Deposit Amount (₹)
+    </label>
+    <input 
+      type="number" 
+      value={depositAmountInput} 
+      onChange={e => setDepositAmountInput(e.target.value)} 
+      placeholder="Enter amount deposited" 
+      className="input-field text-sm" 
+      min="0" 
+    />
+  </div>
+
+</div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1.5">Upload Bank Slip</label>
+              <input 
+                type="file" 
+                accept="image/*,.pdf" 
+                onChange={handleFileUpload} 
+                className="block w-full text-xs text-gray-500 
+                  file:mr-4 file:py-2 file:px-4 
+                  file:rounded-lg file:border-0 
+                  file:text-sm file:font-semibold 
+                  file:bg-cyan-50 file:text-cyan-700 
+                  hover:file:bg-cyan-100 
+                  dark:file:bg-cyan-900/30 dark:file:text-cyan-400 
+                  dark:hover:file:bg-cyan-900/50" 
+              />
+              {bankSlipInput && <p className="text-xs text-gray-400 mt-1">Selected: {bankSlipInput.name}</p>}
+            </div>
+
+            <button 
+              onClick={handleAddDeposit} 
+              disabled={!depositAmountInput || Number(depositAmountInput) <= 0}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 transition-colors text-sm font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-4 h-4" /> Add Deposit Entry
+            </button>
+          </div>
         </div>
 
         {/* Cash Expenses (Fetched dynamically from API) */}

@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef, Fragment } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Plus, X, Loader as Loader2, Trash2, ChevronDown, ChevronUp, Save, Package, AlertCircle, Search, ScanBarcode, Filter, RotateCcw, FileDown, TriangleAlert, Warehouse, Store, CreditCard as Edit2 } from 'lucide-react'
+import { Plus, X, Loader as Loader2, Trash2, ChevronDown, ChevronUp, Save, Package, AlertCircle, Search, ScanBarcode, Filter, RotateCcw, FileDown, TriangleAlert, Warehouse, Store, CreditCard as Edit2, Pencil } from 'lucide-react'
 import { format } from 'date-fns'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
 
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeFile } from '@tauri-apps/plugin-fs'
+
 // Import API functions
-import { getPurchases, createPurchase, getPurchaseItems } from '../apiservices/purchasesapi'
+import { getPurchases, createPurchase, getPurchaseItems, updatePurchase } from '../apiservices/purchasesapi'
 import { getSuppliers } from '../apiservices/supplierapi'
 import { searchProducts, createProduct, updateProduct, getProductById } from '../apiservices/inventoryapi'
 
@@ -29,10 +32,10 @@ const SUB_CATEGORIES_BY_CATEGORY = {
 
 const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE']
 
-const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE', 'COUNTRY LIQUOR']
+const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE', ]
 
 const BOTTLE_SIZES_BY_TYPE = {
-  'IMFL': ['90ml', '180ml','200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
+  'IMFL': ['90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
   'BEER': ['275ml', '330ml', '500ml', '650ml'],
   'WINE': ['375ml', '500ml', '750ml', '1000ml', '2000ml'],
   'COUNTRY LIQUOR': ['200ml', '300ml', '500ml', '750ml'],
@@ -84,17 +87,14 @@ const getTraditionalData = (bottleSize) => {
 const getSubCategories = (category) => {
   return SUB_CATEGORIES_BY_CATEGORY[category] || DEFAULT_SUB_CATEGORIES
 }
-// ─── Auto-calculate BL (Bulk Liters) and LPL (LP Liters) ───
-// In Odisha:
-//   IMFL / WINE / COUNTRY LIQUOR → LPL = 75% of BL
-//   BEER → LPL = 0 (not applicable)
+
 const calculateBLandLPL = (totalQty, bottleSize, productType) => {
   const sizeInMl = parseInt(bottleSize) || 0
   const bottles = Number(totalQty) || 0
 
   if (bottles > 0 && sizeInMl > 0) {
     const bl = (bottles * sizeInMl) / 1000
-    const lpl = productType === 'BEER' ? 0 : bl * 0.75  // ← CHANGED: 75% of BL
+    const lpl = productType === 'BEER' ? 0 : bl * 0.75
     return {
       qtyBulkLiters: parseFloat(bl.toFixed(3)),
       qtyLPLiters: parseFloat(lpl.toFixed(3))
@@ -306,7 +306,7 @@ const ProductModal = ({ isOpen, onClose, onSaveSuccess }) => {
           <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
             <button type="button" onClick={onClose} className="btn-secondary flex-1 justify-center">Cancel</button>
             <button type="submit" disabled={saving} className="btn-primary flex-1 justify-center">
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+              {saving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               {saving ? 'Saving...' : 'Create Product'}
             </button>
           </div>
@@ -321,7 +321,7 @@ const ProductModal = ({ isOpen, onClose, onSaveSuccess }) => {
 // ─────────────────────────────────────────────────────────────
 
 const SIZE_BOTTLES_MAP = {
-  '90ml': 96, '180ml': 48,'200ml': 24, '250ml': 36, '275ml': 24, '300ml': 30,
+  '90ml': 96, '180ml': 48, '200ml': 24, '250ml': 36, '275ml': 24, '300ml': 30,
   '330ml': 30, '375ml': 24, '500ml': 24, '650ml': 12, '750ml': 12,
   '1000ml': 9, '2000ml': 6,
 }
@@ -335,6 +335,7 @@ function normalizeItem(item) {
   return {
     id: item.id,
     purchase_id: item.purchase_id,
+    product_id: item.product_id ?? null,
     product_name: item.product_name ?? item.name ?? '',
     brand: item.brand ?? '',
     category: item.category ?? '',
@@ -383,6 +384,7 @@ const EMPTY_ITEM = {
 
 export default function Purchases() {
   const { user } = useAuth()
+  const isAdmin = user?.role?.toUpperCase() === 'ADMIN' // <-- ADD THIS LINE
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
   const companyName = localStorage.getItem('selectedCompanyName') || 'Unknown Company'
 
@@ -430,6 +432,9 @@ export default function Purchases() {
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
   const [filterType, setFilterType] = useState('ALL')
+
+  const [editingPurchaseId, setEditingPurchaseId] = useState(null)
+  const [editingItemIndex, setEditingItemIndex] = useState(null)
 
   useEffect(() => {
     if (companyId) {
@@ -482,6 +487,62 @@ export default function Purchases() {
     finally { setLoading(false) }
   }
 
+  const handleEditPurchase = async (purchase) => {
+    try {
+      const rawItems = await getPurchaseItems(purchase.id)
+      const normalizedItems = (rawItems || []).map(normalizeItem)
+
+      setSelectedSupplier(String(purchase.supplier_id || ''))
+      setInvoiceNumber(purchase.invoice_number || '')
+      setBillingDate(purchase.billing_date || purchase.purchase_date || format(new Date(), 'yyyy-MM-dd'))
+      setInvoiceDate(purchase.invoice_date || '')
+      setTransportPass(purchase.notes || '')
+      setVehicleNumber(purchase.vehicle_number || '')
+      setPurchaseVat(purchase.subtotal > 0 ? ((purchase.vat_amount / purchase.subtotal) * 100).toFixed(1) : 35)
+      setPurchaseCess(purchase.subtotal > 0 ? ((purchase.cess_amount / purchase.subtotal) * 100).toFixed(1) : 0)
+      setPurchaseSpecial(purchase.subtotal > 0 ? ((purchase.special_amount / purchase.subtotal) * 100).toFixed(1) : 0)
+      setPurchaseTcs(purchase.subtotal > 0 ? ((purchase.tcs_amount / purchase.subtotal) * 100).toFixed(1) : 2.7)
+
+      const mappedItems = normalizedItems.map((item, idx) => {
+        const bpc = Number(item.bottles_per_case) || 0
+        const ratePerCase = bpc > 0 ? Number(item.unit_cost) : 0
+        const ratePerUnit = Number(item.purchase_rate_per_unit) || 0
+
+        return {
+          serialNo: idx + 1,
+          name: item.product_name || '',
+          brand: item.brand || '',
+          category: item.category || '',
+          barcode: item.barcode || '',
+          productId: item.product_id || null,
+          productType: item.category === 'BEER' ? 'BEER' : 'IMFL',
+          bottleSize: item.bottle_size || '',
+          traditionalName: item.traditional_name || '',
+          bottlesPerCase: bpc,
+          mrp: Number(item.mrp) || 0,
+          purchaseRatePerCase: ratePerCase,
+          purchaseRatePerUnit: ratePerUnit,
+          sellingRate: Number(item.selling_rate) || 0,
+          qtyCases: Number(item.qty_cases) || 0,
+          totalQty: Number(item.total_bottles) || 0,
+          qtyBulkLiters: Number(item.qty_bulk_liters) || 0,
+          qtyLPLiters: Number(item.qty_lp_liters) || 0,
+          openingStock: Number(item.opening_stock) || 0,
+          minStock: Number(item.min_stock) || 0,
+        }
+      })
+
+      setItems(mappedItems)
+      setEditingPurchaseId(purchase.id)
+      setEditingItemIndex(null)
+      setShowForm(true)
+      setCurrentItem(EMPTY_ITEM)
+      setSearchQuery('')
+    } catch (err) {
+      alert('Failed to load purchase for editing: ' + err.message)
+    }
+  }
+
   const fetchSuppliers = async () => {
     try {
       const data = await getSuppliers()
@@ -498,11 +559,8 @@ export default function Purchases() {
         const bpc = Number(prev.bottlesPerCase) || 0
         if (cases > 0 && bpc > 0) {
           updated.totalQty = cases * bpc
-          // REMOVED: updated.openingStock = cases * bpc
-          // Opening stock now comes from inventory, not from purchase qty
         } else if (cases === 0) {
           updated.totalQty = 0
-          // REMOVED: updated.openingStock = 0
         }
       }
       if (key === 'bottlesPerCase') {
@@ -510,11 +568,9 @@ export default function Purchases() {
         const bpc = Number(val) || 0
         if (cases > 0 && bpc > 0) {
           updated.totalQty = cases * bpc
-          // REMOVED: updated.openingStock = cases * bpc
         }
       }
 
-      // ─── AUTO-CALCULATE BL AND LPL ───
       const latestQty = Number(updated.totalQty ?? prev.totalQty) || 0
       const latestSize = updated.bottleSize ?? prev.bottleSize
       const latestType = updated.productType ?? prev.productType
@@ -526,6 +582,7 @@ export default function Purchases() {
       return updated
     })
   }
+
   const calcLineTotal = (item) => {
     const ratePerCase = Number(item.purchaseRatePerCase) || 0
     const cases = Number(item.qtyCases) || 0
@@ -536,10 +593,8 @@ export default function Purchases() {
     const ratePerCase = Number(item.purchaseRatePerCase) || 0
     const bpc = Number(item.bottlesPerCase) || 0
 
-    // ─── PRIORITY 1: If we have rate/case and bottles/case, just divide ───
     if (ratePerCase > 0 && bpc > 0) return ratePerCase / bpc
 
-    // ─── PRIORITY 2: Fallback — from total qty and cases ───
     const cases = Number(item.qtyCases) || 0
     const totalQty = Number(item.totalQty) || 0
     if (totalQty > 0 && cases > 0) return (ratePerCase * cases) / totalQty
@@ -586,7 +641,6 @@ export default function Purchases() {
     const bpc = product.bottles_per_case || SIZE_BOTTLES_MAP[product.bottle_size] || 0
     const productType = product.product_type || 'IMFL'
 
-    // ─── NEW: AUTO-CALCULATE PURCHASE RATE PER CASE FROM INVENTORY ───
     const purchaseRatePerUnit = Number(product.purchase_rate) || 0
     const autoRatePerCase = purchaseRatePerUnit > 0 && bpc > 0 ? purchaseRatePerUnit * bpc : ''
 
@@ -603,8 +657,8 @@ export default function Purchases() {
       productType,
       mrp: product.mrp || '',
       sellingRate: product.sale_price || '',
-      purchaseRatePerCase: autoRatePerCase,  // ← NEW: auto from inventory
-      openingStock: product.current_stock || 0,  // ← NEW: from inventory current_stock
+      purchaseRatePerCase: autoRatePerCase,
+      openingStock: product.current_stock || 0,
     }
 
     const { qtyBulkLiters, qtyLPLiters } = calculateBLandLPL(0, product.bottle_size || '', productType)
@@ -628,20 +682,44 @@ export default function Purchases() {
       return alert('Please enter quantity (cases or total bottles)')
     }
 
-    // ─── RECALCULATE BL/LPL BEFORE ADDING ───
     const { qtyBulkLiters, qtyLPLiters } = calculateBLandLPL(
       currentItem.totalQty, currentItem.bottleSize, currentItem.productType
     )
+    const itemToSave = { ...currentItem, qtyBulkLiters, qtyLPLiters }
 
-    setItems(prev => [...prev, { ...currentItem, qtyBulkLiters, qtyLPLiters, serialNo: prev.length + 1 }])
+    if (editingItemIndex !== null) {
+      setItems(prev => prev.map((item, i) =>
+        i === editingItemIndex ? { ...itemToSave, serialNo: item.serialNo } : item
+      ))
+    } else {
+      setItems(prev => [...prev, { ...itemToSave, serialNo: prev.length + 1 }])
+    }
+
     setCurrentItem(EMPTY_ITEM)
     setSearchQuery('')
     setBarcodeDetected(false)
+    setEditingItemIndex(null)
+
     setTimeout(() => { if (searchInputRef.current) searchInputRef.current.focus() }, 100)
+  }
+
+  const handleEditItem = (index) => {
+    const itemToEdit = items[index]
+    setCurrentItem(itemToEdit)
+    setSearchQuery(itemToEdit.name || '')
+    setEditingItemIndex(index)
   }
 
   const removeItemFromTable = (index) => {
     setItems(prev => prev.filter((_, i) => i !== index).map((item, i) => ({ ...item, serialNo: i + 1 })))
+
+    if (editingItemIndex === index) {
+      setCurrentItem(EMPTY_ITEM)
+      setSearchQuery('')
+      setEditingItemIndex(null)
+    } else if (editingItemIndex !== null && editingItemIndex > index) {
+      setEditingItemIndex(editingItemIndex - 1)
+    }
   }
 
   const calcTotals = () => {
@@ -702,15 +780,20 @@ export default function Purchases() {
     }
 
     try {
-      await createPurchase(payload)
-
-      // ╔══════════════════════════════════════════════════╗
-      // ║  REMOVED: Frontend stock update loop             ║
-      // ║  Backend already handles stock updates in        ║
-      // ║  create_purchase() — no need to double-add       ║
-      // ╚══════════════════════════════════════════════════╝
+      if (editingPurchaseId) {
+        // ─── PREVENT NON-ADMINS FROM UPDATING ───
+        if (!isAdmin) {
+          return alert("Permission denied: Only admins can update purchases.")
+        }
+        await updatePurchase(editingPurchaseId, payload)
+      } else {
+        // Anyone can create a new purchase
+        await createPurchase(payload)
+      }
 
       setShowForm(false)
+      setEditingPurchaseId(null)
+      setEditingItemIndex(null)
       setSelectedSupplier(''); setInvoiceNumber(''); setItems([])
       setNotes(''); setInvoiceDate('')
       setBillingDate(format(new Date(), 'yyyy-MM-dd'))
@@ -718,7 +801,7 @@ export default function Purchases() {
       fetchPurchases()
     } catch (err) { setError(err.message || 'Failed to save purchase') }
     finally { setSaving(false) }
-}// ← ← ← THIS CLOSING BRACE WAS MISSING! It closes `handleSubmit`
+  }
 
   const loadItems = async (id) => {
     if (expandedId === id) { setExpandedId(null); return }
@@ -731,6 +814,7 @@ export default function Purchases() {
       setExpandedId(id)
     } catch (err) { alert('Failed to load items') }
   }
+
   const clearFilters = () => {
     setFilterProduct(''); setFilterBrand(''); setFilterCategory('')
     setFilterMrp(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterType('ALL')
@@ -758,22 +842,65 @@ export default function Purchases() {
     return true
   })
 
-  const handleExportExcel = () => {
-    if (filteredPurchases.length === 0) { alert('No data to export'); return }
-    const exportData = filteredPurchases.map(p => ({
-      'Invoice No.': p.invoice_number || '', 'Billing Date': p.billing_date || p.purchase_date || '',
-      'Invoice Date': p.invoice_date || '', 'Supplier': p.supplier_name || '',
-      'Transport Pass': p.notes || '', 'Vehicle Number': p.vehicle_number || '',
-      'Subtotal': Number(p.subtotal) || 0, 'VAT Amount': Number(p.vat_amount) || 0,
-      'CESS Amount': Number(p.cess_amount) || 0, 'Special Amount': Number(p.special_amount) || 0,
-      'TCS Amount': Number(p.tcs_amount) || 0, 'Total Amount': Number(p.total_amount) || 0,
-      'Status': p.status || '',
-    }))
-    const ws = XLSX.utils.json_to_sheet(exportData)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Purchases Data')
-    XLSX.writeFile(wb, `Purchases_Report_${new Date().toISOString().slice(0, 10)}.xlsx`)
+ const isTauri = () => '__TAURI_INTERNALS__' in window
+
+const downloadAsBlob = (data, fileName) => {
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+const handleExportExcel = async () => {
+  if (filteredPurchases.length === 0) { alert('No data to export'); return }
+
+  const exportData = filteredPurchases.map(p => ({
+    'Invoice No.': p.invoice_number || '',
+    'Billing Date': p.billing_date || p.purchase_date || '',
+    'Invoice Date': p.invoice_date || '',
+    'Supplier': p.supplier_name || '',
+    'Transport Pass': p.notes || '',
+    'Vehicle Number': p.vehicle_number || '',
+    'Subtotal': Number(p.subtotal) || 0,
+    'VAT Amount': Number(p.vat_amount) || 0,
+    'CESS Amount': Number(p.cess_amount) || 0,
+    'Special Amount': Number(p.special_amount) || 0,
+    'TCS Amount': Number(p.tcs_amount) || 0,
+    'Total Amount': Number(p.total_amount) || 0,
+    'Status': p.status || '',
+  }))
+
+  const ws = XLSX.utils.json_to_sheet(exportData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Purchases Data')
+
+  const fileName = `Purchases_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+  if (isTauri()) {
+    try {
+      const filePath = await save({
+        defaultPath: fileName,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      })
+      if (filePath) {
+        await writeFile(filePath, new Uint8Array(wbout))
+      }
+    } catch (err) {
+      console.error('Tauri export error:', err)
+      downloadAsBlob(wbout, fileName)
+    }
+  } else {
+    downloadAsBlob(wbout, fileName)
   }
+}
 
   const { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total } = calcTotals()
   const isTotalQtyAuto = Number(currentItem.qtyCases) > 0 && Number(currentItem.bottlesPerCase) > 0
@@ -806,8 +933,50 @@ export default function Purchases() {
           <button type="button" onClick={handleExportExcel} className="btn-secondary bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 flex items-center gap-2">
             <FileDown className="w-4 h-4" /> Export
           </button>
-          <button onClick={() => setShowForm(s => !s)} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> New Purchase
+          <button
+            onClick={() => {
+              if (showForm) {
+                setShowForm(false)
+                setEditingPurchaseId(null)
+                setEditingItemIndex(null)
+                setItems([])
+                setSelectedSupplier('')
+                setInvoiceNumber('')
+                setInvoiceDate('')
+                setBillingDate(format(new Date(), 'yyyy-MM-dd'))
+                setTransportPass('')
+                setVehicleNumber('')
+                setCurrentItem(EMPTY_ITEM)
+                setSearchQuery('')
+                setPurchaseVat(35)
+                setPurchaseCess(0)
+                setPurchaseSpecial(0)
+                setPurchaseTcs(2.7)
+              } else {
+                setEditingPurchaseId(null)
+                setEditingItemIndex(null)
+                setItems([])
+                setSelectedSupplier('')
+                setInvoiceNumber('')
+                setCurrentItem(EMPTY_ITEM)
+                setSearchQuery('')
+                setShowForm(true)
+              }
+            }}
+            className={clsx(
+              "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+              editingPurchaseId
+                ? "bg-amber-500 hover:bg-amber-600 text-white"
+                : "btn-primary"
+            )}
+          >
+            {editingPurchaseId ? (
+              <><X className="w-4 h-4" /> Cancel Edit</>
+            ) : showForm ? (
+              <><X className="w-4 h-4" /> Close</>
+            ) : (
+              <><Plus className="w-4 h-4" /> New Purchase</>
+            )}
           </button>
         </div>
       </div>
@@ -821,7 +990,9 @@ export default function Purchases() {
 
       {showForm && (
         <div className="card p-6 border dark:border-slate-700 shadow-sm">
-          <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-6">New Purchase Entry</h3>
+          <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-6">
+            {editingPurchaseId ? '✏️ Edit Purchase' : 'New Purchase Entry'}
+          </h3>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <div>
@@ -852,7 +1023,7 @@ export default function Purchases() {
               </div>
               <div>
                 <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Vehicle Number</label>
-                <input type="text" value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value)} placeholder="e.g. MH12AB1234" className="input-field" />
+                <input type="text" value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value.toUpperCase())} placeholder="e.g. MH12AB1234" className="input-field" />
               </div>
             </div>
 
@@ -862,7 +1033,7 @@ export default function Purchases() {
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
                     <Package className="w-4 h-4 text-blue-500" />
-                    Add New Item
+                    {editingItemIndex !== null ? 'Edit Item' : 'Add New Item'}
                   </h4>
 
                   <button
@@ -930,7 +1101,7 @@ export default function Purchases() {
                         Purchase Rate / Case (₹) *
                         {currentItem.purchaseRatePerCase && Number(currentItem.purchaseRatePerCase) > 0 && currentItem.bottlesPerCase > 0 ? (
                           <span className="ml-1 text-[10px] text-blue-500 font-medium">
-                            auto from inventory (₹{(Number(currentItem.purchaseRatePerCase) / currentItem.bottlesPerCase).toFixed(2)}/unit)
+                            (₹{(Number(currentItem.purchaseRatePerCase) / currentItem.bottlesPerCase).toFixed(2)}/unit)
                           </span>
                         ) : (
                           <span className="ml-1 text-[10px] text-red-500 font-medium">manual</span>
@@ -958,211 +1129,256 @@ export default function Purchases() {
                     <div><label className="block text-md font-semibold text-black-800 mb-1">Selling Rate (₹) *</label><input type="number" min="0" step="0.01" value={currentItem.sellingRate} onChange={e => handleItemChange('sellingRate', e.target.value)} className="input-field text-sm" /></div>
 
                     <div>
-  <label className="block text-md font-semibold text-black-800 mb-1">
-    Qty in Cases 
-    {currentItem.bottlesPerCase > 0 && <span className="ml-1 text-[10px] text-blue-500">×{currentItem.bottlesPerCase} btls</span>}
-  </label>
-  <input 
-    id="qtyCasesInput" 
-    type="number" 
-    min="0" 
-    value={currentItem.qtyCases} 
-    onChange={e => handleItemChange('qtyCases', e.target.value)} 
-    onKeyDown={e => {
-      if (e.key === 'Enter') {
-        e.preventDefault(); // Prevent form submission
-        addItemToTable();   // Add item to the right-side table
-      }
-    }}
-    className="input-field text-sm" 
-    placeholder="0" 
-  />
-</div>
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">Total Qty (Bottles) {isTotalQtyAuto ? <span className="ml-1 text-[10px] text-green-500 font-medium">auto</span> : <span className="ml-1 text-[10px] text-amber-500 font-medium">manual</span>}</label>
-                      <input type="number" min="0" value={currentItem.totalQty} onChange={e => handleItemChange('totalQty', e.target.value)} readOnly={isTotalQtyAuto} className={clsx("input-field text-sm font-semibold", isTotalQtyAuto ? "bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 cursor-not-allowed" : "bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300")} />
-                    </div>
-
-                    {/* ─── BL (Bulk Liters) — AUTO CALCULATED ─── */}
-                    <div>
                       <label className="block text-md font-semibold text-black-800 mb-1">
-                        BL (Bulk Liters) <span className="ml-1 text-[10px] text-green-500 font-medium">auto</span>
+                        Qty in Cases
+                        {currentItem.bottlesPerCase > 0 && <span className="ml-1 text-[10px] text-blue-500">×{currentItem.bottlesPerCase} btls</span>}
                       </label>
                       <input
-                        type="text"
-                        value={currentItem.qtyBulkLiters > 0 ? currentItem.qtyBulkLiters.toFixed(3) : '0'}
-                        readOnly
-                        className="input-field text-sm font-semibold bg-cyan-50 dark:bg-cyan-900/20 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 cursor-not-allowed"
+                        id="qtyCasesInput"
+                        type="number"
+                        min="0"
+                        value={currentItem.qtyCases}
+                        onChange={e => handleItemChange('qtyCases', e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addItemToTable();
+                          }
+                        }}
+                        className="input-field text-sm"
+                        placeholder="0"
                       />
-                      <p className="text-[9px] text-gray-400 mt-0.5">
-                        {currentItem.totalQty} btls × {parseInt(currentItem.bottleSize) || 0}ml ÷ 1000
-                      </p>
                     </div>
-
-                    {/* ─── LPL (LP Liters) — AUTO CALCULATED ─── */}
-
                     <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">
-                        LPL (LP Liters)
-                        {currentItem.productType === 'BEER'
-                          ? <span className="ml-1 text-[10px] text-red-500 font-medium">N/A for Beer</span>
-                          : <span className="ml-1 text-[10px] text-green-500 font-medium">auto (75% of BL)</span>
-                        }
-                      </label>
-                      <input
-                        type="text"
-                        value={currentItem.productType === 'BEER' ? 'N/A' : (currentItem.qtyLPLiters > 0 ? currentItem.qtyLPLiters.toFixed(3) : '0')}
-                        readOnly
-                        className={clsx(
-                          "input-field text-sm font-semibold cursor-not-allowed",
-                          currentItem.productType === 'BEER'
-                            ? "bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700 text-red-400 dark:text-red-500 line-through"
-                            : "bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300"
-                        )}
-                      />
-                      <p className="text-[9px] text-gray-400 mt-0.5">
-                        {currentItem.productType === 'BEER'
-                          ? 'Beer has only BL in Odisha'
-                          : 'LPL = 75% of BL (IMFL/Wine/CL)'  // ← CHANGED
-                        }
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">
-                        Opening Stock
-                        <span className="ml-1 text-[10px] text-blue-500 font-medium">from inventory</span>
-                      </label>
+                      <label className="block text-md font-semibold text-black-800 mb-1">Total Qty (Bottles) {isTotalQtyAuto ? <span className="ml-1 text-[10px] text-blue-500">auto</span> : ''}</label>
                       <input
                         type="number"
                         min="0"
-                        value={currentItem.openingStock}
-                        onChange={e => handleItemChange('openingStock', e.target.value)}
-                        className="input-field text-sm font-semibold bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 cursor-not-allowed"
-                        readOnly
+                        value={currentItem.totalQty}
+                        onChange={e => handleItemChange('totalQty', e.target.value)}
+                        className={clsx("input-field text-sm", isTotalQtyAuto && "bg-gray-50 dark:bg-gray-800")}
+                        readOnly={isTotalQtyAuto}
                       />
                     </div>
-                    <div><label className="block text-md font-semibold text-black-800 mb-1">Min Stock Alert</label><input type="number" value={currentItem.minStock} onChange={e => handleItemChange('minStock', e.target.value)} className="input-field text-sm" /></div>
+
+                    {/* ─── RESTORED OPENING, MIN, BL, LPL FIELDS ─── */}
+                    <div>
+                      <label className="block text-md font-semibold text-black-800 mb-1">Opening Stock</label>
+                      <input type="number" min="0" value={currentItem.openingStock} onChange={e => handleItemChange('openingStock', e.target.value)} className="input-field text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-md font-semibold text-black-800 mb-1">Min Stock</label>
+                      <input type="number" min="0" value={currentItem.minStock} onChange={e => handleItemChange('minStock', e.target.value)} className="input-field text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-md font-semibold text-black-800 mb-1">Bulk Liters (BL) <span className="ml-1 text-[10px] text-cyan-500 font-medium">auto</span></label>
+                      <input type="text" value={currentItem.qtyBulkLiters > 0 ? currentItem.qtyBulkLiters.toFixed(3) : '—'} readOnly className="input-field text-sm font-semibold bg-cyan-50 dark:bg-cyan-900/20 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 cursor-not-allowed" />
+                    </div>
+                    <div>
+                      <label className="block text-md font-semibold text-black-800 mb-1">LP Liters (LPL) <span className="ml-1 text-[10px] text-purple-500 font-medium">auto</span></label>
+                      <input type="text" value={currentItem.qtyLPLiters > 0 ? currentItem.qtyLPLiters.toFixed(3) : '—'} readOnly className="input-field text-sm font-semibold bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 cursor-not-allowed" />
+                    </div>
                   </div>
-                  <button type="button" onClick={addItemToTable} className="w-full mt-2 flex justify-center items-center gap-2 btn-primary bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium transition-colors">
-                    <Plus className="w-4 h-4" /> Add to List
+                </div>
+
+                {/* Add / Update Item Buttons */}
+                <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                  <button
+                    type="button"
+                    onClick={addItemToTable}
+                    className={clsx(
+                      "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors",
+                      editingItemIndex !== null
+                        ? "bg-amber-500 hover:bg-amber-600 text-white"
+                        : "btn-primary"
+                    )}
+                  >
+                    {editingItemIndex !== null ? (
+                      <><Save className="w-4 h-4" /> Update Item</>
+                    ) : (
+                      <><Plus className="w-4 h-4" /> Add Item</>
+                    )}
                   </button>
+
+                  {editingItemIndex !== null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCurrentItem(EMPTY_ITEM)
+                        setSearchQuery('')
+                        setEditingItemIndex(null)
+                      }}
+                      className="btn-secondary flex items-center gap-2"
+                    >
+                      <X className="w-4 h-4" /> Cancel
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Right: Live Table */}
-              <div className="lg:col-span-8 border dark:border-slate-700 rounded-lg overflow-hidden">
-                <div className="overflow-x-auto h-full max-h-[550px] overflow-y-auto">
-                  {items.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-600 p-8">
-                      <Package className="w-10 h-10 mb-2" />
-                      <p className="text-sm">No items added yet. Fill the form to add items.</p>
-                    </div>
-                  ) : (
+              {/* Right: Items Table */}
+              <div className="lg:col-span-8 border dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900">
+                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    Items in this Purchase ({items.length})
+                  </h4>
+                </div>
+
+                {items.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+                    <Package className="w-10 h-10 mb-2" />
+                    <p className="text-sm">No items added yet</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-10">
-                        <tr>
-                          <th className="p-2 text-left font-semibold">#</th>
-                          <th className="p-2 text-left font-semibold">Item</th>
-                          <th className="p-2 text-center font-semibold">Type</th>
-                          <th className="p-2 text-center font-semibold">Size</th>
-                          <th className="p-2 text-center font-semibold">MRP</th>
-                          <th className="p-2 text-center font-semibold text-orange-600">Rate/Case ₹</th>
-                          <th className="p-2 text-center font-semibold text-green-600">Rate/Unit ₹</th>
-                          <th className="p-2 text-center font-semibold">Cases</th>
-                          <th className="p-2 text-center font-semibold font-bold text-green-600">Btls</th>
-                          <th className="p-2 text-center font-semibold text-cyan-600">BL</th>
-                          <th className="p-2 text-center font-semibold text-purple-600">LPL</th>
-                          <th className="p-2 text-right font-semibold text-blue-600">Total ₹</th>
-                          <th className="p-2 text-center font-semibold">Act</th>
+                      <thead>
+                        <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                          <th className="text-left py-2 px-2 font-medium text-gray-500">#</th>
+                          <th className="text-left py-2 px-2 font-medium text-gray-500">Product</th>
+                          <th className="text-center py-2 px-2 font-medium text-gray-500">Cases</th>
+                          <th className="text-center py-2 px-2 font-medium text-green-500">Btls</th>
+                          <th className="text-center py-2 px-2 font-medium text-cyan-500">BL</th>
+                          <th className="text-center py-2 px-2 font-medium text-purple-500">LPL</th>
+                          <th className="text-center py-2 px-2 font-medium text-gray-500">Opening</th>
+                          <th className="text-center py-2 px-2 font-medium text-gray-500">Min</th>
+                          <th className="text-right py-2 px-2 font-medium text-orange-500">Rate/Case</th>
+                          <th className="text-right py-2 px-2 font-medium text-green-500">Rate/Unit</th>
+                          <th className="text-right py-2 px-2 font-medium text-gray-500">Total</th>
+                          <th className="text-center py-2 px-2 font-medium text-gray-500">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                        {items.map((item, i) => {
+                        {items.map((item, idx) => {
                           const lineTotal = calcLineTotal(item)
                           const ratePerUnit = calcRatePerUnit(item)
+
                           return (
-                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                              <td className="p-2 font-medium">{item.serialNo}</td>
-                              <td className="p-2"><div className="font-semibold text-gray-900 dark:text-gray-100">{item.name}</div><div className="text-[10px] text-gray-400">{item.brand} · {item.traditionalName}</div></td>
-                              <td className="p-2 text-center"><span className={clsx("text-[10px] font-semibold px-1.5 py-0.5 rounded", item.productType === 'BEER' ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400" : item.productType === 'WINE' ? "bg-pink-50 dark:bg-pink-900/20 text-pink-600 dark:text-pink-400" : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400")}>{item.productType}</span></td>
-                              <td className="p-2 text-center text-gray-500">{item.bottleSize || '—'}</td>
-                              <td className="p-2 text-center">₹{item.mrp}</td>
-                              <td className="p-2 text-center font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20">₹{Number(item.purchaseRatePerCase).toFixed(2)}</td>
-                              <td className="p-2 text-center font-semibold text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20">₹{ratePerUnit.toFixed(2)}</td>
-                              <td className="p-2 text-center font-medium">{item.qtyCases || '-'}</td>
-                              <td className="p-2 text-center font-bold text-green-600 dark:text-green-400 bg-green-50/50 dark:bg-green-900/10">{item.totalQty}</td>
-                              <td className="p-2 text-center font-semibold text-cyan-600 dark:text-cyan-400 bg-cyan-50/50 dark:bg-cyan-900/10">{item.qtyBulkLiters > 0 ? item.qtyBulkLiters.toFixed(3) : '-'}</td>
-                              <td className={clsx("p-2 text-center font-semibold bg-purple-50/50 dark:bg-purple-900/10", item.productType === 'BEER' ? "text-red-400 line-through" : "text-purple-600 dark:text-purple-400")}>{item.productType === 'BEER' ? 'N/A' : (item.qtyLPLiters > 0 ? item.qtyLPLiters.toFixed(3) : '-')}</td>
-                              <td className="p-2 text-right font-bold text-blue-700 dark:text-blue-300 bg-blue-50/50 dark:bg-blue-900/10">₹{lineTotal.toFixed(2)}</td>
-                              <td className="p-2 text-center"><button type="button" onClick={() => removeItemFromTable(i)} className="text-red-400 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                            <tr key={idx} className={clsx(
+                              editingItemIndex === idx && "bg-amber-50 dark:bg-amber-900/20"
+                            )}>
+                              <td className="py-2 px-2 text-gray-400">{item.serialNo}</td>
+                              <td className="py-2 px-2">
+                                <div className="font-medium text-gray-800 dark:text-gray-200">{item.name}</div>
+                                <div className="text-gray-400">{item.bottleSize} · {item.traditionalName}</div>
+                              </td>
+                              <td className="py-2 px-2 text-center font-medium">{item.qtyCases || '-'}</td>
+                              <td className="py-2 px-2 text-center font-bold text-green-600">{item.totalQty}</td>
+                              <td className="py-2 px-2 text-center font-semibold text-cyan-600 dark:text-cyan-400">{item.qtyBulkLiters > 0 ? item.qtyBulkLiters.toFixed(3) : '-'}</td>
+                              <td className="py-2 px-2 text-center font-semibold text-purple-600 dark:text-purple-400">{item.qtyLPLiters > 0 ? item.qtyLPLiters.toFixed(3) : '-'}</td>
+                              <td className="py-2 px-2 text-center">{item.openingStock || '-'}</td>
+                              <td className="py-2 px-2 text-center">{item.minStock || '-'}</td>
+                              <td className="py-2 px-2 text-right font-semibold text-orange-600">₹{Number(item.purchaseRatePerCase).toFixed(2)}</td>
+                              <td className="py-2 px-2 text-right font-semibold text-green-600">₹{ratePerUnit.toFixed(2)}</td>
+                              <td className="py-2 px-2 text-right font-semibold">₹{lineTotal.toFixed(2)}</td>
+                              <td className="py-2 px-2 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditItem(idx)}
+                                    className="p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                                    title="Edit this item"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeItemFromTable(idx)}
+                                    className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                    title="Remove this item"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           )
                         })}
                       </tbody>
-                      <tfoot className="bg-slate-50 dark:bg-slate-800/50 border-t-2 border-slate-300 dark:border-slate-600 sticky bottom-0 z-10">
-                        <tr>
-                          <td colSpan={5} className="p-2 text-xs font-bold text-gray-700 dark:text-gray-300 text-right">Total</td>
-                          <td className="p-2 text-center">—</td>
-                          <td className="p-2 text-center">{items.reduce((s, i) => s + (Number(i.qtyCases) || 0), 0)}</td>
-                          <td className="p-2 text-center font-bold text-green-600 dark:text-green-400">{items.reduce((s, i) => s + (Number(i.totalQty) || 0), 0)}</td>
-                          <td className="p-2 text-center font-bold text-cyan-600 dark:text-cyan-400">{items.reduce((s, i) => s + (Number(i.qtyBulkLiters) || 0), 0).toFixed(3)}</td>
-                          <td className="p-2 text-center font-bold text-purple-600 dark:text-purple-400">{items.filter(i => i.productType !== 'BEER').reduce((s, i) => s + (Number(i.qtyLPLiters) || 0), 0).toFixed(3)}</td>
-                          <td className="p-2 text-right font-bold text-blue-700 dark:text-blue-300">₹{items.reduce((s, i) => s + calcLineTotal(i), 0).toFixed(2)}</td>
-                          <td></td>
-                        </tr>
-                      </tfoot>
                     </table>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Bottom Section */}
-            <div className="flex flex-col items-end gap-2 w-full sm:w-auto">
+            {/* Totals Section */}
+
+            <div className="flex flex-col items-end gap-2 w-full sm:w-auto mt-6">
               <div className="w-full sm:w-72 text-sm space-y-2">
-                <div className="flex justify-between items-center font-semibold text-gray-800 dark:text-gray-200"><span>Subtotal</span><span className="w-24 text-right">₹{subtotal.toFixed(2)}</span></div>
-                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400"><div className="flex items-center gap-2"><span className="w-16">VAT</span><input type="number" value={purchaseVat} onChange={e => setPurchaseVat(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" /><span>%</span></div><span className="w-24 text-right">₹{vatTotal.toFixed(2)}</span></div>
-                {/* <div className="flex justify-between items-center text-gray-500 dark:text-gray-400"><div className="flex items-center gap-2"><span className="w-16">CESS</span><input type="number" value={purchaseCess} onChange={e => setPurchaseCess(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" /><span>%</span></div><span className="w-24 text-right">₹{cessTotal.toFixed(2)}</span></div> */}
-                {/* <div className="flex justify-between items-center text-gray-500 dark:text-gray-400"><div className="flex items-center gap-2"><span className="w-16">Special</span><input type="number" value={purchaseSpecial} onChange={e => setPurchaseSpecial(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" /><span>%</span></div><span className="w-24 text-right">₹{specialTotal.toFixed(2)}</span></div> */}
-                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400"><div className="flex items-center gap-2"><span className="w-16">TCS</span><input type="number" value={purchaseTcs} onChange={e => setPurchaseTcs(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" /><span>%</span></div><span className="w-24 text-right">₹{tcsTotal.toFixed(2)}</span></div>
-                <div className="flex justify-between items-center border-t border-gray-200 dark:border-gray-700 pt-2 font-bold text-base text-gray-800 dark:text-gray-200"><span>Grand Total</span><span className="w-24 text-right">₹{total.toFixed(2)}</span></div>
+                <div className="flex justify-between items-center font-semibold text-gray-800 dark:text-gray-200">
+                  <span>Subtotal</span>
+                  <span className="w-24 text-right">₹{subtotal.toFixed(2)}</span>
+                </div>
+
+                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-2">
+                    <span className="w-16">VAT</span>
+                    <input type="number" value={purchaseVat} onChange={e => setPurchaseVat(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+                    <span>%</span>
+                  </div>
+                  <span className="w-24 text-right">₹{vatTotal.toFixed(2)}</span>
+                </div>
+
+                {/* Uncomment CESS and Special if you need them later */}
+                {/*
+                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-2">
+                    <span className="w-16">CESS</span>
+                    <input type="number" value={purchaseCess} onChange={e => setPurchaseCess(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+                    <span>%</span>
+                  </div>
+                  <span className="w-24 text-right">₹{cessTotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-2">
+                    <span className="w-16">Special</span>
+                    <input type="number" value={purchaseSpecial} onChange={e => setPurchaseSpecial(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+                    <span>%</span>
+                  </div>
+                  <span className="w-24 text-right">₹{specialTotal.toFixed(2)}</span>
+                </div>
+                */}
+
+                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-2">
+                    <span className="w-16">TCS</span>
+                    <input type="number" value={purchaseTcs} onChange={e => setPurchaseTcs(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+                    <span>%</span>
+                  </div>
+                  <span className="w-24 text-right">₹{tcsTotal.toFixed(2)}</span>
+                </div>
+
+                <div className="flex justify-between items-center border-t border-gray-200 dark:border-gray-700 pt-2 font-bold text-base text-gray-800 dark:text-gray-200">
+                  <span>Grand Total</span>
+                  <span className="w-24 text-right">₹{total.toFixed(2)}</span>
+                </div>
               </div>
-              <button type="submit" disabled={saving || items.length === 0} className={clsx("w-full sm:w-72 flex justify-center items-center gap-2 py-2.5 rounded-lg text-white font-semibold transition-all", saving || items.length === 0 ? "bg-gray-300 dark:bg-gray-700 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 active:scale-95 shadow-md")}>
+
+              <button
+                type="submit"
+                disabled={saving || items.length === 0}
+                className={clsx(
+                  "w-full sm:w-72 flex justify-center items-center gap-2 py-2.5 rounded-lg text-white font-semibold transition-all",
+                  saving || items.length === 0
+                    ? "bg-gray-300 dark:bg-gray-700 cursor-not-allowed"
+                    : "bg-green-600 hover:bg-green-700 active:scale-95 shadow-md"
+                )}
+              >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? "Saving Purchase..." : "Confirm Purchase"}
+                {saving ? "Saving Purchase..." : editingPurchaseId ? "Update Purchase" : "Confirm Purchase"}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Filter Report Section */}
-      <div className="card p-4 border dark:border-slate-700 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
-            <Filter className="w-4 h-4 text-blue-500" /> Purchase Report Filters
-          </h3>
-          <button onClick={clearFilters} className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 flex items-center gap-1 font-medium transition-colors">
-            <RotateCcw className="w-3 h-3" /> Clear Filters
-          </button>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          <input type="text" placeholder="Product Name" value={filterProduct} onChange={e => setFilterProduct(e.target.value)} className="input-field text-xs" />
-          <input type="text" placeholder="Brand" value={filterBrand} onChange={e => setFilterBrand(e.target.value)} className="input-field text-xs" />
-          <input type="text" placeholder="Category" value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="input-field text-xs" />
-          <input type="text" placeholder="MRP Revision" value={filterMrp} onChange={e => setFilterMrp(e.target.value)} className="input-field text-xs" />
-          <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} className="input-field text-xs" title="Date From" />
-          <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} className="input-field text-xs" title="Date To" />
-          <select value={filterType} onChange={e => setFilterType(e.target.value)} className="input-field text-xs">
-            <option value="ALL">All Types</option>
-            <option value="PURCHASE">Purchase Only</option>
-            <option value="RETURN">Purchase Return</option>
-          </select>
-        </div>
-      </div>
+      <ProductModal
+        isOpen={showProductModal}
+        onClose={() => setShowProductModal(false)}
+        onSaveSuccess={fetchPurchases}
+      />
 
-      {/* Existing Purchases List */}
+      {/* ─── PURCHASES LIST TABLE ─── */}
       <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -1172,9 +1388,10 @@ export default function Purchases() {
                 <th className="table-header text-left">Date</th>
                 <th className="table-header text-left">Supplier</th>
                 <th className="table-header text-right">VAT</th>
+                <th className="table-header text-right">TCS</th> {/* ADDED TCS HEADER */}
                 <th className="table-header text-right">Total</th>
                 <th className="table-header text-center">Status</th>
-                <th className="table-header text-center">Items</th>
+                <th className="table-header text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
@@ -1196,14 +1413,28 @@ export default function Purchases() {
                     </td>
                     <td className="table-cell text-gray-600 dark:text-gray-400">{p.supplier_name || '—'}</td>
                     <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
+                    <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
                     <td className="table-cell text-right font-semibold">₹{Number(p.total_amount).toFixed(2)}</td>
                     <td className="table-cell text-center">
                       <span className={clsx("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold", p.status === 'RETURN' ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400" : "bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400")}>{p.status}</span>
                     </td>
                     <td className="table-cell text-center">
-                      <button onClick={() => loadItems(p.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors">
-                        {expandedId === p.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        {/* ─── ONLY SHOW EDIT BUTTON IF ADMIN ─── */}
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleEditPurchase(p) }}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                            title="Edit Purchase"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        <button onClick={() => loadItems(p.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors">
+                          {expandedId === p.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   {expandedId === p.id && expandedItems[p.id] && (
@@ -1262,12 +1493,6 @@ export default function Purchases() {
           </table>
         </div>
       </div>
-
-      <ProductModal
-        isOpen={showProductModal}
-        onClose={() => setShowProductModal(false)}
-        onSaveSuccess={() => alert('Product created successfully! You can now search for it.')}
-      />
     </div>
   )
 }

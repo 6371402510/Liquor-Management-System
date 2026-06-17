@@ -2,10 +2,25 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "enables the default permissions",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "opener:default",
+    "dialog:default",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "fs:default",
+    "fs:allow-write-file",
+    "fs:allow-write",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$HOME/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$DOCUMENT/**" }
+      ]
+    }
   ]
 }

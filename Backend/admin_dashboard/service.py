@@ -6,13 +6,13 @@ from typing import List, Optional
 from company.model import Company
 from employee.model import Employee
 from expenses.model import Expense, ExpenseCategory
-from sales_counter.model import Sale
-from sales_godown.model import GodownSale
+from sales_counter.model import Sale, SaleItem
+from sales_godown.model import GodownSale, GodownSaleItem
 from employee_attendance.model import Attendance
 from inventory.model import Product
+from purchases.model import Purchase, PurchaseItem 
 
 from . import schema
-
 
 def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, date_to: Optional[str] = None):
     today = datetime.now().date()
@@ -39,6 +39,11 @@ def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, 
     present_period_all = 0
     total_stock_value_all = 0.0
     total_stock_mrp_all = 0.0
+
+    # ─── NEW: Bottle aggregation variables ───
+    total_bottles_in_stock_all = 0
+    total_bottles_sold_all = 0
+    total_bottles_purchased_all = 0
 
     store_performances = []
     company_stock_list = []
@@ -109,14 +114,56 @@ def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, 
             ).scalar() or 0
         present_period_all += present_count
 
+
+              # ═══════════════════════════════════════════════════
+        # ─── NEW: PROFIT CALCULATION (Sales - COGS - Expenses) ───
+        # ═══════════════════════════════════════════════════
+        store_cogs = 0.0
+        try:
+            counter_cogs = db.query(
+                func.coalesce(func.sum(SaleItem.quantity * func.coalesce(Product.purchase_rate, 0)), 0)
+            ).join(Sale, SaleItem.sale_id == Sale.id
+            ).join(Product, SaleItem.product_id == Product.id
+            ).filter(
+                and_(
+                    Sale.company_id == company.id,
+                    Sale.created_at.between(start_datetime, end_datetime)
+                )
+            ).scalar() or 0
+
+            godown_cogs = db.query(
+                func.coalesce(func.sum(GodownSaleItem.quantity * func.coalesce(Product.purchase_rate, 0)), 0)
+            ).join(GodownSale, GodownSaleItem.sale_id == GodownSale.id
+            ).join(Product, GodownSaleItem.product_id == Product.id
+            ).filter(
+                and_(
+                    GodownSale.company_id == company.id,
+                    GodownSale.created_at.between(start_datetime, end_datetime)
+                )
+            ).scalar() or 0
+
+            store_cogs = float(counter_cogs) + float(godown_cogs)
+        except Exception as e:
+            print(f"COGS query failed for company {company.id}: {e}")
+
+        # Calculate Taxes based on COGS
+        store_vat = store_cogs * 0.35                       # VAT at 35% of Purchase Rate
+        store_tcs = (store_cogs + store_vat) * 0.027        # TCS at 2.7% of (Purchase Rate + VAT)
+
+        # New Profit Formula
+        store_profit = store_sales - store_cogs - store_vat - store_tcs - store_expense
+
         store_performances.append(schema.StorePerformance(
             id=company.id,
             name=company_name,
             sales=store_sales,
+            cogs=store_cogs,        # ← NEW
+            vat=store_vat,          # ← NEW
+            tcs=store_tcs,          # ← NEW
             expense=store_expense,
+            profit=store_profit,
             employees=emp_count
         ))
-
         # ═══════════════════════════════════════════════════
         # ─── STOCK VALUE from Product table ───────────────
         # ═══════════════════════════════════════════════════
@@ -156,6 +203,7 @@ def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, 
 
         total_stock_value_all += stock_value
         total_stock_mrp_all += stock_value_mrp
+        total_bottles_in_stock_all += total_bottles  # ← NEW
 
         company_stock_list.append(schema.CompanyStockValue(
             company_id=company.id,
@@ -166,6 +214,55 @@ def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, 
             total_bottles=total_bottles,
         ))
 
+        # ═══════════════════════════════════════════════════
+        # ─── NEW: BOTTLES SOLD (Counter + Godown) ─────────
+        # ═══════════════════════════════════════════════════
+        company_bottles_sold = 0
+        try:
+            counter_bottles = db.query(
+                func.coalesce(func.sum(SaleItem.quantity), 0)
+            ).join(Sale, SaleItem.sale_id == Sale.id).filter(
+                and_(
+                    Sale.company_id == company.id,
+                    Sale.created_at.between(start_datetime, end_datetime)
+                )
+            ).scalar() or 0
+
+            godown_bottles = db.query(
+                func.coalesce(func.sum(GodownSaleItem.quantity), 0)
+            ).join(GodownSale, GodownSaleItem.sale_id == GodownSale.id).filter(
+                and_(
+                    GodownSale.company_id == company.id,
+                    GodownSale.created_at.between(start_datetime, end_datetime)
+                )
+            ).scalar() or 0
+
+            company_bottles_sold = int(counter_bottles) + int(godown_bottles)
+        except Exception as e:
+            print(f"Bottles sold query failed for company {company.id}: {e}")
+
+        total_bottles_sold_all += company_bottles_sold  # ← NEW
+
+        # ═══════════════════════════════════════════════════
+        # ─── NEW: BOTTLES PURCHASED ────────────────────────
+        # ═══════════════════════════════════════════════════
+        company_bottles_purchased = 0
+        try:
+            company_bottles_purchased = int(
+                db.query(
+                    func.coalesce(func.sum(PurchaseItem.total_bottles), 0)
+                ).join(Purchase, PurchaseItem.purchase_id == Purchase.id).filter(
+                    and_(
+                        Purchase.company_id == company.id,
+                        Purchase.created_at.between(start_datetime, end_datetime)
+                    )
+                ).scalar() or 0
+            )
+        except Exception as e:
+            print(f"Bottles purchased query failed for company {company.id}: {e}")
+
+        total_bottles_purchased_all += company_bottles_purchased  # ← NEW
+
     # ─── STATS ───
     stats = schema.OperationsStats(
         total_stores=len(companies),
@@ -174,6 +271,9 @@ def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, 
         cash_in_hand=total_sales_all - total_expenses_all,
         total_stock_value=total_stock_value_all,
         total_stock_value_mrp=total_stock_mrp_all,
+        total_bottles_in_stock=total_bottles_in_stock_all,      # ← NEW
+        total_bottles_sold=total_bottles_sold_all,               # ← NEW
+        total_bottles_purchased=total_bottles_purchased_all,     # ← NEW
     )
 
     # ─── ATTENDANCE LIST ───

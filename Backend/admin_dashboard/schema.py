@@ -5,7 +5,11 @@ class StorePerformance(BaseModel):
     id: int
     name: str
     sales: float
+    cogs: float = 0.0        # ← NEW: Cost of Goods Sold (Purchase Rate)
+    vat: float = 0.0         # ← NEW: VAT 35% on COGS
+    tcs: float = 0.0         # ← NEW: TCS 2.7% on (COGS + VAT)
     expense: float
+    profit: float
     employees: int
 
 class AttendanceRecord(BaseModel):
@@ -30,15 +34,19 @@ class OperationsStats(BaseModel):
     total_employees: int
     present_today: int
     cash_in_hand: float
-    total_stock_value: float  # ← NEW
-
+    total_stock_value: float
+    total_stock_value_mrp: float      # ← ADD THIS (was missing too)
+    total_bottles_in_stock: int = 0    # ← NEW
+    total_bottles_sold: int = 0        # ← NEW
+    total_bottles_purchased: int = 0   # ← NEW
 # ─── NEW: Company-wise stock breakdown ───
 class CompanyStockValue(BaseModel):
     company_id: int
     company_name: str
     stock_value: float        # total value at cost
     stock_value_mrp: float    # total value at MRP (optional)
-    item_count: int           # number of distinct liquor items
+    item_count: int    
+    total_bottles: int = 0       # number of distinct liquor items
 
 class OperationsDashboardResponse(BaseModel):
     stats: OperationsStats

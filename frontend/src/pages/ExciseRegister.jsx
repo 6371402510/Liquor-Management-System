@@ -7,6 +7,8 @@ import {
 import clsx from 'clsx'
 import { format } from 'date-fns'
 import * as XLSX from 'xlsx'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API functions
 import { getProducts } from '../apiservices/inventoryapi'
@@ -27,7 +29,21 @@ function calculateLPLiters(bottles, bottleSizeStr) {
   const sizeInMl = parseInt(bottleSizeStr) || 0
   return (Number(bottles) || 0) * sizeInMl / 1000
 }
+const isTauri = () => '__TAURI_INTERNALS__' in window
 
+const downloadAsBlob = (data, fileName) => {
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 export default function ExciseReport() {
   // ─── COMPANY ID FROM LOCAL STORAGE ───
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
@@ -256,7 +272,8 @@ export default function ExciseReport() {
   }, [reportData])
 
   // ─── Export to Excel ───
-  const handleExportExcel = () => {
+  // ─── Export to Excel ───
+  const handleExportExcel = async () => {
     if (sortedData.length === 0) return alert('No data to export')
 
     const exportData = sortedData.map(row => ({
@@ -282,7 +299,27 @@ export default function ExciseReport() {
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Excise Movement')
-    XLSX.writeFile(wb, `Excise_Movement_${companyName}_${filterDateFrom}_to_${filterDateTo}.xlsx`)
+
+    // ─── Save File (Tauri + Browser) ───
+    const fileName = `Excise_Movement_${companyName}_${filterDateFrom}_to_${filterDateTo}.xlsx`
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+    if (isTauri()) {
+      try {
+        const filePath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+        })
+        if (filePath) {
+          await writeFile(filePath, new Uint8Array(wbout))
+        }
+      } catch (err) {
+        console.error('Tauri export error:', err)
+        downloadAsBlob(wbout, fileName)
+      }
+    } else {
+      downloadAsBlob(wbout, fileName)
+    }
   }
 
   // ─── GUARD: NO COMPANY SELECTED ───

@@ -9,13 +9,30 @@ import {
 import { format } from 'date-fns'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API functions
 import { getPurchases, getPurchaseItems } from '../apiservices/purchasesapi'
 import { getSuppliers } from '../apiservices/supplierapi'
 
 // ─── Helper: Normalize API response field names ───
+// ─── Helper: Normalize API response field names ───
 function normalizeItem(item) {
+  const total_bottles = Number(item.total_bottles ?? item.totalBottles ?? item.qty_bottles ?? item.qtyBottles) || 0
+  const purchase_rate_per_unit = Number(item.purchase_rate_per_unit ?? item.purchaseRatePerUnit) || 0
+  const stored_total_cost = Number(item.total_cost) || 0
+
+  // ─── CALCULATE: Total Cost = Bottle Quantity × Purchase Rate Per Unit ───
+  let total_cost
+  if (purchase_rate_per_unit > 0 && total_bottles > 0) {
+    total_cost = total_bottles * purchase_rate_per_unit
+  } else if (stored_total_cost > 0) {
+    total_cost = stored_total_cost  // Fallback for old records
+  } else {
+    total_cost = 0
+  }
+
   return {
     id: item.id,
     purchase_id: item.purchase_id,
@@ -28,16 +45,16 @@ function normalizeItem(item) {
     bottles_per_case: Number(item.bottles_per_case ?? item.bottlesPerCase) || 0,
     mrp: Number(item.mrp) || 0,
     unit_cost: Number(item.unit_cost ?? item.purchaseRate) || 0,
-    purchase_rate_per_unit: Number(item.purchase_rate_per_unit ?? item.purchaseRatePerUnit) || 0,
+    purchase_rate_per_unit: purchase_rate_per_unit,
     selling_rate: Number(item.selling_rate ?? item.sellingRate) || 0,
     qty_cases: Number(item.qty_cases ?? item.qtyCases) || 0,
     qty_bottles: Number(item.qty_bottles ?? item.qtyBottles) || 0,
-    total_bottles: Number(item.total_bottles ?? item.totalBottles ?? item.qty_bottles ?? item.qtyBottles) || 0,
+    total_bottles: total_bottles,
     qty_bulk_liters: Number(item.qty_bulk_liters ?? item.qtyBulkLiters) || 0,
     qty_lp_liters: Number(item.qty_lp_liters ?? item.qtyLPLiters) || 0,
     opening_stock: Number(item.opening_stock ?? item.openingStock) || 0,
     min_stock: Number(item.min_stock ?? item.minStock) || 0,
-    total_cost: Number(item.total_cost) || 0,
+    total_cost: total_cost,  // ← CALCULATED: bottles × rate_per_unit
   }
 }
 
@@ -49,6 +66,23 @@ function getSortIcon(sortDir) {
 }
 
 const ITEMS_PER_PAGE = 25
+
+
+const isTauri = () => '__TAURI_INTERNALS__' in window
+
+const downloadAsBlob = (data, fileName) => {
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 export default function PurchaseReport() {
   const { user } = useAuth()
@@ -362,44 +396,143 @@ export default function PurchaseReport() {
   }, [activeTab, purchases])
 
   // ─── Export to Excel ───
-  const handleExportExcel = () => {
-    if (filteredPurchases.length === 0) { alert('No data to export'); return }
-    const wb = XLSX.utils.book_new()
-    const summaryData = filteredPurchases.map(p => ({ 'Invoice No.': p.invoice_number || '', 'Billing Date': p.billing_date || p.purchase_date || '', 'Invoice Date': p.invoice_date || '', 'Supplier': p.supplier_name || '', 'Transport Pass': p.notes || '', 'Vehicle Number': p.vehicle_number || '', 'Subtotal': Number(p.subtotal) || 0, 'VAT Amount': Number(p.vat_amount) || 0, 'CESS Amount': Number(p.cess_amount) || 0, 'Special Amount': Number(p.special_amount) || 0, 'TCS Amount': Number(p.tcs_amount) || 0, 'Total Amount': Number(p.total_amount) || 0, 'Status': p.status || '' }))
-    const ws1 = XLSX.utils.json_to_sheet(summaryData)
-    XLSX.utils.book_append_sheet(wb, ws1, 'Purchase Summary')
+  const handleExportExcel = async () => {
+  if (filteredPurchases.length === 0) { alert('No data to export'); return }
 
-    const itemData = []
-    filteredPurchases.forEach(p => {
-      const items = expandedItems[p.id] || []
-      if (items.length === 0) { itemData.push({ 'Invoice No.': p.invoice_number || '', 'Billing Date': p.billing_date || p.purchase_date || '', 'Supplier': p.supplier_name || '', 'Product': '—' }) }
-      else { items.forEach(item => { itemData.push({ 'Invoice No.': p.invoice_number || '', 'Billing Date': p.billing_date || p.purchase_date || '', 'Supplier': p.supplier_name || '', 'Product': item.product_name || '', 'Brand': item.brand || '', 'Category': item.category || '', 'Bottle Size': item.bottle_size || '', 'Cases': item.qty_cases || 0, 'Total Bottles': item.total_bottles || 0, 'Bulk Liters': item.qty_bulk_liters || 0, 'MRP': item.mrp || 0, 'Rate/Case': item.unit_cost || 0, 'Rate/Unit': item.purchase_rate_per_unit || 0, 'Total Cost': item.total_cost || 0 }) }) }
+  const wb = XLSX.utils.book_new()
+
+  // ─── Sheet 1: Purchase Summary ───
+  const summaryData = filteredPurchases.map(p => ({
+    'Invoice No.': p.invoice_number || '',
+    'Billing Date': p.billing_date || p.purchase_date || '',
+    'Invoice Date': p.invoice_date || '',
+    'Supplier': p.supplier_name || '',
+    'Transport Pass': p.notes || '',
+    'Vehicle Number': p.vehicle_number || '',
+    'Subtotal': Number(p.subtotal) || 0,
+    'VAT Amount': Number(p.vat_amount) || 0,
+    'CESS Amount': Number(p.cess_amount) || 0,
+    'Special Amount': Number(p.special_amount) || 0,
+    'TCS Amount': Number(p.tcs_amount) || 0,
+    'Total Amount': Number(p.total_amount) || 0,
+    'Status': p.status || '',
+  }))
+  const ws1 = XLSX.utils.json_to_sheet(summaryData)
+  XLSX.utils.book_append_sheet(wb, ws1, 'Purchase Summary')
+
+  // ─── Sheet 2: Item Details ───
+  const itemData = []
+  filteredPurchases.forEach(p => {
+    const items = expandedItems[p.id] || []
+    if (items.length === 0) {
+      itemData.push({
+        'Invoice No.': p.invoice_number || '',
+        'Billing Date': p.billing_date || p.purchase_date || '',
+        'Supplier': p.supplier_name || '',
+        'Product': '—',
+      })
+    } else {
+      items.forEach(item => {
+        itemData.push({
+          'Invoice No.': p.invoice_number || '',
+          'Billing Date': p.billing_date || p.purchase_date || '',
+          'Supplier': p.supplier_name || '',
+          'Product': item.product_name || '',
+          'Brand': item.brand || '',
+          'Category': item.category || '',
+          'Bottle Size': item.bottle_size || '',
+          'Cases': item.qty_cases || 0,
+          'Total Bottles': item.total_bottles || 0,
+          'Bulk Liters': item.qty_bulk_liters || 0,
+          'MRP': item.mrp || 0,
+          'Rate/Case': item.unit_cost || 0,
+          'Rate/Unit': item.purchase_rate_per_unit || 0,
+          'Total Cost': item.total_cost || 0,
+        })
+      })
+    }
+  })
+  const ws2 = XLSX.utils.json_to_sheet(itemData)
+  XLSX.utils.book_append_sheet(wb, ws2, 'Item Details')
+
+  // ─── Sheet 3: By Supplier ───
+  const supplierData = bySupplier.map(s => ({
+    'Supplier': s.name,
+    'No. of Purchases': s.count,
+    'Subtotal': s.subtotal,
+    'VAT': s.vat,
+    'CESS': s.cess,
+    'Special': s.special,
+    'TCS': s.tcs,
+    'Total Amount': s.total,
+  }))
+  const ws3 = XLSX.utils.json_to_sheet(supplierData)
+  XLSX.utils.book_append_sheet(wb, ws3, 'By Supplier')
+
+  // ─── Sheet 4: By Product ───
+  const productData = byProduct.map(p => ({
+    'Product': p.name,
+    'Brand': p.brand,
+    'Category': p.category,
+    'Bottle Size': p.bottle_size,
+    'MRP': p.mrp,
+    'Times Purchased': p.count,
+    'Total Cases': p.cases,
+    'Total Bottles': p.bottles,
+    'Bulk Liters': p.bulkLiters,
+    'L.P. Liters': p.lpLiters,
+    'Total Cost': p.cost,
+  }))
+  const ws4 = XLSX.utils.json_to_sheet(productData)
+  XLSX.utils.book_append_sheet(wb, ws4, 'By Product')
+
+  // ─── Save File ───
+  const dateLabel = filterDateFrom && filterDateTo
+    ? `_${filterDateFrom}_to_${filterDateTo}`
+    : `_${new Date().toISOString().slice(0, 10)}`
+
+  const fileName = `Purchase_Report${dateLabel}.xlsx`
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+  if (isTauri()) {
+    try {
+      const filePath = await save({
+        defaultPath: fileName,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      })
+      if (filePath) {
+        await writeFile(filePath, new Uint8Array(wbout))
+      }
+    } catch (err) {
+      console.error('Tauri export error:', err)
+      downloadAsBlob(wbout, fileName)
+    }
+  } else {
+    downloadAsBlob(wbout, fileName)
+  }
+}
+
+const handleExportExcelFull = async () => {
+  const missing = filteredPurchases.filter(p => !expandedItems[p.id])
+  if (missing.length > 0) {
+    const promises = missing.map(async p => {
+      try {
+        const data = await getPurchaseItems(p.id)
+        return { id: p.id, data: (data || []).map(normalizeItem) }
+      } catch { return null }
     })
-    const ws2 = XLSX.utils.json_to_sheet(itemData)
-    XLSX.utils.book_append_sheet(wb, ws2, 'Item Details')
-
-    const supplierData = bySupplier.map(s => ({ 'Supplier': s.name, 'No. of Purchases': s.count, 'Subtotal': s.subtotal, 'VAT': s.vat, 'CESS': s.cess, 'Special': s.special, 'TCS': s.tcs, 'Total Amount': s.total }))
-    const ws3 = XLSX.utils.json_to_sheet(supplierData)
-    XLSX.utils.book_append_sheet(wb, ws3, 'By Supplier')
-
-    const productData = byProduct.map(p => ({ 'Product': p.name, 'Brand': p.brand, 'Category': p.category, 'Bottle Size': p.bottle_size, 'MRP': p.mrp, 'Times Purchased': p.count, 'Total Cases': p.cases, 'Total Bottles': p.bottles, 'Bulk Liters': p.bulkLiters, 'L.P. Liters': p.lpLiters, 'Total Cost': p.cost }))
-    const ws4 = XLSX.utils.json_to_sheet(productData)
-    XLSX.utils.book_append_sheet(wb, ws4, 'By Product')
-
-    const dateLabel = filterDateFrom && filterDateTo ? `_${filterDateFrom}_to_${filterDateTo}` : `_${new Date().toISOString().slice(0, 10)}`
-    XLSX.writeFile(wb, `Purchase_Report${dateLabel}.xlsx`)
+    const results = await Promise.all(promises)
+    setExpandedItems(prev => {
+      const next = { ...prev }
+      results.forEach(r => { if (r && r.data) next[r.id] = r.data })
+      return next
+    })
+    // Wait for state to update, then export
+    setTimeout(() => handleExportExcel(), 500)
+  } else {
+    handleExportExcel()
   }
-
-  const handleExportExcelFull = async () => {
-    const missing = filteredPurchases.filter(p => !expandedItems[p.id])
-    if (missing.length > 0) {
-      const promises = missing.map(async p => { try { const data = await getPurchaseItems(p.id); return { id: p.id, data: (data || []).map(normalizeItem) } } catch { return null } })
-      const results = await Promise.all(promises)
-      setExpandedItems(prev => { const next = { ...prev }; results.forEach(r => { if (r && r.data) next[r.id] = r.data }); return next })
-      setTimeout(() => handleExportExcel(), 300)
-    } else { handleExportExcel() }
-  }
-
+}
   // ─── GUARD: NO COMPANY SELECTED ───
   if (!companyId) {
     return (
@@ -482,7 +615,7 @@ export default function PurchaseReport() {
           <p className="text-lg font-bold text-cyan-600 dark:text-cyan-400">{summaryStats.totalBottles.toLocaleString()}</p>
         </div>
         <div className="card p-3 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-1"><Truck className="w-4 h-4 text-amber-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">VAT + CESS</span></div>
+          <div className="flex items-center gap-2 mb-1"><Truck className="w-4 h-4 text-amber-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">VAT + TCS</span></div>
           <p className="text-lg font-bold text-amber-600 dark:text-amber-400">₹{(summaryStats.totalVat + summaryStats.totalCess + summaryStats.totalSpecial + summaryStats.totalTcs).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         </div>
       </div>

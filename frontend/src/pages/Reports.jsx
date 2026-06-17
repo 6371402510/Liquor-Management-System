@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, Fragment, useMemo } from 'react'
 import {
   Store, Warehouse, TrendingUp, CreditCard, Banknote, Smartphone,
   Users, Receipt, RotateCcw, Filter, FileDown, Clock3, Calendar,
@@ -6,6 +6,8 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeFile } from '@tauri-apps/plugin-fs'
 import { format } from 'date-fns'
 
 // Import API functions
@@ -15,6 +17,7 @@ import { getGodownProducts, getGodownSales } from '../apiservices/godown-counter
 
 const GROUP_BY_OPTIONS = [
   { value: 'date', label: 'Date Wise' },
+  { value: 'bill', label: 'Bill Wise' }, 
   { value: 'month', label: 'Month Wise' },
   { value: 'year', label: 'Year Wise' },
   { value: 'hour', label: 'Hour Wise' },
@@ -23,7 +26,21 @@ const GROUP_BY_OPTIONS = [
   { value: 'category', label: 'Category Wise' },
   { value: 'size', label: 'Size Wise' },
 ]
+const isTauri = () => '__TAURI_INTERNALS__' in window
 
+const downloadAsBlob = (data, fileName) => {
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 export default function Reports() {
   // ─── COMPANY ID FROM LOCAL STORAGE ───
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
@@ -34,6 +51,7 @@ export default function Reports() {
   const [error, setError] = useState('')
   const [rawData, setRawData] = useState([])
   const [productsMap, setProductsMap] = useState({})
+  const [expandedBill, setExpandedBill] = useState(null)
 
   const [dateFrom, setDateFrom] = useState(format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd'))
   const [dateTo, setDateTo] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -130,7 +148,7 @@ export default function Reports() {
     }
   }
 
-  const { summary, tableData, topSelling } = useMemo(() => {
+   const { summary, tableData, topSelling } = useMemo(() => {
     let filtered = rawData.filter(row => {
       const rowDate = format(new Date(row.date), 'yyyy-MM-dd')
       if (rowDate < dateFrom || rowDate > dateTo) return false
@@ -164,6 +182,7 @@ export default function Reports() {
       const d = new Date(row.date)
       switch (groupBy) {
         case 'date': return format(d, 'yyyy-MM-dd')
+        case 'bill': return row.id // <-- Group by Invoice Number
         case 'month': return format(d, 'yyyy-MM')
         case 'year': return format(d, 'yyyy')
         case 'hour': return `${format(d, 'yyyy-MM-dd')} ${d.getHours()}:00`
@@ -200,6 +219,14 @@ export default function Reports() {
           if (row.paymentMode === 'CASH') groups[key].cash += amt
           if (row.paymentMode === 'CARD') groups[key].card += amt
         }
+
+        // ─── STORE METADATA FOR BILL WISE VIEW ───
+        if (groupBy === 'bill') {
+          if (!groups[key].date) groups[key].date = row.date
+          if (!groups[key].paymentMode) groups[key].paymentMode = row.paymentMode
+          if (!groups[key].customerId) groups[key].customerId = row.customerId
+          if (!groups[key].billItems) groups[key].billItems = row.items
+        }
       }
     })
 
@@ -213,7 +240,18 @@ export default function Reports() {
       upi: val.upi || 0,
       cash: val.cash || 0,
       card: val.card || 0,
-    })).sort((a, b) => a.group.localeCompare(b.group))
+      // Extra data for Bill Wise view
+      date: val.date || null,
+      paymentMode: val.paymentMode || null,
+      customerId: val.customerId || null,
+      billItems: val.billItems || null,
+    })).sort((a, b) => {
+      // Sort bills by newest first, others alphabetically
+      if (groupBy === 'bill' && a.date && b.date) {
+        return new Date(b.date) - new Date(a.date)
+      }
+      return a.group.localeCompare(b.group)
+    })
 
     const itemGroups = {}
     rawData.filter(f => f.transactionType === 'SALE' && format(new Date(f.date), 'yyyy-MM-dd') >= dateFrom && format(new Date(f.date), 'yyyy-MM-dd') <= dateTo).forEach(row => {
@@ -230,9 +268,9 @@ export default function Reports() {
 
     return { summary, tableData, topSelling }
   }, [rawData, dateFrom, dateTo, groupBy, salesType, paymentMode])
-
-  const handleExport = () => {
+    const handleExport = async () => {
     if (tableData.length === 0) return alert('No data to export')
+
     const exportData = tableData.map(row => ({
       [groupBy.toUpperCase()]: row.group,
       'Bills': row.bills,
@@ -244,10 +282,31 @@ export default function Reports() {
       'Cash': row.cash,
       'Card': row.card,
     }))
+
     const ws = XLSX.utils.json_to_sheet(exportData)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Sales Report')
-    XLSX.writeFile(wb, `${activeTab}_sales_report_${companyName}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+
+    // ─── Save File (Tauri + Browser) ───
+    const fileName = `${activeTab}_sales_report_${companyName}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+    if (isTauri()) {
+      try {
+        const filePath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+        })
+        if (filePath) {
+          await writeFile(filePath, new Uint8Array(wbout))
+        }
+      } catch (err) {
+        console.error('Tauri export error:', err)
+        downloadAsBlob(wbout, fileName)
+      }
+    } else {
+      downloadAsBlob(wbout, fileName)
+    }
   }
 
   // ─── GUARD: NO COMPANY SELECTED ───
@@ -417,21 +476,34 @@ export default function Reports() {
             <table className="w-full text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/50">
                 <tr>
-                  <th className="p-3 text-left font-semibold text-gray-500 dark:text-gray-400">{groupBy.toUpperCase()}</th>
-                  <th className="p-3 text-center font-semibold text-gray-500 dark:text-gray-400">Bills</th>
-                  {!['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                  {groupBy === 'bill' ? (
                     <>
-                      <th className="p-3 text-center font-semibold text-gray-500 dark:text-gray-400">Cust.</th>
-                      <th className="p-3 text-right font-semibold text-gray-500 dark:text-gray-400">UPI ₹</th>
-                      <th className="p-3 text-right font-semibold text-gray-500 dark:text-gray-400">Cash ₹</th>
-                      <th className="p-3 text-right font-semibold text-gray-500 dark:text-gray-400">Card ₹</th>
-                      <th className="p-3 text-right font-semibold text-gray-500 dark:text-gray-400">Returns ₹</th>
+                      <th className="p-3 text-left font-semibold text-gray-500">Invoice No.</th>
+                      <th className="p-3 text-left font-semibold text-gray-500">Date / Time</th>
+                      <th className="p-3 text-left font-semibold text-gray-500">Customer</th>
+                      <th className="p-3 text-center font-semibold text-gray-500">Payment</th>
+                      <th className="p-3 text-center font-semibold text-gray-500">Items</th>
+                      <th className="p-3 text-right font-semibold text-gray-500">Amount ₹</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="p-3 text-left font-semibold text-gray-500">{groupBy.toUpperCase()}</th>
+                      <th className="p-3 text-center font-semibold text-gray-500">Bills</th>
+                      {!['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                        <>
+                          <th className="p-3 text-center font-semibold text-gray-500">Cust.</th>
+                          <th className="p-3 text-right font-semibold text-gray-500">UPI ₹</th>
+                          <th className="p-3 text-right font-semibold text-gray-500">Cash ₹</th>
+                          <th className="p-3 text-right font-semibold text-gray-500">Card ₹</th>
+                          <th className="p-3 text-right font-semibold text-gray-500">Returns ₹</th>
+                        </>
+                      )}
+                      {['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                        <th className="p-3 text-center font-semibold text-gray-500">Qty</th>
+                      )}
+                      <th className="p-3 text-right font-semibold text-gray-700">Net Amt ₹</th>
                     </>
                   )}
-                  {['item', 'brand', 'category', 'size'].includes(groupBy) && (
-                    <th className="p-3 text-center font-semibold text-gray-500 dark:text-gray-400">Qty</th>
-                  )}
-                  <th className="p-3 text-right font-semibold text-gray-700 dark:text-gray-300">Net Amt ₹</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -440,25 +512,92 @@ export default function Reports() {
                 ) : tableData.length === 0 ? (
                   <tr><td colSpan={9} className="text-center py-10 text-gray-400">No data found for selected filters</td></tr>
                 ) : tableData.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-                    <td className="p-3 font-medium text-gray-800 dark:text-gray-200">{row.group}</td>
-                    <td className="p-3 text-center text-gray-600 dark:text-gray-400">{row.bills}</td>
-                    {!['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                  <Fragment key={i}>
+                    {groupBy === 'bill' ? (
                       <>
-                        <td className="p-3 text-center text-gray-600 dark:text-gray-400">{row.customers}</td>
-                        <td className="p-3 text-right text-green-600 dark:text-green-400">₹{row.upi.toLocaleString()}</td>
-                        <td className="p-3 text-right text-amber-600 dark:text-amber-400">₹{row.cash.toLocaleString()}</td>
-                        <td className="p-3 text-right text-blue-500 dark:text-blue-400">₹{row.card.toLocaleString()}</td>
-                        <td className="p-3 text-right text-red-500 dark:text-red-400">₹{row.returns.toLocaleString()}</td>
+                        <tr 
+                          onClick={() => setExpandedBill(expandedBill === row.group ? null : row.group)}
+                          className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors cursor-pointer"
+                        >
+                          <td className="p-3 font-medium text-blue-600 dark:text-blue-400">{row.group}</td>
+                          <td className="p-3 text-gray-600 dark:text-gray-400">
+                            {row.date ? format(new Date(row.date), 'dd MMM yyyy, hh:mm a') : '-'}
+                          </td>
+                          <td className="p-3 text-gray-600 dark:text-gray-400">{row.customerId || 'Walk-in'}</td>
+                          <td className="p-3 text-center">
+                            <span className={clsx("text-[10px] font-semibold px-2 py-0.5 rounded-full", 
+                              row.paymentMode === 'UPI' ? "bg-green-50 text-green-700" : 
+                              row.paymentMode === 'CARD' ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"
+                            )}>
+                              {row.paymentMode}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center text-gray-500">
+                            {row.billItems?.length || 0} 
+                            <span className="ml-1 text-gray-400">
+                              {expandedBill === row.group ? '▲' : '▼'}
+                            </span>
+                          </td>
+                          <td className={clsx("p-3 text-right font-bold", row.amount >= 0 ? "text-emerald-600" : "text-red-500")}>
+                            ₹{Math.abs(row.amount).toLocaleString()}
+                          </td>
+                        </tr>
+                        
+                        {/* Expandable Items List */}
+                        {expandedBill === row.group && row.billItems && (
+                          <tr className="bg-gray-50 dark:bg-gray-800/30">
+                            <td colSpan="6" className="p-0">
+                              <div className="px-6 py-3 border-l-4 border-blue-400 ml-4">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                      <th className="text-left py-1 font-medium w-8">#</th>
+                                      <th className="text-left py-1 font-medium">Product</th>
+                                      <th className="text-center py-1 font-medium">Qty</th>
+                                      <th className="text-right py-1 font-medium">Price</th>
+                                      <th className="text-right py-1 font-medium">Total</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {row.billItems.map((item, idx) => (
+                                      <tr key={idx} className="border-b border-gray-100 dark:border-gray-800">
+                                        <td className="py-1.5 text-gray-400">{idx + 1}</td>
+                                        <td className="py-1.5 text-gray-800 dark:text-gray-200">{item.name}</td>
+                                        <td className="text-center py-1.5">{item.qty}</td>
+                                        <td className="text-right py-1.5">₹{(item.amount / (item.qty || 1)).toFixed(2)}</td>
+                                        <td className="text-right py-1.5 font-medium">₹{item.amount.toFixed(2)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                       </>
+                    ) : (
+                      /* Original Row Rendering for non-bill groupings */
+                      <tr className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+                        <td className="p-3 font-medium text-gray-800 dark:text-gray-200">{row.group}</td>
+                        <td className="p-3 text-center text-gray-600 dark:text-gray-400">{row.bills}</td>
+                        {!['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                          <>
+                            <td className="p-3 text-center text-gray-600 dark:text-gray-400">{row.customers}</td>
+                            <td className="p-3 text-right text-green-600 dark:text-green-400">₹{row.upi.toLocaleString()}</td>
+                            <td className="p-3 text-right text-amber-600 dark:text-amber-400">₹{row.cash.toLocaleString()}</td>
+                            <td className="p-3 text-right text-blue-500 dark:text-blue-400">₹{row.card.toLocaleString()}</td>
+                            <td className="p-3 text-right text-red-500 dark:text-red-400">₹{row.returns.toLocaleString()}</td>
+                          </>
+                        )}
+                        {['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                          <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">{row.qty}</td>
+                        )}
+                        <td className={clsx("p-3 text-right font-bold", row.amount >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400")}>
+                          ₹{Math.abs(row.amount).toLocaleString()} {row.amount < 0 ? '(Dr)' : ''}
+                        </td>
+                      </tr>
                     )}
-                    {['item', 'brand', 'category', 'size'].includes(groupBy) && (
-                      <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">{row.qty}</td>
-                    )}
-                    <td className={clsx("p-3 text-right font-bold", row.amount >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400")}>
-                      ₹{Math.abs(row.amount).toLocaleString()} {row.amount < 0 ? '(Dr)' : ''}
-                    </td>
-                  </tr>
+                  </Fragment>
                 ))}
               </tbody>
               {tableData.length > 0 && (

@@ -8,6 +8,8 @@ import {
 import clsx from 'clsx'
 import { format } from 'date-fns'
 import * as XLSX from 'xlsx'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API functions
 import { getStockTransfers } from '../apiservices/stockTransferapi'
@@ -21,6 +23,21 @@ function getSortIcon(sortDir) {
 }
 
 const ITEMS_PER_PAGE = 25
+const isTauri = () => '__TAURI_INTERNALS__' in window
+
+const downloadAsBlob = (data, fileName) => {
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 export default function StockTransferReport() {
   // ─── COMPANY ID FROM LOCAL STORAGE ───
@@ -279,12 +296,14 @@ export default function StockTransferReport() {
   }, [filteredTransfers, expandedItems])
 
   // ─── Export to Excel ───
+   // ─── Export to Excel ───
   const handleExportExcel = async () => {
     if (filteredTransfers.length === 0) {
       alert('No data to export')
       return
     }
 
+    // ─── Fetch missing items first ───
     const missing = filteredTransfers.filter(t => !expandedItems[t.id])
     if (missing.length > 0) {
       const promises = missing.map(async t => {
@@ -303,6 +322,7 @@ export default function StockTransferReport() {
 
     const wb = XLSX.utils.book_new()
 
+    // ─── Sheet 1: Transfer Summary ───
     const summaryData = filteredTransfers.map(t => ({
       'Transfer No.': t.transfer_number || '',
       'Date': t.transfer_date ? format(new Date(t.transfer_date), 'dd MMM yyyy hh:mm a') : '',
@@ -315,6 +335,7 @@ export default function StockTransferReport() {
     ws1['!cols'] = [{ wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }]
     XLSX.utils.book_append_sheet(wb, ws1, 'Transfer Summary')
 
+    // ─── Sheet 2: Item Details ───
     const itemData = []
     filteredTransfers.forEach(t => {
       const items = expandedItems[t.id] || []
@@ -340,6 +361,7 @@ export default function StockTransferReport() {
     ws2['!cols'] = [{ wch: 20 }, { wch: 14 }, { wch: 25 }, { wch: 10 }]
     XLSX.utils.book_append_sheet(wb, ws2, 'Item Details')
 
+    // ─── Sheet 3: By Product ───
     const productData = byProduct.map(p => ({
       'Product': p.name,
       'Times Transferred': p.count,
@@ -348,7 +370,26 @@ export default function StockTransferReport() {
     const ws3 = XLSX.utils.json_to_sheet(productData)
     XLSX.utils.book_append_sheet(wb, ws3, 'By Product')
 
-    XLSX.writeFile(wb, `Stock_Transfer_Report_${companyName}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    // ─── Save File (Tauri + Browser) ───
+    const fileName = `Stock_Transfer_Report_${companyName}_${new Date().toISOString().slice(0, 10)}.xlsx`
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+    if (isTauri()) {
+      try {
+        const filePath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+        })
+        if (filePath) {
+          await writeFile(filePath, new Uint8Array(wbout))
+        }
+      } catch (err) {
+        console.error('Tauri export error:', err)
+        downloadAsBlob(wbout, fileName)
+      }
+    } else {
+      downloadAsBlob(wbout, fileName)
+    }
   }
 
   // ─── GUARD: NO COMPANY SELECTED ───

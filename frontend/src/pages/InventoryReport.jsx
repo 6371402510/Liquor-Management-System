@@ -7,6 +7,8 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API function
 import { getProducts } from '../apiservices/inventoryapi'
@@ -36,6 +38,21 @@ function getSortIcon(sortDir) {
 }
 
 const ITEMS_PER_PAGE = 25
+const isTauri = () => '__TAURI_INTERNALS__' in window
+
+const downloadAsBlob = (data, fileName) => {
+  const blob = new Blob([data], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 export default function InventoryReport() {
   // ─── COMPANY ID FROM LOCAL STORAGE ───
@@ -180,15 +197,16 @@ export default function InventoryReport() {
   }
 
   // ─── Summary Statistics ───
-  const summaryStats = useMemo(() => {
+      const summaryStats = useMemo(() => {
     const totalProducts = filteredProducts.length
     const totalStock = filteredProducts.reduce((s, p) => s + (Number(p.current_stock) || 0), 0)
     const godownStock = filteredProducts.reduce((s, p) => s + (Number(p.godown_stock) || 0), 0)
     const counterStock = filteredProducts.reduce((s, p) => s + (Number(p.counter_stock) || 0), 0)
     const damageStock = filteredProducts.reduce((s, p) => s + (Number(p.damage_stock) || 0), 0)
     
+    // ─── Cost Value = Bottles × Purchase Rate Per Unit ───
     const totalValue = filteredProducts.reduce((s, p) => {
-      const rate = Number(p.landing_cost) || Number(p.purchase_rate) || 0
+      const rate = Number(p.purchase_rate) || 0
       return s + ((Number(p.current_stock) || 0) * rate)
     }, 0)
 
@@ -207,9 +225,8 @@ export default function InventoryReport() {
       totalValue, totalRetailValue, stockStatusCounts
     }
   }, [filteredProducts])
-
   // ─── Aggregation: By Category ───
-  const byCategory = useMemo(() => {
+    const byCategory = useMemo(() => {
     const map = {}
     filteredProducts.forEach(p => {
       const key = p.category || 'Uncategorized'
@@ -218,30 +235,30 @@ export default function InventoryReport() {
       map[key].stock += Number(p.current_stock) || 0
       map[key].godown += Number(p.godown_stock) || 0
       map[key].counter += Number(p.counter_stock) || 0
-      const rate = Number(p.landing_cost) || Number(p.purchase_rate) || 0
+      // ─── Cost Value = Bottles × Purchase Rate Per Unit ───
+      const rate = Number(p.purchase_rate) || 0
       map[key].value += (Number(p.current_stock) || 0) * rate
       map[key].retailValue += (Number(p.current_stock) || 0) * (Number(p.sale_price) || 0)
     })
     return Object.values(map).sort((a, b) => b.value - a.value)
   }, [filteredProducts])
-
   // ─── Aggregation: By Brand ───
-  const byBrand = useMemo(() => {
+     const byBrand = useMemo(() => {
     const map = {}
     filteredProducts.forEach(p => {
       const key = p.brand || 'Unknown Brand'
       if (!map[key]) map[key] = { name: key, category: p.category || '', count: 0, stock: 0, value: 0, retailValue: 0 }
       map[key].count++
       map[key].stock += Number(p.current_stock) || 0
-      const rate = Number(p.landing_cost) || Number(p.purchase_rate) || 0
+      // ─── Cost Value = Bottles × Purchase Rate Per Unit ───
+      const rate = Number(p.purchase_rate) || 0
       map[key].value += (Number(p.current_stock) || 0) * rate
       map[key].retailValue += (Number(p.current_stock) || 0) * (Number(p.sale_price) || 0)
     })
     return Object.values(map).sort((a, b) => b.value - a.value)
   }, [filteredProducts])
-
   // ─── Aggregation: By Stock Status ───
-  const byStockStatus = useMemo(() => {
+    const byStockStatus = useMemo(() => {
     const map = {}
     const statusConfig = {
       'Out of Stock': { color: 'red', icon: AlertCircle },
@@ -256,7 +273,8 @@ export default function InventoryReport() {
       if (!map[key]) map[key] = { name: key, count: 0, stock: 0, value: 0, retailValue: 0, config: statusConfig[key] || {} }
       map[key].count++
       map[key].stock += Number(p.current_stock) || 0
-      const rate = Number(p.landing_cost) || Number(p.purchase_rate) || 0
+      // ─── Cost Value = Bottles × Purchase Rate Per Unit ───
+      const rate = Number(p.purchase_rate) || 0
       map[key].value += (Number(p.current_stock) || 0) * rate
       map[key].retailValue += (Number(p.current_stock) || 0) * (Number(p.sale_price) || 0)
     })
@@ -264,22 +282,25 @@ export default function InventoryReport() {
     const order = ['Out of Stock', 'Low Stock', 'Fast Moving', 'Slow Moving', 'Dead Stock']
     return order.filter(k => map[k]).map(k => map[k])
   }, [filteredProducts])
-
   // ─── Export to Excel ───
-  const handleExportExcel = () => {
+     // ─── Export to Excel ───
+  const handleExportExcel = async () => {
     if (filteredProducts.length === 0) { alert('No data to export'); return }
 
     const wb = XLSX.utils.book_new()
 
-    const detailData = filteredProducts.map(p => ({
-      'Item Code': p.item_code || '', 'Barcode': p.barcode || '', 'Product Name': p.name || '', 'Brand': p.brand || '',
-      'Category': p.category || '', 'Sub Category': p.sub_category || '', 'Type': p.product_type || '', 'Size': p.bottle_size || '',
-      'Traditional Name': p.traditional_name || '', 'Btls/Case': p.bottles_per_case || 0,
-      'MRP': Number(p.mrp) || 0, 'Sale Price': Number(p.sale_price) || 0, 'Landing Cost': Number(p.landing_cost) || Number(p.purchase_rate) || 0,
-      'Godown Stock': Number(p.godown_stock) || 0, 'Counter Stock': Number(p.counter_stock) || 0, 'Total Stock': Number(p.current_stock) || 0,
-      'Stock Value': (Number(p.current_stock) || 0) * (Number(p.landing_cost) || Number(p.purchase_rate) || 0),
-      'Status': classifyProduct(p),
-    }))
+    const detailData = filteredProducts.map(p => {
+      const rate = Number(p.purchase_rate) || 0
+      return {
+        'Item Code': p.item_code || '', 'Barcode': p.barcode || '', 'Product Name': p.name || '', 'Brand': p.brand || '',
+        'Category': p.category || '', 'Sub Category': p.sub_category || '', 'Type': p.product_type || '', 'Size': p.bottle_size || '',
+        'Traditional Name': p.traditional_name || '', 'Btls/Case': p.bottles_per_case || 0,
+        'MRP': Number(p.mrp) || 0, 'Sale Price': Number(p.sale_price) || 0, 'Purchase Rate/Unit': rate,
+        'Godown Stock': Number(p.godown_stock) || 0, 'Counter Stock': Number(p.counter_stock) || 0, 'Total Stock': Number(p.current_stock) || 0,
+        'Cost Value (Stock × Rate)': (Number(p.current_stock) || 0) * rate,
+        'Status': classifyProduct(p),
+      }
+    })
     const ws1 = XLSX.utils.json_to_sheet(detailData)
     XLSX.utils.book_append_sheet(wb, ws1, 'Inventory Detail')
 
@@ -291,7 +312,26 @@ export default function InventoryReport() {
     const ws3 = XLSX.utils.json_to_sheet(brandData)
     XLSX.utils.book_append_sheet(wb, ws3, 'By Brand')
 
-    XLSX.writeFile(wb, `Inventory_Report_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    // ─── Save File (Tauri + Browser) ───
+    const fileName = `Inventory_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+
+    if (isTauri()) {
+      try {
+        const filePath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+        })
+        if (filePath) {
+          await writeFile(filePath, new Uint8Array(wbout))
+        }
+      } catch (err) {
+        console.error('Tauri export error:', err)
+        downloadAsBlob(wbout, fileName)
+      }
+    } else {
+      downloadAsBlob(wbout, fileName)
+    }
   }
 
   // ─── GUARD: NO COMPANY SELECTED ───
@@ -415,7 +455,7 @@ export default function InventoryReport() {
               <div className="card overflow-hidden border dark:border-slate-700 shadow-sm"><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50">{[{ label: 'Product', field: 'name' },{ label: 'Code', field: 'item_code' },{ label: 'Category', field: 'category' },{ label: 'Brand', field: 'brand' },{ label: 'Size', field: 'bottle_size' },{ label: 'Sale ₹', field: 'sale_price' },{ label: 'Cost ₹', field: 'landing_cost' },{ label: 'Godown', field: 'godown_stock' },{ label: 'Counter', field: 'counter_stock' },{ label: 'Total', field: 'current_stock' },{ label: 'Value ₹', field: 'stock_value' },{ label: 'Status', field: 'status' }].map(({ label, field }) => (<th key={field} onClick={() => handleSort(field)} className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors whitespace-nowrap"><div className="flex items-center gap-1">{label} {getSortIcon(sortField === field ? sortDir : '')}</div></th>))}</tr></thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
                   {paginatedProducts.map(p => {
-                    const stock = Number(p.current_stock) || 0; const rate = Number(p.landing_cost) || Number(p.purchase_rate) || 0; const stockValue = stock * rate; const stockStatus = classifyProduct(p)
+                   const stock = Number(p.current_stock) || 0; const rate = Number(p.purchase_rate) || 0; const stockValue = stock * rate; const stockStatus = classifyProduct(p)
                     const statusColors = { 'Out of Stock': 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400', 'Low Stock': 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400', 'Fast Moving': 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400', 'Slow Moving': 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400', 'Dead Stock': 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400' }
                     return (
                       <tr key={p.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">

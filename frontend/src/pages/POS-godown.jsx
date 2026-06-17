@@ -3,14 +3,23 @@ import {
   Search, Barcode, Plus, Minus, Trash2, ShoppingCart,
   Printer, CheckCircle, X, Loader2, CreditCard, Banknote,
   Smartphone, Send, Package, Tag, Hash, Calendar, Layers, Download,
-  AlertCircle, ChevronDown,Store
+  AlertCircle, ChevronDown, Store
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import { getGodownProducts, processGodownCheckout } from '../apiservices/godown-counter';
+import { openUrl } from '@tauri-apps/plugin-opener'
 
-function generateInvoiceNumber() {
-  return `GD-INV-${Date.now()}`;
+function generateInvoiceNumber(companyId) {
+  if (!companyId) return `GD-TEMP-${Date.now()}`;
+
+  const storageKey = `godown_invoice_counter_${companyId}`;
+  let lastNumber = parseInt(localStorage.getItem(storageKey) || '0', 10);
+  lastNumber += 1;
+
+  localStorage.setItem(storageKey, String(lastNumber));
+
+  return `GD-${String(lastNumber).padStart(4, '0')}`;
 }
 
 let scanCounter = 0;
@@ -22,6 +31,13 @@ function generateScanId(productId) {
 export default function POSGodown() {
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
   const companyName = localStorage.getItem('selectedCompanyName') || 'Unknown Company'
+
+  const [companyDetails, setCompanyDetails] = useState(() => {
+    try {
+      const saved = localStorage.getItem('selectedCompany');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
 
@@ -51,8 +67,7 @@ export default function POSGodown() {
   const [barcodeValue, setBarcodeValue] = useState('');
   const [showInvoice, setShowInvoice] = useState(false);
   const [completedSale, setCompletedSale] = useState(null);
-  
-  // ─── NEW: Refs for Focus Management ───
+
   const barcodeRef = useRef(null);
   const qtyInputRefs = useRef({});
   const discInputRefs = useRef({});
@@ -67,22 +82,23 @@ export default function POSGodown() {
   const [printCustomerName, setPrintCustomerName] = useState('');
   const [printCustomerPhone, setPrintCustomerPhone] = useState('');
   const [printing, setPrinting] = useState(false);
-  
+
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const isTauri = () => '__TAURI_INTERNALS__' in window
 
   // ─── PERSISTENCE ───
   useEffect(() => { localStorage.setItem('godown_cart', JSON.stringify(cart)); }, [cart]);
-  useEffect(() => { 
+  useEffect(() => {
     const lastMode = paymentSplits.length > 0 ? paymentSplits[0].mode : 'CASH';
-    localStorage.setItem('godown_lastPaymentMode', JSON.stringify(lastMode)); 
+    localStorage.setItem('godown_lastPaymentMode', JSON.stringify(lastMode));
   }, [paymentSplits]);
   useEffect(() => { localStorage.setItem('godown_customerName', JSON.stringify(customerName)); }, [customerName]);
   useEffect(() => { localStorage.setItem('godown_customerPhone', JSON.stringify(customerPhone)); }, [customerPhone]);
   useEffect(() => { localStorage.setItem('godown_discount', JSON.stringify(discount)); }, [discount]);
 
-   useEffect(() => { if (companyId) fetchProducts(); }, [companyId]);
+  useEffect(() => { if (companyId) fetchProducts(); }, [companyId]);
 
-  // ─── NEW: Auto-Focus Logic ───
+  // ─── Auto-Focus Logic ───
   useEffect(() => {
     if (focusRequest) {
       const { scanId, field } = focusRequest;
@@ -94,15 +110,14 @@ export default function POSGodown() {
           discInputRefs.current[scanId].focus();
           discInputRefs.current[scanId].select();
         }
-      }, 50); // Small delay ensures React has rendered the new row
+      }, 50);
       return () => clearTimeout(timer);
     }
   }, [focusRequest]);
 
-   const fetchProducts = async (searchTerm = '') => {
+  const fetchProducts = async (searchTerm = '') => {
     setLoadingProducts(true);
     try {
-      // ─── PASS COMPANY ID ───
       const data = await getGodownProducts(companyId, searchTerm);
       setProducts(data || []);
       setFilteredProducts(data || []);
@@ -132,93 +147,70 @@ export default function POSGodown() {
     setSelectedItems(prev => prev.filter(scanId => cart.some(item => item.scanId === scanId)));
   }, [cart]);
 
-const addToCart = useCallback((product) => {
-
-  // Stop if stock is 0
-  if ((product.godown_stock || 0) <= 0) {
-    alert(`${product.name} is Out Of Stock`);
-    return;
-  }
-
-  let focusScanId = null;
-
-  setCart(prev => {
-
-    const existingItem = prev.find(
-      item => item.productId === product.id
-    );
-
-    const totalQty = prev
-      .filter(item => item.productId === product.id)
-      .reduce(
-        (sum, item) => sum + (Number(item.quantity) || 0),
-        0
-      );
-
-    // Prevent stock overflow
-    if (totalQty >= product.godown_stock) {
-      alert(
-        `Only ${product.godown_stock} items available in stock`
-      );
-      return prev;
+  const addToCart = useCallback((product) => {
+    if ((product.godown_stock || 0) <= 0) {
+      alert(`${product.name} is Out Of Stock`);
+      return;
     }
 
-    // Product already exists in bill
-    if (existingItem) {
+    let focusScanId = null;
 
-      focusScanId = existingItem.scanId;
-
-      return prev.map(item =>
-        item.scanId === existingItem.scanId
-          ? {
-              ...item,
-              quantity: (Number(item.quantity) || 0) + 1
-            }
-          : item
+    setCart(prev => {
+      const existingItem = prev.find(
+        item => item.productId === product.id
       );
-    }
 
-    // New product
-    const newScanId = generateScanId(product.id);
+      const totalQty = prev
+        .filter(item => item.productId === product.id)
+        .reduce(
+          (sum, item) => sum + (Number(item.quantity) || 0),
+          0
+        );
 
-    focusScanId = newScanId;
-
-    return [
-      ...prev,
-      {
-        ...product,
-        scanId: newScanId,
-        productId: product.id,
-        quantity: 1,
-        discount: 0
+      if (totalQty >= product.godown_stock) {
+        alert(`Only ${product.godown_stock} items available in stock`);
+        return prev;
       }
-    ];
-  });
 
-  // Auto focus quantity field
-  setTimeout(() => {
-    if (focusScanId && qtyInputRefs.current[focusScanId]) {
-      qtyInputRefs.current[focusScanId].focus();
-      qtyInputRefs.current[focusScanId].select();
-    }
-  }, 100);
+      if (existingItem) {
+        focusScanId = existingItem.scanId;
+        return prev.map(item =>
+          item.scanId === existingItem.scanId
+            ? {
+                ...item,
+                quantity: (Number(item.quantity) || 0) + 1
+              }
+            : item
+        );
+      }
 
-  // Recently scanned list
-  setRecentlyScanned(prev => {
-    const filtered = prev.filter(
-      p => p.id !== product.id
-    );
+      const newScanId = generateScanId(product.id);
+      focusScanId = newScanId;
 
-    return [
-      {
-        ...product,
-        scanTime: Date.now()
-      },
-      ...filtered
-    ].slice(0, 15);
-  });
+      return [
+        ...prev,
+        {
+          ...product,
+          scanId: newScanId,
+          productId: product.id,
+          quantity: 1,
+          discount: 0
+        }
+      ];
+    });
 
-}, []);
+    setTimeout(() => {
+      if (focusScanId && qtyInputRefs.current[focusScanId]) {
+        qtyInputRefs.current[focusScanId].focus();
+        qtyInputRefs.current[focusScanId].select();
+      }
+    }, 100);
+
+    setRecentlyScanned(prev => {
+      const filtered = prev.filter(p => p.id !== product.id);
+      return [{ ...product, scanTime: Date.now() }, ...filtered].slice(0, 15);
+    });
+  }, []);
 
   const updateQuantity = (scanId, delta) => {
     setCart(prev => {
@@ -293,13 +285,10 @@ const addToCart = useCallback((product) => {
     setCart(prev => prev.map(i => i.scanId === scanId ? { ...i, discount: Math.max(0, Number(value)) } : i));
   };
 
-  // ─── NEW: Keyboard Navigation Handlers ───
   const handleQtyKeyDown = (e, scanId) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      // Validate the field first
       handleQuantityBlur(scanId);
-      // Move focus to discount
       if (discInputRefs.current[scanId]) {
         discInputRefs.current[scanId].focus();
         discInputRefs.current[scanId].select();
@@ -310,7 +299,6 @@ const addToCart = useCallback((product) => {
   const handleDiscKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      // Move focus back to barcode scanner
       if (barcodeRef.current) {
         barcodeRef.current.focus();
       }
@@ -390,7 +378,7 @@ const addToCart = useCallback((product) => {
   };
 
   const removeSplitRow = (index) => {
-    if (paymentSplits.length === 1) return; 
+    if (paymentSplits.length === 1) return;
     setPaymentSplits(paymentSplits.filter((_, i) => i !== index));
   };
 
@@ -398,7 +386,134 @@ const addToCart = useCallback((product) => {
   const remaining = Math.max(0, grandTotal - totalPaid);
   const isPaymentValid = Math.abs(remaining) < 0.1;
 
- const handleCheckout = async () => {
+  // ─── FIXED: Uses iframe instead of window.open() ───
+  const printThermalReceipt = (payload, aggregatedItems) => {
+    const printGroups = {};
+    let totalAmount = 0;
+
+    Object.values(aggregatedItems).forEach(item => {
+      if (!printGroups[item.product_id]) {
+        printGroups[item.product_id] = { name: item.product_name, bottle_size: item.bottle_size, sale_price: item.unit_price, qty: 0, totalDiscount: 0, lineTotal: 0 };
+      }
+      printGroups[item.product_id].qty += item.quantity;
+      printGroups[item.product_id].totalDiscount += item.discount;
+      printGroups[item.product_id].lineTotal += item.total_price;
+      totalAmount += item.total_price;
+    });
+
+    let itemsHtml = '';
+
+    Object.values(printGroups).forEach(g => {
+      const discountHtml = g.totalDiscount > 0
+        ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
+        : '';
+
+      itemsHtml += `
+        <div style="margin-bottom:6px;">
+          <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.name} ${g.bottle_size ? `(${g.bottle_size})` : ''}</div>
+          <div style="display:flex; justify-content:space-between; font-size:11px;">
+            <span>₹${g.sale_price.toFixed(2)} x ${g.qty}</span>
+            <span>₹${(g.sale_price * g.qty).toFixed(2)}</span>
+          </div>
+          ${discountHtml}
+        </div>
+      `;
+    });
+
+    let paymentHtml = '';
+    if (payload.payment_details && payload.payment_details.length > 0) {
+      payload.payment_details.forEach(split => {
+        if (split.amount > 0) {
+          paymentHtml += `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>${split.mode}:</span><span>₹${Number(split.amount).toFixed(2)}</span></div>`;
+        }
+      });
+    } else {
+      paymentHtml = `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>CASH:</span><span>₹${totalAmount.toFixed(2)}</span></div>`;
+    }
+
+    const invoiceNumber = payload.invoice_number;
+    const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
+    const cName = payload.customer_name || 'Walk-in Customer';
+    const cPhone = payload.customer_phone || 'N/A';
+
+    const cAddress = companyDetails.address || '';
+    const cEmail = companyDetails.email || '';
+    const cExcise = companyDetails.exciseLicenseNo || '';
+
+    // ─── IFRAME METHOD ───
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+
+    doc.write(`
+      <html>
+        <head>
+          <title>Godown Receipt</title>
+          <style>
+            @page { margin: 0mm; size: 80mm auto; }
+            body { margin: 0; padding: 0; width: 100%; }
+          </style>
+        </head>
+        <body>
+          <div style="font-family: 'Courier New', monospace; width: 100%; max-width: 280px; margin: 0 auto; padding: 10px 5px; font-size: 12px; line-height: 1.4;">
+            <div style="text-align:center; margin-bottom:5px;">
+              <h2 style="margin:0; font-size:16px; text-transform:uppercase; letter-spacing:1px;">${companyName}</h2>
+              ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
+              ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
+              ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">FL/Off Lic No: ${cExcise}</p>` : ''}
+              <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">GODOWN SALE BILL</p>
+            </div>
+            <div style="border-top:1px dashed #000; margin:8px 0;"></div>
+            <div style="font-size:11px; margin-bottom:5px;">
+              <div style="display:flex; justify-content:space-between;"><span>Bill No:</span><span>${invoiceNumber}</span></div>
+              <div style="display:flex; justify-content:space-between;"><span>Date:</span><span>${printDate}</span></div>
+              <div style="display:flex; justify-content:space-between;"><span>Customer:</span><span>${cName}</span></div>
+              ${cPhone ? `<div style="display:flex; justify-content:space-between;"><span>Phone:</span><span>${cPhone}</span></div>` : ''}
+            </div>
+            <div style="border-top:1px dashed #000; border-bottom:1px dashed #000; margin:8px 0; padding:4px 0; font-weight:bold; display:flex; justify-content:space-between; font-size:11px;">
+              <span>ITEM</span>
+              <span>AMOUNT</span>
+            </div>
+            ${itemsHtml}
+            <div style="border-top:1px dashed #000; margin-top:8px; padding-top:6px;">
+              <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:15px;">
+                <span>TOTAL</span>
+                <span>₹${totalAmount.toFixed(2)}</span>
+              </div>
+              ${paymentHtml ? `
+                <div style="border-top:1px dashed #000; margin-top:6px; padding-top:4px;">
+                  <div style="font-size:10px; font-weight:bold; margin-bottom:2px;">Payment Details:</div>
+                  ${paymentHtml}
+                </div>
+              ` : ''}
+            </div>
+            <div style="border-top:1px dashed #000; margin-top:15px; padding-top:5px; text-align:center; font-size:10px;">
+              <p style="margin:0 0 5px 0; font-weight:bold;">Thank you for your purchase!</p>
+              <p style="margin:0; font-size:9px; color:#666;">Visit Again</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+    }, 500);
+  };
+
+  const handleCheckout = async () => {
     if (!isPaymentValid) {
       alert(`Payment incomplete. Remaining: ₹${remaining.toFixed(2)}`);
       return;
@@ -415,6 +530,7 @@ const addToCart = useCallback((product) => {
         aggregated[key] = {
           product_id: item.productId,
           product_name: item.name,
+          bottle_size: item.bottle_size,
           quantity: 0,
           unit_price: item.sale_price,
           discount: 0,
@@ -425,13 +541,12 @@ const addToCart = useCallback((product) => {
       aggregated[key].discount += (item.discount || 0) * qty;
       aggregated[key].total_price += (item.sale_price - (item.discount || 0)) * qty;
     });
-
     const isSplit = paymentSplits.length > 1;
     const paymentMode = isSplit ? 'SPLIT' : paymentSplits[0].mode;
 
     const payload = {
-      invoice_number: generateInvoiceNumber(),
-      company_id: Number(companyId), // ─── INJECT COMPANY ID ───
+      invoice_number: generateInvoiceNumber(companyId),
+      company_id: Number(companyId),
       customer_name: customerName,
       customer_phone: customerPhone,
       total_amount: grandTotal,
@@ -439,12 +554,16 @@ const addToCart = useCallback((product) => {
       payment_details: paymentSplits,
       items: Object.values(aggregated).map(item => ({
         ...item,
-        company_id: Number(companyId) // ─── INJECT COMPANY ID ───
+        company_id: Number(companyId)
       })),
     };
 
     try {
       const result = await processGodownCheckout(payload);
+
+      // ─── AUTO PRINT THERMAL RECEIPT ───
+      printThermalReceipt(payload, aggregated);
+
       setCompletedSale({ ...payload, created_at: result.created_at || new Date().toISOString() });
       setShowInvoice(true);
       setRecentlyScanned([]);
@@ -509,18 +628,19 @@ const addToCart = useCallback((product) => {
       totalAmount += (item.sale_price - (item.discount || 0)) * qty;
     });
 
-    const printPaymentMode = paymentSplits.length > 0 ? paymentSplits[0].mode : 'CASH';
+    const printPaymentMode = paymentSplits.length > 1 ? 'SPLIT' : (paymentSplits.length === 1 ? paymentSplits[0].mode : 'CASH');
 
     const payload = {
-      invoice_number: generateInvoiceNumber(),
+      invoice_number: generateInvoiceNumber(companyId),
       company_id: Number(companyId),
       customer_name: cName,
       customer_phone: cPhone === 'N/A' ? '' : cPhone,
       total_amount: totalAmount,
       payment_mode: printPaymentMode,
+      payment_details: paymentSplits,
       items: Object.values(aggregated).map(item => ({
         ...item,
-        company_id: Number(companyId) // ─── INJECT COMPANY ID ───
+        company_id: Number(companyId)
       })),
     };
 
@@ -541,37 +661,138 @@ const addToCart = useCallback((product) => {
       let itemsHtml = '';
 
       Object.values(printGroups).forEach(g => {
-        const discountHtml = g.totalDiscount > 0 
-          ? `<p style="margin: 2px 0; display: flex; justify-content: space-between; color: #d9534f;"><span>Discount:</span> <span>-₹${g.totalDiscount.toFixed(2)}</span></p>` 
+        const discountHtml = g.totalDiscount > 0
+          ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
           : '';
 
         itemsHtml += `
-          <div style="margin-bottom: 10px; border-bottom: 1px dashed #eee; padding-bottom: 5px;">
-            <p style="margin: 2px 0; font-weight: bold;">${g.name} ${g.bottle_size ? `(${g.bottle_size})` : ''}</p>
-            <p style="margin: 2px 0; display: flex; justify-content: space-between;"><span>MRP: ₹${g.sale_price} x ${g.qty}</span> <span>₹${(g.sale_price * g.qty).toFixed(2)}</span></p>
+          <div style="margin-bottom:6px;">
+            <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.name} ${g.bottle_size ? `(${g.bottle_size})` : ''}</div>
+            <div style="display:flex; justify-content:space-between; font-size:11px;">
+              <span>₹${g.sale_price.toFixed(2)} x ${g.qty}</span>
+              <span>₹${(g.sale_price * g.qty).toFixed(2)}</span>
+            </div>
             ${discountHtml}
-            <p style="margin: 2px 0; display: flex; justify-content: space-between; font-weight: bold;"><span>Subtotal:</span> <span>₹${g.lineTotal.toFixed(2)}</span></p>
           </div>
         `;
       });
 
-      const win = window.open('', '_blank');
-      win.document.write(`
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 300px; margin: auto; border: 1px dashed #ccc; padding: 15px;">
-          <h3 style="text-align: center; margin-bottom: 5px; text-transform: uppercase;">Godown Invoice</h3>
-          <hr style="border-top: 1px dashed #ccc;">
-          <p style="margin: 5px 0;"><strong>Customer:</strong> ${cName}</p>
-          <p style="margin: 5px 0;"><strong>Mobile:</strong> ${cPhone}</p>
-          <p style="margin: 5px 0;"><strong>Date:</strong> ${format(new Date(), 'dd/MM/yyyy hh:mm a')}</p>
-          <hr style="border-top: 1px dashed #ccc; margin-top: 10px;">
-          ${itemsHtml}
-          <p style="font-size: 1.2em; font-weight: bold; display: flex; justify-content: space-between; margin-top: 15px;">
-            <span>Total:</span> <span>₹${totalAmount.toFixed(2)}</span>
-          </p>
-        </div>
+      let paymentHtml = '';
+      if (paymentSplits.length > 0) {
+        paymentSplits.forEach(split => {
+          if (split.amount > 0) {
+            paymentHtml += `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>${split.mode}:</span><span>₹${Number(split.amount).toFixed(2)}</span></div>`;
+          }
+        });
+      } else {
+        paymentHtml = `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>CASH:</span><span>₹${totalAmount.toFixed(2)}</span></div>`;
+      }
+
+      const invoiceNumber = payload.invoice_number;
+      const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
+
+      const cAddress = companyDetails.address || '';
+      const cEmail = companyDetails.email || '';
+      const cExcise = companyDetails.exciseLicenseNo || '';
+      const cTrade = companyDetails.tradeLicenseNo || '';
+
+      // ─── IFRAME METHOD ───
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "1px";
+      iframe.style.height = "1px";
+      iframe.style.border = "0";
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow.document;
+      doc.open();
+
+      doc.write(`
+        <html>
+          <head>
+            <title>Godown Receipt</title>
+            <style>
+              @page {
+                margin: 0mm;
+                size: 80mm auto;
+              }
+              body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+              }
+            </style>
+          </head>
+          <body>
+            <div style="font-family: 'Courier New', monospace; width: 100%; max-width: 280px; margin: 0 auto; padding: 10px 5px; font-size: 12px; line-height: 1.4;">
+
+              <!-- Header -->
+              <div style="text-align:center; margin-bottom:5px;">
+                <h2 style="margin:0; font-size:16px; text-transform:uppercase; letter-spacing:1px;">${companyName}</h2>
+                ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
+                ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
+                ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">Shop Lic No: ${cExcise}</p>` : ''}
+                <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">GODOWN SALE BILL</p>
+              </div>
+
+              <div style="border-top:1px dashed #000; margin:8px 0;"></div>
+
+              <!-- Info -->
+              <div style="font-size:11px; margin-bottom:5px;">
+                <div style="display:flex; justify-content:space-between;"><span>Bill No:</span><span>${invoiceNumber}</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Date:</span><span>${printDate}</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Customer:</span><span>${cName}</span></div>
+                ${cPhone !== 'N/A' ? `<div style="display:flex; justify-content:space-between;"><span>Phone:</span><span>${cPhone}</span></div>` : ''}
+              </div>
+
+              <div style="border-top:1px dashed #000; border-bottom:1px dashed #000; margin:8px 0; padding:4px 0; font-weight:bold; display:flex; justify-content:space-between; font-size:11px;">
+                <span>ITEM</span>
+                <span>AMOUNT</span>
+              </div>
+
+              <!-- Items -->
+              ${itemsHtml}
+
+              <!-- Totals -->
+              <div style="border-top:1px dashed #000; margin-top:8px; padding-top:6px;">
+                <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:15px;">
+                  <span>TOTAL</span>
+                  <span>₹${totalAmount.toFixed(2)}</span>
+                </div>
+
+                <!-- Payment Mode Breakdown -->
+                ${paymentHtml ? `
+                  <div style="border-top:1px dashed #000; margin-top:6px; padding-top:4px;">
+                    <div style="font-size:10px; font-weight:bold; margin-bottom:2px;">Payment Details:</div>
+                    ${paymentHtml}
+                  </div>
+                ` : ''}
+              </div>
+
+              <!-- Footer -->
+               <div style="border-top:1px dashed #000; margin-top:15px; padding-top:5px; text-align:center; font-size:9px; line-height: 1.4;">
+                <p style="margin:0 0 4px 0; font-weight:bold;">Goods once sold will not be taken back.</p>
+                <p style="margin:0 0 4px 0;">Please check items before leaving.</p>
+                <p style="margin:0 0 4px 0; font-weight:bold;">Liquor consumption is injurious to health.</p>
+                <p style="margin:0 0 4px 0;">Do not drink and drive.</p>
+                <p style="margin:0 0 4px 0;">Subject to local jurisdiction.</p>
+                <p style="margin:8px 0 0 0; font-weight:bold;">Thank You. Visit Again.</p>
+              </div>
+
+            </div>
+          </body>
+        </html>
       `);
-      win.document.close();
-      setTimeout(() => { win.print(); }, 400);
+
+      doc.close();
+
+      setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        document.body.removeChild(iframe);
+      }, 500);
 
       setCart(prev => prev.filter(i => !selectedItems.includes(i.scanId)));
       setSelectedItems([]);
@@ -585,7 +806,7 @@ const addToCart = useCallback((product) => {
     }
   };
 
-  const handleBulkWhatsApp = () => {
+    const handleBulkWhatsApp = async () => {
     if (selectedItems.length === 0) return alert('Please select items to send.');
     const itemsToSend = cart.filter(i => selectedItems.includes(i.scanId));
 
@@ -613,15 +834,34 @@ const addToCart = useCallback((product) => {
     });
 
     msg += `*Grand Total: ₹${totalAmount.toFixed(2)}*`;
-    window.open(`https://wa.me/${customerPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+
+    // Auto-add India country code if 10-digit number
+    let waPhone = (customerPhone || '').replace(/\D/g, '');
+    if (waPhone.length === 10) waPhone = '91' + waPhone;
+
+    const url = waPhone 
+      ? `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+
+    if (isTauri()) {
+      try {
+        await openUrl(url);
+      } catch (err) {
+        console.error('Failed to open WhatsApp:', err);
+        alert('Could not open WhatsApp. Make sure it is installed.');
+      }
+    } else {
+      window.open(url, '_blank');
+    }
   };
 
+  // ─── FIXED: Uses iframe instead of window.open() ───
   const handleSavePDF = () => {
     if (cart.length === 0) return alert('Cart is empty.');
 
     const cName = customerName || 'Walk-in Customer';
     const cPhone = customerPhone || 'N/A';
-    const invoiceNumber = generateInvoiceNumber();
+    const invoiceNumber = generateInvoiceNumber(companyId);
 
     const pdfGroups = {};
     cart.forEach(item => {
@@ -637,8 +877,8 @@ const addToCart = useCallback((product) => {
 
     Object.values(pdfGroups).forEach(g => {
       const lineTotal = (g.sale_price * g.qty) - g.totalDiscount;
-      const discountHtml = g.totalDiscount > 0 
-        ? `<tr><td colspan="3" style="text-align:right; padding:4px 8px; color:#d9534f; font-size:0.9em;">Discount</td><td style="padding:4px 8px; text-align:right; color:#d9534f;">-₹${g.totalDiscount.toFixed(2)}</td></tr>` 
+      const discountHtml = g.totalDiscount > 0
+        ? `<tr><td colspan="3" style="text-align:right; padding:4px 8px; color:#d9534f; font-size:0.9em;">Discount</td><td style="padding:4px 8px; text-align:right; color:#d9534f;">-₹${g.totalDiscount.toFixed(2)}</td></tr>`
         : '';
 
       itemsHtml += `
@@ -652,8 +892,20 @@ const addToCart = useCallback((product) => {
       `;
     });
 
-    const win = window.open('', '_blank');
-    win.document.write(`
+    // ─── IFRAME METHOD ───
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+
+    doc.write(`
       <html>
         <head>
           <title>Godown Invoice ${invoiceNumber}</title>
@@ -683,7 +935,7 @@ const addToCart = useCallback((product) => {
                 <p><strong>Payment:</strong> ${paymentSplits.length > 1 ? 'Split Payment' : paymentSplits[0]?.mode || 'CASH'}</p>
               </div>
             </div>
-            
+
             <table>
               <thead>
                 <tr>
@@ -710,7 +962,7 @@ const addToCart = useCallback((product) => {
                 <td style="text-align:right;">₹${grandTotal.toFixed(2)}</td>
               </tr>
             </table>
-            
+
             <div style="margin-top: 40px; text-align: center; color: #888; font-size: 0.8em;">
               Thank you for your purchase!
             </div>
@@ -718,8 +970,14 @@ const addToCart = useCallback((product) => {
         </body>
       </html>
     `);
-    win.document.close();
-    setTimeout(() => { win.print(); }, 500);
+
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      document.body.removeChild(iframe);
+    }, 500);
   };
 
   if (showInvoice && completedSale) {
@@ -765,6 +1023,7 @@ const addToCart = useCallback((product) => {
       </div>
     );
   }
+
   if (!companyId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
@@ -774,6 +1033,7 @@ const addToCart = useCallback((product) => {
       </div>
     );
   }
+
   return (
     <div className="flex flex-1 min-h-0 bg-gray-50 dark:bg-gray-950 overflow-hidden relative">
 
@@ -784,9 +1044,9 @@ const addToCart = useCallback((product) => {
             <button onClick={() => setIsPayModalOpen(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
               <X className="w-5 h-5" />
             </button>
-            
+
             <h3 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-2">Complete Payment</h3>
-            
+
             <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg text-center border border-gray-200 dark:border-gray-700">
               <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Total Due</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">₹{grandTotal.toFixed(2)}</p>
@@ -817,13 +1077,13 @@ const addToCart = useCallback((product) => {
 
             <div className="space-y-2">
               <label className="text-xs font-semibold text-gray-600 dark:text-gray-400">Payment Breakdown</label>
-              
+
               {paymentSplits.map((split, idx) => {
                 const isLastRow = idx === paymentSplits.length - 1;
                 return (
                   <div key={idx} className="flex items-center gap-2">
-                    <select 
-                      value={split.mode} 
+                    <select
+                      value={split.mode}
                       onChange={(e) => updateSplitMode(idx, e.target.value)}
                       className="w-24 text-xs border border-gray-300 dark:border-gray-700 rounded px-2 py-2 dark:bg-gray-800 dark:text-white"
                     >
@@ -832,15 +1092,15 @@ const addToCart = useCallback((product) => {
                       <option value="CARD">Card</option>
                       <option value="CHEQUE">Cheque</option>
                     </select>
-                    
-                    <input 
-                      type="number" 
+
+                    <input
+                      type="number"
                       value={split.amount === 0 ? '' : split.amount}
                       onChange={(e) => updateSplitAmount(idx, e.target.value)}
                       placeholder="0.00"
                       className="flex-1 text-xs border border-gray-300 dark:border-gray-700 rounded px-2 py-2 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-primary-500"
                     />
-                    
+
                     {paymentSplits.length > 1 && (
                       <button onClick={() => removeSplitRow(idx)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
@@ -848,12 +1108,12 @@ const addToCart = useCallback((product) => {
                     )}
 
                     {isLastRow && (
-                      <button 
+                      <button
                         onClick={addSplitRow}
                         className={clsx(
                           "p-1.5 rounded transition-colors border-2 flex items-center justify-center",
-                          remaining <= 0 
-                            ? "border-gray-200 text-gray-300 cursor-not-allowed dark:border-gray-700" 
+                          remaining <= 0
+                            ? "border-gray-200 text-gray-300 cursor-not-allowed dark:border-gray-700"
                             : "border-primary-200 text-primary-600 hover:bg-primary-50 dark:border-primary-700 dark:text-primary-400 dark:hover:bg-primary-900/20"
                         )}
                         title={remaining > 0 ? "Add split for remaining amount" : "Bill fully paid"}
@@ -896,9 +1156,9 @@ const addToCart = useCallback((product) => {
             <button onClick={() => setIsPrintModalOpen(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
               <X className="w-5 h-5" />
             </button>
-            
+
             <h3 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-2">Checkout & Print Godown Bill</h3>
-            
+
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">Customer Name</label>
@@ -931,9 +1191,9 @@ const addToCart = useCallback((product) => {
                 ));
               })()}
             </div>
-            
+
             <button onClick={confirmPrint} disabled={printing} className="w-full bg-primary-600 hover:bg-primary-700 text-white font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
-              {printing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />} 
+              {printing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
               {printing ? 'Processing...' : 'Print & Checkout'}
             </button>
           </div>
@@ -942,11 +1202,12 @@ const addToCart = useCallback((product) => {
 
       {/* LEFT PANEL */}
       <div className="w-[280px] flex-shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col overflow-hidden">
+        {/* Barcode Scan Box */}
         <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
           <div className="p-3 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800/50 flex flex-col items-center justify-center text-center">
             <Barcode className="w-4 h-4 text-gray-400 mb-1" />
             <h3 className="text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">Barcode Scan</h3>
-            {/* <input
+            <input
               ref={barcodeRef}
               value={barcodeValue}
               onChange={e => setBarcodeValue(e.target.value)}
@@ -954,20 +1215,11 @@ const addToCart = useCallback((product) => {
               placeholder="Scan or type barcode..."
               className="w-full text-center text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono"
               autoFocus
-            /> */}
-            <input
-  ref={barcodeRef}
-  value={barcodeValue}
-  onChange={(e) => setBarcodeValue(e.target.value)}
-  onKeyDown={(e) => { if (e.key === 'Enter') { handleBarcodeInput();}
-    }}
-  placeholder="Scan or type barcode..."
-              className="w-full text-center text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono"
-  autoFocus
-/>
+            />
           </div>
         </div>
 
+        {/* Recently Scanned */}
         <div className="p-3 flex-1 overflow-y-auto">
           <h5 className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Recently Scanned</h5>
           {recentlyScanned.length === 0 ? (
@@ -984,11 +1236,10 @@ const addToCart = useCallback((product) => {
                     <div className="flex gap-3">
                       <div className="flex-1 min-w-0 space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-mono text-gray-500 dark:text-gray-400">{product.item_code || product.id}</span>
+                          <span className="text-[9px] font-mono text-gray-500 dark:text-gray-400">B.No:{product.id}</span>
                           <span className="text-[9px] text-gray-500 dark:text-gray-400">{format(new Date(), 'dd/MM/yy')}</span>
                         </div>
                         <p className="text-[11px] font-bold text-gray-900 dark:text-white truncate">{product.name}</p>
-                        <p className="text-[9px] text-gray-500">{product.bottle_size || ''} · {product.traditional_name || ''}</p>
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-semibold text-primary-600 dark:text-primary-400">MRP: ₹{product.sale_price}</span>
                           <div className="flex items-center gap-1.5">
@@ -1010,6 +1261,7 @@ const addToCart = useCallback((product) => {
           )}
         </div>
 
+        {/* Product Search List */}
         <div className="border-t border-gray-100 dark:border-gray-800 p-3 max-h-[200px] flex flex-col flex-shrink-0">
           <div className="relative mb-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -1025,7 +1277,7 @@ const addToCart = useCallback((product) => {
                   <button key={p.id} onClick={() => addToCart(p)} className="w-full flex items-center gap-2 p-1.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <div className="w-7 h-7 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[7px] font-bold text-gray-500">{p.category?.slice(0, 2)}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name} ({p.bottle_size})</p>
+                      <p className="text-[10px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
                       <p className="text-[8px] text-gray-400">Stock: {p.godown_stock} {cartCount > 0 && `· ${cartCount} in bill`}</p>
                     </div>
                     <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300">₹{p.sale_price}</p>
@@ -1046,10 +1298,11 @@ const addToCart = useCallback((product) => {
           </div>
         )}
 
+        {/* Table Header */}
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900">
           <div className="flex items-center gap-3">
             <ShoppingCart className="w-4 h-4 text-primary-600" />
-            <h2 className="text-sm font-bold text-gray-900 dark:text-white">Godown Billing</h2>
+            <h2 className="text-sm font-bold text-gray-900 dark:text-white">Godown Bill</h2>
             <span className="px-2 py-0.5 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 text-xs font-bold rounded-full">
               {cart.length} {cart.length === 1 ? 'item' : 'items'}
             </span>
@@ -1060,7 +1313,7 @@ const addToCart = useCallback((product) => {
               <span className="text-xs font-semibold text-gray-600 dark:text-gray-400">Grand Total:</span>
               <span className="text-sm font-bold text-primary-600 dark:text-primary-400">₹{grandTotal.toFixed(2)}</span>
             </div>
-            
+
             <button onClick={handleSavePDF} disabled={cart.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-600 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Download className="w-3.5 h-3.5" /> Save PDF
             </button>
@@ -1068,13 +1321,14 @@ const addToCart = useCallback((product) => {
             <button onClick={handleBulkPrint} disabled={selectedItems.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Printer className="w-3.5 h-3.5" /> Print & Checkout
             </button>
-            
+
             <button onClick={handleBulkWhatsApp} disabled={selectedItems.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Send className="w-3.5 h-3.5" /> WhatsApp
             </button>
           </div>
         </div>
 
+        {/* Table Area */}
         <div className="flex-1 overflow-y-auto px-4">
           {cart.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-300 dark:text-gray-600">
@@ -1091,18 +1345,18 @@ const addToCart = useCallback((product) => {
                   </th>
                   <th className="pb-2 pr-4 w-12">Photo</th>
                   <th className="pb-2 pr-4">Name</th>
-                  <th className="pb-2 pr-4 text-center w-24">Qty</th>
+                  <th className="pb-2 pr-4 text-center w-16">Qty</th>
                   <th className="pb-2 pr-4 text-right w-14">MRP</th>
-                  <th className="pb-2 pr-4 text-center w-14">Dis.</th>
+                  <th className="pb-2 pr-4 text-center w-16">Dis.</th>
                   <th className="pb-2 pr-4 text-right w-14">Total</th>
                   <th className="pb-2 text-center w-20">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {cart.map((item) => {
-                  const qty = Number(item.quantity) || 0;
                   const itemDiscount = item.discount || 0;
-                  const lineTotal = (item.sale_price * qty) - (itemDiscount * qty);
+                  const qty = Number(item.quantity) || 0;
+                  const lineTotal = (item.sale_price - itemDiscount) * qty;
                   const isSelected = selectedItems.includes(item.scanId);
 
                   return (
@@ -1116,45 +1370,41 @@ const addToCart = useCallback((product) => {
                         </div>
                       </td>
                       <td className="py-1.5 pr-2">
-                        <p className="text-[10px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
-                        <p className="text-[8px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
+                        <p className="text-[12px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
+                        <p className="text-[10px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
                       </td>
-                      <td className="py-1.5 pr-2 text-center">
+                      <td className="py-1.5 pr-2">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => updateQuantity(item.scanId, -1)} className="p-0.5 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300">
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <input 
-                            type="number" 
+                          <button onClick={() => updateQuantity(item.scanId, -1)} className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 text-xs font-bold">−</button>
+                          <input
                             ref={el => qtyInputRefs.current[item.scanId] = el}
-                            value={item.quantity} 
-                            onChange={(e) => handleManualQuantityChange(item.scanId, e.target.value)} 
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => handleManualQuantityChange(item.scanId, e.target.value)}
                             onBlur={() => handleQuantityBlur(item.scanId)}
                             onKeyDown={(e) => handleQtyKeyDown(e, item.scanId)}
-                            className="w-8 text-center text-[10px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className="w-9 text-center text-[11px] border border-gray-200 dark:border-gray-700 rounded px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800"
                           />
-                          <button onClick={() => updateQuantity(item.scanId, 1)} className="p-0.5 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300">
-                            <Plus className="w-3 h-3" />
-                          </button>
+                          <button onClick={() => updateQuantity(item.scanId, 1)} className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 text-xs font-bold">+</button>
                         </div>
                       </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[10px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
+                        <span className="text-[12px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
                       </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex justify-center">
-                          <input 
-                            type="number" 
+                          <input
                             ref={el => discInputRefs.current[item.scanId] = el}
-                            value={itemDiscount} 
+                            type="number"
+                            value={itemDiscount}
                             onChange={(e) => updateItemDiscount(item.scanId, e.target.value)}
                             onKeyDown={handleDiscKeyDown}
-                            className="w-10 text-center text-[10px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                            className="w-12 text-center text-[10px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800"
                           />
                         </div>
                       </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[10px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
+                        <span className="text-[12px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
                       </td>
                       <td className="py-1.5 pr-2 text-center">
                         <button onClick={() => removeFromCart(item.scanId)} className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Remove this item">
@@ -1169,7 +1419,15 @@ const addToCart = useCallback((product) => {
           )}
         </div>
 
-        <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 flex items-center justify-end flex-shrink-0">
+        {/* Checkout Footer */}
+        <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 flex items-center justify-between flex-shrink-0">
+          <div className="flex-1 pr-4">
+            <div className="flex gap-2 text-xs">
+              <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer Name" className="w-1/2 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-primary-500 text-xs" />
+              <input type="tel" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="Phone (Optional)" className="w-1/2 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-primary-500 text-xs" />
+            </div>
+          </div>
+
           <button
             onClick={openPayModal}
             disabled={cart.length === 0}
@@ -1179,7 +1437,7 @@ const addToCart = useCallback((product) => {
             )}
           >
             <CreditCard className="w-4 h-4" />
-            Pay All ₹{grandTotal.toFixed(2)}
+            Pay ₹{grandTotal.toFixed(2)}
           </button>
         </div>
 

@@ -4,14 +4,23 @@ import {
   Search, Barcode, Plus, Minus, Trash2, ShoppingCart,
   Printer, CheckCircle, X, Loader2, CreditCard, Banknote,
   Smartphone, Send, Package, Tag, Hash, Calendar, Layers, Download,
-  AlertCircle,Store
+  AlertCircle, Store
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import { getPosProducts, processCheckout } from '../apiservices/sales-counter';
+import { openUrl } from '@tauri-apps/plugin-opener'
 
-function generateInvoiceNumber() {
-  return `INV-${Date.now()}`;
+function generateInvoiceNumber(companyId) {
+  if (!companyId) return `INV-TEMP-${Date.now()}`;
+
+  const storageKey = `pos_invoice_counter_${companyId}`;
+  let lastNumber = parseInt(localStorage.getItem(storageKey) || '0', 10);
+  lastNumber += 1;
+
+  localStorage.setItem(storageKey, String(lastNumber));
+
+  return `INV-${String(lastNumber).padStart(4, '0')}`;
 }
 
 let scanCounter = 0;
@@ -24,18 +33,23 @@ export default function POS() {
   // ─── PERSISTED STATE: Load from localStorage or use defaults ───
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
   const companyName = localStorage.getItem('selectedCompanyName') || 'Unknown Company'
+  const [companyDetails, setCompanyDetails] = useState(() => {
+    try {
+      const saved = localStorage.getItem('selectedCompany');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
-  
+
   const [cart, setCart] = useState(() => {
     try {
       const saved = localStorage.getItem('pos_cart');
       const parsed = saved ? JSON.parse(saved) : [];
-      // Ensure every loaded cart item has a paymentMode (fallback for old data)
       return parsed.map(i => ({ ...i, paymentMode: i.paymentMode || 'CASH' }));
     } catch { return []; }
   });
-  
+
   const [search, setSearch] = useState('');
   const [paymentMode, setPaymentMode] = useState(() => {
     try {
@@ -43,21 +57,21 @@ export default function POS() {
       return saved ? JSON.parse(saved) : 'CASH';
     } catch { return 'CASH'; }
   });
-  
+
   const [customerName, setCustomerName] = useState(() => {
     try {
       const saved = localStorage.getItem('pos_customerName');
       return saved ? JSON.parse(saved) : 'Walk-in Customer';
     } catch { return 'Walk-in Customer'; }
   });
-  
+
   const [customerPhone, setCustomerPhone] = useState(() => {
     try {
       const saved = localStorage.getItem('pos_customerPhone');
       return saved ? JSON.parse(saved) : '';
     } catch { return ''; }
   });
-  
+
   const [discount, setDiscount] = useState(() => {
     try {
       const saved = localStorage.getItem('pos_discount');
@@ -80,7 +94,7 @@ export default function POS() {
   const [printCustomerName, setPrintCustomerName] = useState('');
   const [printCustomerPhone, setPrintCustomerPhone] = useState('');
   const [printing, setPrinting] = useState(false);
-
+const isTauri = () => '__TAURI_INTERNALS__' in window
   // ─── PERSISTENCE: Save to localStorage on change ───
   useEffect(() => { localStorage.setItem('pos_cart', JSON.stringify(cart)); }, [cart]);
   useEffect(() => { localStorage.setItem('pos_paymentMode', JSON.stringify(paymentMode)); }, [paymentMode]);
@@ -88,12 +102,11 @@ export default function POS() {
   useEffect(() => { localStorage.setItem('pos_customerPhone', JSON.stringify(customerPhone)); }, [customerPhone]);
   useEffect(() => { localStorage.setItem('pos_discount', JSON.stringify(discount)); }, [discount]);
 
- useEffect(() => { if (companyId) fetchProducts(); }, [companyId]);
+  useEffect(() => { if (companyId) fetchProducts(); }, [companyId]);
 
   const fetchProducts = async (searchTerm = '') => {
     setLoadingProducts(true);
     try {
-      // ─── PASS COMPANY ID ───
       const data = await getPosProducts(companyId, searchTerm);
       setProducts(data || []);
       setFilteredProducts(data || []);
@@ -119,6 +132,37 @@ export default function POS() {
     setSelectedItems(prev => prev.filter(scanId => cart.some(item => item.scanId === scanId)));
   }, [cart]);
 
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (
+        e.target.tagName === 'INPUT' ||
+        e.target.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
+
+      if (e.key.toLowerCase() === 'u') {
+        if (recentlyScanned.length === 0) return;
+
+        const lastScanned = recentlyScanned[0];
+
+        const lastItem = cart
+          .slice()
+          .reverse()
+          .find(item => item.productId === lastScanned.id);
+
+        if (lastItem) {
+          updateItemPaymentMode(lastItem.scanId, 'UPI');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [recentlyScanned, cart]);
+
   const addToCart = useCallback((product) => {
     setCart(prev => {
       const existingCount = prev.filter(i => i.productId === product.id).length;
@@ -132,7 +176,7 @@ export default function POS() {
         productId: product.id,
         quantity: 1,
         discount: 0,
-        paymentMode: paymentMode, // Inherit current global default
+        paymentMode: paymentMode,
       }];
     });
 
@@ -167,10 +211,8 @@ export default function POS() {
     const barcode = barcodeValue.trim();
     if (!barcode) return;
 
-    // 1. Try to find in the current state (fastest, comes from online API)
     let product = products.find(p => p.barcode === barcode);
 
-    // 2. If not found in state, try IndexedDB (Works OFFLINE)
     if (!product) {
       try {
         product = await db.products.where('barcode').equals(barcode).first();
@@ -205,8 +247,8 @@ export default function POS() {
     try {
       for (const item of cart) {
         const payload = {
-          invoice_number: generateInvoiceNumber(),
-          company_id: Number(companyId), // ─── INJECT COMPANY ID ───
+          invoice_number: generateInvoiceNumber(companyId),
+          company_id: Number(companyId),
           customer_name: customerName,
           customer_phone: customerPhone,
           total_amount: item.sale_price - (item.discount || 0),
@@ -218,7 +260,7 @@ export default function POS() {
             unit_price: item.sale_price,
             discount: item.discount || 0,
             total_price: item.sale_price - (item.discount || 0),
-            company_id: Number(companyId) // ─── INJECT COMPANY ID ───
+            company_id: Number(companyId)
           }],
         };
         await processCheckout(payload);
@@ -279,10 +321,15 @@ export default function POS() {
     setPrinting(true);
 
     try {
+      let lastInvoiceNumber = '';
+
       for (const item of itemsToPrint) {
+        const invNum = generateInvoiceNumber(companyId);
+        lastInvoiceNumber = invNum;
+
         const payload = {
-          invoice_number: generateInvoiceNumber(),
-          company_id: Number(companyId), // ─── INJECT COMPANY ID ───
+          invoice_number: invNum,
+          company_id: Number(companyId),
           customer_name: cName,
           customer_phone: cPhone === 'N/A' ? '' : cPhone,
           total_amount: item.sale_price - (item.discount || 0),
@@ -294,11 +341,12 @@ export default function POS() {
             unit_price: item.sale_price,
             discount: item.discount || 0,
             total_price: item.sale_price - (item.discount || 0),
-            company_id: Number(companyId) // ─── INJECT COMPANY ID ───
+            company_id: Number(companyId)
           }],
         };
         await processCheckout(payload);
       }
+
       const printGroups = {};
       let totalAmount = 0;
       itemsToPrint.forEach(item => {
@@ -314,38 +362,124 @@ export default function POS() {
       let itemsHtml = '';
 
       Object.values(printGroups).forEach(g => {
-        const discountHtml = g.totalDiscount > 0 
-          ? `<p style="margin: 2px 0; display: flex; justify-content: space-between; color: #d9534f;"><span>Discount:</span> <span>-₹${g.totalDiscount.toFixed(2)}</span></p>` 
+        const discountHtml = g.totalDiscount > 0
+          ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
           : '';
 
         itemsHtml += `
-          <div style="margin-bottom: 10px; border-bottom: 1px dashed #eee; padding-bottom: 5px;">
-            <p style="margin: 2px 0; font-weight: bold;">${g.name}</p>
-            <p style="margin: 2px 0; display: flex; justify-content: space-between;"><span>MRP: ₹${g.sale_price} x ${g.qty}</span> <span>₹${(g.sale_price * g.qty).toFixed(2)}</span></p>
+          <div style="margin-bottom:6px;">
+            <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.name}</div>
+            <div style="display:flex; justify-content:space-between; font-size:11px;">
+              <span>₹${g.sale_price.toFixed(2)} x ${g.qty}</span>
+              <span>₹${(g.sale_price * g.qty).toFixed(2)}</span>
+            </div>
             ${discountHtml}
-            <p style="margin: 2px 0; display: flex; justify-content: space-between; font-weight: bold;"><span>Subtotal:</span> <span>₹${g.lineTotal.toFixed(2)}</span></p>
           </div>
         `;
       });
 
-      const win = window.open('', '_blank');
-      win.document.write(`
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 300px; margin: auto; border: 1px dashed #ccc; padding: 15px;">
-          <h3 style="text-align: center; margin-bottom: 5px; text-transform: uppercase;">Retail Invoice</h3>
-          <hr style="border-top: 1px dashed #ccc;">
-          <p style="margin: 5px 0;"><strong>Customer:</strong> ${cName}</p>
-          <p style="margin: 5px 0;"><strong>Mobile:</strong> ${cPhone}</p>
-          <p style="margin: 5px 0;"><strong>Date:</strong> ${format(new Date(), 'dd/MM/yyyy hh:mm a')}</p>
-          <p style="margin: 5px 0; font-size: 0.8em; color: #888;">${itemsToPrint.length} separate bill(s) processed</p>
-          <hr style="border-top: 1px dashed #ccc; margin-top: 10px;">
-          ${itemsHtml}
-          <p style="font-size: 1.2em; font-weight: bold; display: flex; justify-content: space-between; margin-top: 15px;">
-            <span>Total:</span> <span>₹${totalAmount.toFixed(2)}</span>
-          </p>
-        </div>
+      const invoiceNumber = lastInvoiceNumber;
+      const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
+
+      // ─── PREPARE COMPANY DETAILS ───
+      const cAddress = companyDetails.address || '';
+      const cEmail = companyDetails.email || '';
+      const cExcise = companyDetails.exciseLicenseNo || '';
+      const cTrade = companyDetails.tradeLicenseNo || '';
+      const cGstin = companyDetails.gstin || '';
+
+      // ─── USE IFRAME INSTEAD OF window.open() ───
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "1px";
+      iframe.style.height = "1px";
+      iframe.style.border = "0";
+
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow.document;
+
+      doc.open();
+
+      doc.write(`
+        <html>
+          <head>
+            <title>Receipt</title>
+            <style>
+              @page {
+                margin: 0mm;
+                size: 80mm auto;
+              }
+              body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+              }
+            </style>
+          </head>
+          <body>
+            <div style="font-family: 'Courier New', monospace; width: 100%; max-width: 280px; margin: 0 auto; padding: 10px 5px; font-size: 12px; line-height: 1.4;">
+
+              <!-- Header -->
+              <div style="text-align:center; margin-bottom:5px;">
+                <h2 style="margin:0; font-size:16px; text-transform:uppercase; letter-spacing:1px;">${companyName}</h2>
+                ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
+                ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
+                ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">FL/Off Lic No: ${cExcise}</p>` : ''}
+
+                <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">SALE BILL</p>
+              </div>
+              <div style="border-top:1px dashed #000; margin:8px 0;"></div>
+
+              <!-- Info -->
+              <div style="font-size:11px; margin-bottom:5px;">
+                <div style="display:flex; justify-content:space-between;"><span>Bill No:</span><span>${invoiceNumber}</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Date:</span><span>${printDate}</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Customer:</span><span>${cName}</span></div>
+                ${cPhone !== 'N/A' ? `<div style="display:flex; justify-content:space-between;"><span>Phone:</span><span>${cPhone}</span></div>` : ''}
+              </div>
+
+              <div style="border-top:1px dashed #000; border-bottom:1px dashed #000; margin:8px 0; padding:4px 0; font-weight:bold; display:flex; justify-content:space-between; font-size:11px;">
+                <span>ITEM</span>
+                <span>AMOUNT</span>
+              </div>
+
+              <!-- Items -->
+              ${itemsHtml}
+
+              <!-- Totals -->
+              <div style="border-top:1px dashed #000; margin-top:8px; padding-top:6px;">
+                <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:15px;">
+                  <span>TOTAL</span>
+                  <span>₹${totalAmount.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <!-- Footer -->
+               <div style="border-top:1px dashed #000; margin-top:15px; padding-top:5px; text-align:center; font-size:9px; line-height: 1.4;">
+                <p style="margin:0 0 4px 0; font-weight:bold;">Goods once sold will not be taken back.</p>
+                <p style="margin:0 0 4px 0;">Please check items before leaving.</p>
+                <p style="margin:0 0 4px 0; font-weight:bold;">Liquor consumption is injurious to health.</p>
+                <p style="margin:0 0 4px 0;">Do not drink and drive.</p>
+                <p style="margin:0 0 4px 0;">Subject to local jurisdiction.</p>
+                <p style="margin:8px 0 0 0; font-weight:bold;">Thank You. Visit Again.</p>
+              </div>
+
+            </div>
+          </body>
+        </html>
       `);
-      win.document.close();
-      setTimeout(() => { win.print(); }, 400);
+
+      doc.close();
+
+      setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+
+        document.body.removeChild(iframe);
+      }, 500);
 
       setCart(prev => prev.filter(i => !selectedItems.includes(i.scanId)));
       setSelectedItems([]);
@@ -359,7 +493,7 @@ export default function POS() {
     }
   };
 
-  const handleBulkWhatsApp = () => {
+  const handleBulkWhatsApp = async () => {
     if (selectedItems.length === 0) return alert('Please select items to send.');
     const itemsToSend = cart.filter(i => selectedItems.includes(i.scanId));
 
@@ -386,7 +520,25 @@ export default function POS() {
     });
 
     msg += `*Grand Total: ₹${totalAmount.toFixed(2)}*`;
-    window.open(`https://wa.me/${customerPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+
+    // Auto-add India country code if 10-digit number
+    let waPhone = (customerPhone || '').replace(/\D/g, '');
+    if (waPhone.length === 10) waPhone = '91' + waPhone;
+
+    const url = waPhone 
+      ? `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+
+    if (isTauri()) {
+      try {
+        await openUrl(url);
+      } catch (err) {
+        console.error('Failed to open WhatsApp:', err);
+        alert('Could not open WhatsApp. Make sure it is installed.');
+      }
+    } else {
+      window.open(url, '_blank');
+    }
   };
 
   const handleSavePDF = () => {
@@ -394,7 +546,7 @@ export default function POS() {
 
     const cName = customerName || 'Walk-in Customer';
     const cPhone = customerPhone || 'N/A';
-    const invoiceNumber = generateInvoiceNumber();
+    const invoiceNumber = generateInvoiceNumber(companyId);
 
     const pdfGroups = {};
     cart.forEach(item => {
@@ -409,8 +561,8 @@ export default function POS() {
 
     Object.values(pdfGroups).forEach(g => {
       const lineTotal = (g.sale_price * g.qty) - g.totalDiscount;
-      const discountHtml = g.totalDiscount > 0 
-        ? `<tr><td colspan="3" style="text-align:right; padding:4px 8px; color:#d9534f; font-size:0.9em;">Discount</td><td style="padding:4px 8px; text-align:right; color:#d9534f;">-₹${g.totalDiscount.toFixed(2)}</td></tr>` 
+      const discountHtml = g.totalDiscount > 0
+        ? `<tr><td colspan="3" style="text-align:right; padding:4px 8px; color:#d9534f; font-size:0.9em;">Discount</td><td style="padding:4px 8px; text-align:right; color:#d9534f;">-₹${g.totalDiscount.toFixed(2)}</td></tr>`
         : '';
 
       itemsHtml += `
@@ -424,8 +576,21 @@ export default function POS() {
       `;
     });
 
-    const win = window.open('', '_blank');
-    win.document.write(`
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.border = "0";
+
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+
+    doc.open();
+
+    doc.write(`
       <html>
         <head>
           <title>Invoice ${invoiceNumber}</title>
@@ -445,7 +610,7 @@ export default function POS() {
           <div class="container">
             <div class="header">
               <div>
-                <div class="title">TAX INVOICE</div>
+                <div class="title">SALE BILL</div>
                 <p><strong>Invoice #:</strong> ${invoiceNumber}</p>
                 <p><strong>Date:</strong> ${format(new Date(), 'dd/MM/yyyy hh:mm a')}</p>
               </div>
@@ -455,7 +620,7 @@ export default function POS() {
                 <p><strong>Payment:</strong> Mixed</p>
               </div>
             </div>
-            
+
             <table>
               <thead>
                 <tr>
@@ -482,7 +647,7 @@ export default function POS() {
                 <td style="text-align:right;">₹${grandTotal.toFixed(2)}</td>
               </tr>
             </table>
-            
+
             <div style="margin-top: 40px; text-align: center; color: #888; font-size: 0.8em;">
               Thank you for your purchase!
             </div>
@@ -490,9 +655,16 @@ export default function POS() {
         </body>
       </html>
     `);
-    win.document.close();
-    setTimeout(() => { win.print(); }, 500);
-  };
+
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+
+      document.body.removeChild(iframe);
+    }, 500);
+  }; // ← FIXED: properly closed handleSavePDF
 
   if (showInvoice && completedSale) {
     return (
@@ -548,7 +720,6 @@ export default function POS() {
     );
   }
 
-
   return (
     <div className="flex flex-1 min-h-0 bg-gray-50 dark:bg-gray-950 overflow-hidden relative">
 
@@ -559,9 +730,9 @@ export default function POS() {
             <button onClick={() => setIsPrintModalOpen(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
               <X className="w-5 h-5" />
             </button>
-            
+
             <h3 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-2">Checkout & Print Bill</h3>
-            
+
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">Customer Name</label>
@@ -593,9 +764,9 @@ export default function POS() {
                 ));
               })()}
             </div>
-            
+
             <button onClick={confirmPrint} disabled={printing} className="w-full bg-primary-600 hover:bg-primary-700 text-white font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
-              {printing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />} 
+              {printing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
               {printing ? 'Processing...' : 'Print & Checkout'}
             </button>
           </div>
@@ -715,7 +886,7 @@ export default function POS() {
               <span className="text-xs font-semibold text-gray-600 dark:text-gray-400">Grand Total:</span>
               <span className="text-sm font-bold text-primary-600 dark:text-primary-400">₹{grandTotal.toFixed(2)}</span>
             </div>
-            
+
             <button onClick={handleSavePDF} disabled={cart.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-600 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Download className="w-3.5 h-3.5" /> Save PDF
             </button>
@@ -723,7 +894,7 @@ export default function POS() {
             <button onClick={handleBulkPrint} disabled={selectedItems.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Printer className="w-3.5 h-3.5" /> Print & Checkout
             </button>
-            
+
             <button onClick={handleBulkWhatsApp} disabled={selectedItems.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Send className="w-3.5 h-3.5" /> WhatsApp
             </button>
@@ -773,14 +944,14 @@ export default function POS() {
                         </div>
                       </td>
                       <td className="py-1.5 pr-2">
-                        <p className="text-[10px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
-                        <p className="text-[8px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
+                        <p className="text-[12px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
+                        <p className="text-[10px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
                       </td>
                       <td className="py-1.5 pr-2 text-center">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-primary-100 dark:bg-primary-900/30 text-[11px] font-bold text-primary-700 dark:text-primary-400">1</span>
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-primary-100 dark:bg-primary-900/30 text-[15px] font-bold text-primary-700 dark:text-primary-400">1</span>
                       </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[10px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
+                        <span className="text-[12px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
                       </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex justify-center">
@@ -789,28 +960,28 @@ export default function POS() {
                       </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex items-center justify-center gap-0.5">
-                          <button 
-                            onClick={() => updateItemPaymentMode(item.scanId, 'CASH')} 
-                            className={clsx("px-1.5 py-0.5 text-[8px] font-bold rounded transition-colors", currentPayMode === 'CASH' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700')}
+                          <button
+                            onClick={() => updateItemPaymentMode(item.scanId, 'CASH')}
+                            className={clsx("px-2 py-0.5 text-[15px] font-bold rounded transition-colors", currentPayMode === 'CASH' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700')}
                           >
                             Cash
                           </button>
-                          <button 
-                            onClick={() => updateItemPaymentMode(item.scanId, 'UPI')} 
-                            className={clsx("px-1.5 py-0.5 text-[8px] font-bold rounded transition-colors", currentPayMode === 'UPI' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700')}
+                          <button
+                            onClick={() => updateItemPaymentMode(item.scanId, 'UPI')}
+                            className={clsx("px-2 py-0.5 text-[15px] font-bold rounded transition-colors", currentPayMode === 'UPI' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700')}
                           >
                             UPI
                           </button>
-                          <button 
-                            onClick={() => updateItemPaymentMode(item.scanId, 'CARD')} 
-                            className={clsx("px-1.5 py-0.5 text-[8px] font-bold rounded transition-colors", currentPayMode === 'CARD' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700')}
+                          <button
+                            onClick={() => updateItemPaymentMode(item.scanId, 'CARD')}
+                            className={clsx("px-2 py-0.5 text-[15px] font-bold rounded transition-colors", currentPayMode === 'CARD' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700')}
                           >
                             Card
                           </button>
                         </div>
                       </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[10px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
+                        <span className="text-[12px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
                       </td>
                       <td className="py-1.5 pr-2 text-center">
                         <button onClick={() => removeFromCart(item.scanId)} className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Remove this item">
@@ -828,12 +999,12 @@ export default function POS() {
         {/* Checkout Footer */}
         <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 flex items-center justify-between flex-shrink-0">
           <div className="flex-1 pr-4">
-             <div className="flex gap-2 text-xs">
-                <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer Name" className="w-1/2 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-primary-500 text-xs" />
-                <input type="tel" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="Phone (Optional)" className="w-1/2 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-primary-500 text-xs" />
-             </div>
+            <div className="flex gap-2 text-xs">
+              <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer Name" className="w-1/2 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-primary-500 text-xs" />
+              <input type="tel" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="Phone (Optional)" className="w-1/2 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 bg-transparent focus:outline-none focus:ring-1 focus:ring-primary-500 text-xs" />
+            </div>
           </div>
-          
+
           <button
             onClick={handleCheckout}
             disabled={cart.length === 0 || checkingOut}

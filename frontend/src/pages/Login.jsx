@@ -4,6 +4,7 @@ import { Wine, Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Sun, Moon } from 'lucide-react'
+import vichaarLogo from "../assets/vichaar.png";
 
 export default function Login() {
   const [mode, setMode] = useState('login') // 'login' | 'signup'
@@ -19,7 +20,7 @@ export default function Login() {
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
 
-   const handleSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setSuccess('')
@@ -28,16 +29,16 @@ export default function Login() {
     try {
       if (mode === 'login') {
         const { error, data } = await signIn(email, password)
-        
+
         if (error) {
           setError(error.message)
         } else if (data) {
           const role = data.role?.toUpperCase() // Safe uppercase comparison
-          
+
           // ─── ROLE BASED REDIRECTION ───
           if (role === 'ADMIN') {
             // Admin goes to the main Owner Dashboard
-            navigate('/admin-dashboard') 
+            navigate('/admin-dashboard')
           } else if (role === 'MANAGER') {
             // ✅ Manager goes directly to their assigned company dashboard
             if (data.company_id) {
@@ -90,18 +91,37 @@ export default function Login() {
         </div>
 
         <div className="relative z-10 text-center">
-          <div className="w-20 h-20 rounded-2xl bg-amber-500 flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-amber-500/30">
-            <Wine className="w-10 h-10 text-white" />
+          <div className="w-[120px] h-[100px] rounded-2xl bg-amber-500 flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-amber-500/30 overflow-hidden">
+            <img
+              src={vichaarLogo}
+              alt="Profile"
+              className="w-full h-full object-cover"
+            />
           </div>
-          <h1 className="text-4xl font-bold text-white mb-3">IMFL Billing</h1>
-          <p className="text-gray-400 text-lg mb-10">Complete Liquor Retail Management</p>
+          <h1 className="text-4xl font-bold text-white mb-3">
+  VICHAAR <span className="text-yellow-400">BEVTRAC</span>
+</h1>
+
+<p className="text-lg italic font-semibold bg-gradient-to-r from-yellow-400 via-orange-400 to-pink-500 bg-clip-text text-transparent">
+  SMART INVENTORY & ACCOUNTING SOFTWARE
+</p>
+
+<p className="text-lg font-medium bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-500 bg-clip-text text-transparent">
+  EXCLUSIVELY FOR ODISHA IMFL OFF SHOPS
+</p>
+
+<p className="text-lg font-semibold bg-gradient-to-r from-green-400 via-emerald-400 to-lime-400 bg-clip-text text-transparent mb-10">
+  MANAGE | MONITOR | GROW YOUR BUSINESS
+</p>
 
           <div className="grid grid-cols-2 gap-4 text-left">
             {[
               { label: 'POS Billing', desc: 'Fast checkout with barcode' },
-              { label: 'GST Invoices', desc: 'Compliant tax invoices' },
-              { label: 'Inventory', desc: 'Real-time stock tracking' },
-              { label: 'Reports', desc: 'Detailed sales analytics' },
+              { label: 'Invoices', desc: 'Compliant tax invoices' },
+              { label: 'Inventory Management', desc: 'Real-time stock tracking' },
+              { label: 'Purchase Management', desc: 'Detailed sales analytics' },
+              { label: 'Management Dashboard', desc: 'Daily sales analytics' },
+              { label: 'Employee Management', desc: 'Manage staff and permissions' },
             ].map(f => (
               <div key={f.label} className="bg-white/5 rounded-xl p-4 border border-white/10">
                 <p className="text-white font-medium text-sm">{f.label}</p>
