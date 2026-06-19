@@ -28,6 +28,8 @@ export default function StockTransfer() {
   const [showDropdown, setShowDropdown] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const dropdownRef = useRef(null)
+  const productInputRef = useRef(null)
+const qtyInputRef = useRef(null)
 
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [transferQty, setTransferQty] = useState(1)
@@ -192,10 +194,16 @@ export default function StockTransfer() {
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input 
+                  ref={productInputRef}
                   type="text" 
                   placeholder="Type barcode or product name..." 
                   value={searchQuery} 
                   onChange={e => handleSearchChange(e.target.value)} 
+                  onKeyDown={(e) => {
+  if(e.key === "Enter" && selectedProduct){
+    qtyInputRef.current?.focus()
+  }
+}}
                   className="input-field pl-8" 
                 />
                 {isSearching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />}
@@ -222,11 +230,21 @@ export default function StockTransfer() {
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Qty to Transfer</label>
               <div className="flex gap-2">
                 <input 
+                 ref={qtyInputRef}
                   type="number" 
                   min="1" 
                   max={selectedProduct?.godown_stock || 1}
                   value={transferQty} 
                   onChange={e => setTransferQty(e.target.value)} 
+                  onKeyDown={(e)=>{
+    if(e.key==="Enter"){
+      addToTransferList()
+
+      setTimeout(()=>{
+        productInputRef.current?.focus()
+      },100)
+    }
+  }}
                   className="input-field" 
                   disabled={!selectedProduct}
                 />

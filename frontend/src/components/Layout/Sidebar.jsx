@@ -67,6 +67,7 @@ export default function Sidebar({ open, onClose }) {
     { to: '/expenses', icon: Receipt, label: 'Expenses', roles: ['ADMIN', 'MANAGER'] },
     { to: '/employees', icon: Users, label: 'Employees', roles: ['ADMIN', 'MANAGER'] },
     { to: '/employee-attendance', icon: Users, label: 'Employee Attendance', roles: ['ADMIN', 'MANAGER'] },
+    { to: '/Payslips', icon: Users, label: 'payslip', roles: ['ADMIN', 'MANAGER'] },
     { to: '/attendance-reports', icon: FileText, label: 'Attendance Reports', roles: ['ADMIN', 'MANAGER'] },
     { to: '/suppliers', icon: Truck, label: 'Supplier', roles: ['ADMIN', 'MANAGER'] },
     

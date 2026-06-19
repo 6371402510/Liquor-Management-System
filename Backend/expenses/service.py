@@ -8,10 +8,7 @@ from datetime import date
 from .model import Expense, ExpenseCategory
 from .schema import ExpenseCreate, ExpenseUpdate, CategoryCreate
 
-DEFAULT_CATEGORIES = [
-    # Add any defaults you want, e.g. "SALARY_PAYOUT", "RENT", "UTILITIES"
-]
-
+DEFAULT_CATEGORIES = ['SALARY_PAYOUT', 'ADVANCE_SALARY']
 # --- Expense Services ---
 def get_expenses(
     db: Session, 
@@ -72,18 +69,24 @@ def delete_expense(db: Session, expense_id: int, company_id: int):  # ← ADDED
     return True
 
 # --- Category Services ---
-def get_categories(db: Session, company_id: int) -> List[ExpenseCategory]:  # ← ADDED
-    """Fetch categories for a company. Seed defaults if empty."""
+def get_categories(db: Session, company_id: int) -> List[ExpenseCategory]:
+    """Fetch categories for a company. Seed defaults if they are missing."""
     categories = db.query(ExpenseCategory).filter(ExpenseCategory.company_id == company_id).all()
     
-    if not categories:
+    # LOGIC FIX: Check which defaults are actually missing
+    existing_names = {c.name for c in categories}
+    missing_defaults = [name for name in DEFAULT_CATEGORIES if name not in existing_names]
+    
+    if missing_defaults:
         try:
-            for cat_name in DEFAULT_CATEGORIES:
+            for cat_name in missing_defaults:
                 db.add(ExpenseCategory(name=cat_name, is_default=True, company_id=company_id))
             db.commit()
+            # Refresh the list to include the newly seeded categories
             return db.query(ExpenseCategory).filter(ExpenseCategory.company_id == company_id).all()
         except IntegrityError:
             db.rollback()
+            # Fallback if something went wrong
             return db.query(ExpenseCategory).filter(ExpenseCategory.company_id == company_id).all()
         
     return categories

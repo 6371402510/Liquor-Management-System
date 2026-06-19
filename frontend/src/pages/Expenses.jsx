@@ -124,7 +124,8 @@ export default function Expenses() {
       setForm(prev => ({ ...prev, category: newCat.name, category_id: newCat.id }))
       setShowCategoryDropdown(false)
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to add category')
+      // FIX: Use err.message instead of err.response.data.detail
+      alert(err.message || 'Failed to add category')
     }
   }
 
@@ -139,10 +140,10 @@ export default function Expenses() {
         setForm(prev => ({ ...prev, category: '' }))
       }
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to delete category')
+      // FIX: Use err.message instead of err.response.data.detail
+      alert(err.message || 'Failed to delete category')
     }
   }
-
   const openAdd = () => {
     setForm(emptyForm)
     setEditingId(null)
@@ -167,7 +168,7 @@ export default function Expenses() {
     setShowModal(true)
   }
 
-  const calculateSalary = async (empId, dateStr) => {
+    const calculateSalary = async (empId, dateStr, currentCategoryId) => {
     if (!empId || !dateStr) return;
     
     setCalculatingSalary(true);
@@ -179,48 +180,90 @@ export default function Expenses() {
       const emp = employees.find(e => e.id === empId);
       const baseSalary = emp?.salary || 0;
       
-      // Inside calculateSalary, when setting SALARY_PAYOUT:
-if (baseSalary > 0) {
-  const workingDays = attRecord ? attRecord.total_working_days : 0;
-  const calculatedAmount = (baseSalary / 30) * workingDays;
+      // Find category IDs for comparison
+      const salaryCat = categories.find(c => c.name === 'SALARY_PAYOUT');
+      const advanceCat = categories.find(c => c.name === 'ADVANCE_SALARY');
+      
+      const isSalaryPayout = currentCategoryId === salaryCat?.id;
+      const isAdvanceSalary = currentCategoryId === advanceCat?.id;
 
-  // Find the SALARY_PAYOUT category ID
-  const salaryCat = categories.find(c => c.name === 'SALARY_PAYOUT');
+      if (baseSalary > 0) {
+        const workingDays = attRecord ? attRecord.total_working_days : 0;
+        const earnedSalary = (baseSalary / 30) * workingDays;
 
-  setForm(prev => ({
-    ...prev,
-    amount: calculatedAmount.toFixed(2),
-    category: prev.category || 'SALARY_PAYOUT',
-    category_id: salaryCat ? salaryCat.id : prev.category_id,  // ← ADDED
-  }));
-}
+        // CALCULATE TOTAL ADVANCES
+        // Filter expenses for this employee and ADVANCE_SALARY category
+        // Note: This relies on the 'expenses' state being filtered to the current month/period
+        const employeeFullName = `${emp.first_name} ${emp.last_name}`;
+        const totalAdvances = expenses.reduce((sum, exp) => {
+            if (
+                exp.category === 'ADVANCE_SALARY' && 
+                exp.employee_name === employeeFullName
+            ) {
+                return sum + (Number(exp.amount) || 0);
+            }
+            return sum;
+        }, 0);
+
+        const netSalary = earnedSalary - totalAdvances;
+
+        // LOGIC:
+        // 1. If Salary Payout is selected -> Fill Net Amount (Salary - Advance)
+        // 2. If NO category is selected (null) -> Default to Salary Calculation
+        // 3. If Advance Salary is selected -> Clear Amount
+        if (isSalaryPayout || !currentCategoryId) {
+          setForm(prev => ({
+            ...prev,
+            amount: netSalary.toFixed(2),
+            // Only set the category if it wasn't set before (default behavior)
+            category: prev.category || 'SALARY_PAYOUT',
+            category_id: prev.category_id || (salaryCat ? salaryCat.id : prev.category_id),
+          }));
+        } else if (isAdvanceSalary) {
+          // Clear amount for manual entry
+          setForm(prev => ({
+            ...prev,
+            amount: '', 
+          }));
+        }
+      }
     } catch (err) {
       console.error("Could not calculate salary automatically", err);
     } finally {
       setCalculatingSalary(false);
     }
   };
-
-  const handleEmployeeNameChange = async (e) => {
+      const handleEmployeeNameChange = async (e) => {
     const name = e.target.value;
     setForm(prev => ({ ...prev, employee_name: name, amount: '' }));
 
     const selectedEmp = employees.find(emp => `${emp.first_name} ${emp.last_name}` === name);
     if (selectedEmp) {
       setForm(prev => ({ ...prev, designation: selectedEmp.designation || '' }));
-      await calculateSalary(selectedEmp.id, form.expense_date);
+      
+      // 1. Clear category input to reset selection
+      setForm(prev => ({ ...prev, category: '', category_id: null }));
+      
+      // 2. Open the category dropdown
+      setShowCategoryDropdown(true);
+
+      // 3. Trigger calculation (which defaults to SALARY_PAYOUT)
+      await calculateSalary(selectedEmp.id, form.expense_date, null);
     } else {
       setForm(prev => ({ ...prev, designation: '' }));
+      // Optional: Hide dropdown if employee is cleared
+      // setShowCategoryDropdown(false);
     }
   };
 
-  const handleDateChange = async (e) => {
+   const handleDateChange = async (e) => {
     const newDate = e.target.value;
     setForm(prev => ({ ...prev, expense_date: newDate }));
 
     const selectedEmp = employees.find(emp => `${emp.first_name} ${emp.last_name}` === form.employee_name);
     if (selectedEmp) {
-      await calculateSalary(selectedEmp.id, newDate);
+      // Pass form.category_id here
+      await calculateSalary(selectedEmp.id, newDate, form.category_id);
     }
   };
 
@@ -309,9 +352,14 @@ if (baseSalary > 0) {
 
   const formatCurrency = (value) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value)
 
-  const categoryOptions = categories.filter(c => 
-    c.name.toLowerCase().includes(form.category.toLowerCase()) || !form.category
-  )
+   const categoryOptions = categories.filter(c => {
+    // If an employee is selected, only show Salary and Advance Salary categories
+    if (form.employee_name) {
+      return ['SALARY_PAYOUT', 'ADVANCE_SALARY'].includes(c.name);
+    }
+    // Otherwise, show all categories (or filter by search text)
+    return c.name.toLowerCase().includes(form.category.toLowerCase()) || !form.category;
+  });
 
   // ─── GUARD: NO COMPANY SELECTED ───
   if (!companyId) {
@@ -514,13 +562,29 @@ if (baseSalary > 0) {
                       </button>
                     </div>
 
-                    {showCategoryDropdown && (
+                                      {showCategoryDropdown && (
                       <div className="absolute top-full left-0 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto z-50">
                         {categoryOptions.length > 0 ? categoryOptions.map(c => (
                           <div 
                             key={c.id} 
                             className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer group"
-                            onMouseDown={() => setForm(f => ({ ...f, category: c.name, category_id: c.id }))}
+                            onMouseDown={() => {
+                              const newId = c.id;
+                              const newName = c.name;
+
+                              // 1. Set the category
+                              setForm(f => ({ ...f, category: newName, category_id: newId }));
+
+                              // 2. Handle Logic based on selection
+                              if (newName === 'SALARY_PAYOUT' && form.employee_name) {
+                                // Recalculate if Salary Payout is chosen and an employee is selected
+                                const emp = employees.find(e => `${e.first_name} ${e.last_name}` === form.employee_name);
+                                if (emp) calculateSalary(emp.id, form.expense_date, newId);
+                              } else if (newName === 'ADVANCE_SALARY') {
+                                // Clear amount if Advance Salary is chosen
+                                setForm(f => ({ ...f, amount: '' }));
+                              }
+                            }}
                           >
                             <span className="text-sm text-gray-700 dark:text-gray-200">{c.name.replace(/_/g, ' ')}</span>
                             <button 
@@ -539,7 +603,7 @@ if (baseSalary > 0) {
                     )}
                   </div>
 
-                  <div>
+                              <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Amount (₹) *</label>
                     <div className="relative">
                       <input 
@@ -558,8 +622,15 @@ if (baseSalary > 0) {
                         </div>
                       )}
                     </div>
-                    {form.employee_name && form.amount && !calculatingSalary && (
-                      <p className="text-[10px] text-gray-400 mt-1">Auto-calculated from attendance</p>
+                    
+                    {/* UPDATED HELPER TEXT LOGIC */}
+                    {form.employee_name && form.category === 'SALARY_PAYOUT' && form.amount && !calculatingSalary && (
+                        <div className="mt-1 text-[10px] text-gray-400 flex justify-between">
+                            <span>Auto-calculated (Less Advances)</span>
+                        </div>
+                    )}
+                    {form.employee_name && form.category !== 'SALARY_PAYOUT' && form.amount && !calculatingSalary && (
+                         <p className="text-[10px] text-gray-400 mt-1">Manual entry</p>
                     )}
                   </div>
                   

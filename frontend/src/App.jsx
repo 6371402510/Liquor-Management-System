@@ -29,6 +29,7 @@ import AdminDashboard from './pages/admindashboard.jsx'
 import SalaryReport from './pages/SalaryReport.jsx'
 import StaffManagement from './pages/StaffManagement.jsx' 
 import CashDeposit from './pages/CashDeposit.jsx' 
+import Payslips from './pages/Payslips.jsx'
 
 // ══════════════════════════════════════════════════
 // 👇 NEW: Component to wait for FastAPI to start
@@ -117,6 +118,8 @@ function AppRoutes() {
         <Route path="/attendance-reports" element={<AttendanceReports />} />
         <Route path="/salary-report" element={<SalaryReport />} />
         <Route path="/cash-deposit" element={<CashDeposit />} />
+        <Route path="/Payslips" element={<Payslips />} />
+
         {/* ─── ADMIN ROUTES ─── */}
       </Route>
 

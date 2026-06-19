@@ -16,18 +16,18 @@ import sys
 import os
 from pathlib import Path
 
-def get_db_dir():
-    """Parse --db-dir from args, otherwise default to script directory."""
-    for i, arg in enumerate(sys.argv):
-        if arg == "--db-dir" and i + 1 < len(sys.argv):
-            return sys.argv[i + 1]
-        if arg.startswith("--db-dir="):
-            return arg.split("=", 1)[1]
-    return os.path.dirname(os.path.abspath(__file__))
+# def get_db_dir():
+#     """Parse --db-dir from args, otherwise default to script directory."""
+#     for i, arg in enumerate(sys.argv):
+#         if arg == "--db-dir" and i + 1 < len(sys.argv):
+#             return sys.argv[i + 1]
+#         if arg.startswith("--db-dir="):
+#             return arg.split("=", 1)[1]
+#     return os.path.dirname(os.path.abspath(__file__))
 
-app_data_dir = get_db_dir()
-os.makedirs(app_data_dir, exist_ok=True)
-os.environ["DB_DIR"] = app_data_dir
+# app_data_dir = get_db_dir()
+# os.makedirs(app_data_dir, exist_ok=True)
+# os.environ["DB_DIR"] = app_data_dir
 
 
 from fastapi import FastAPI

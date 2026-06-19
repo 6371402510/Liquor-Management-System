@@ -128,20 +128,27 @@ export default function POSGodown() {
     }
   };
 
-  useEffect(() => {
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      setFilteredProducts(products.filter(p =>
+ useEffect(() => {
+  const availableProducts = products.filter(
+    p => Number(p.godown_stock) > 0
+  );
+
+  if (search.trim()) {
+    const q = search.toLowerCase();
+
+    setFilteredProducts(
+      availableProducts.filter(p =>
         p.name.toLowerCase().includes(q) ||
         (p.barcode || '').includes(q) ||
         (p.brand || '').toLowerCase().includes(q) ||
         (p.item_code || '').toLowerCase().includes(q) ||
         (p.traditional_name || '').toLowerCase().includes(q)
-      ));
-    } else {
-      setFilteredProducts(products);
-    }
-  }, [products, search]);
+      )
+    );
+  } else {
+    setFilteredProducts(availableProducts);
+  }
+}, [products, search]);
 
   useEffect(() => {
     setSelectedItems(prev => prev.filter(scanId => cart.some(item => item.scanId === scanId)));
@@ -468,7 +475,7 @@ export default function POSGodown() {
               <h2 style="margin:0; font-size:16px; text-transform:uppercase; letter-spacing:1px;">${companyName}</h2>
               ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
               ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
-              ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">FL/Off Lic No: ${cExcise}</p>` : ''}
+              ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">Shop Lic No: ${cExcise}</p>` : ''}
               <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">GODOWN SALE BILL</p>
             </div>
             <div style="border-top:1px dashed #000; margin:8px 0;"></div>
@@ -495,10 +502,14 @@ export default function POSGodown() {
                 </div>
               ` : ''}
             </div>
-            <div style="border-top:1px dashed #000; margin-top:15px; padding-top:5px; text-align:center; font-size:10px;">
-              <p style="margin:0 0 5px 0; font-weight:bold;">Thank you for your purchase!</p>
-              <p style="margin:0; font-size:9px; color:#666;">Visit Again</p>
-            </div>
+           <div style="border-top:1px dashed #000; margin-top:15px; padding-top:5px; text-align:center; font-size:9px; line-height:1.4;">
+  <p style="margin:0 0 4px 0; font-weight:bold;">Goods once sold will not be taken back.</p>
+  <p style="margin:0 0 4px 0;">Please check items before leaving.</p>
+  <p style="margin:0 0 4px 0; font-weight:bold;">Liquor consumption is injurious to health.</p>
+  <p style="margin:0 0 4px 0;">Do not drink and drive.</p>
+  <p style="margin:0 0 4px 0;">Subject to local jurisdiction.</p>
+  <p style="margin:8px 0 0 0; font-weight:bold;">Thank You. Visit Again.</p>
+</div>
           </div>
         </body>
       </html>
@@ -1353,7 +1364,7 @@ export default function POSGodown() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {cart.map((item) => {
+                {[...cart].reverse().map((item) => {
                   const itemDiscount = item.discount || 0;
                   const qty = Number(item.quantity) || 0;
                   const lineTotal = (item.sale_price - itemDiscount) * qty;

@@ -427,7 +427,7 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
                 <h2 style="margin:0; font-size:16px; text-transform:uppercase; letter-spacing:1px;">${companyName}</h2>
                 ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
                 ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
-                ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">FL/Off Lic No: ${cExcise}</p>` : ''}
+                ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">Shop Lic No: ${cExcise}</p>` : ''}
 
                 <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">SALE BILL</p>
               </div>
@@ -927,7 +927,7 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {cart.map((item) => {
+                {[...cart].reverse().map((item) => {
                   const itemDiscount = item.discount || 0;
                   const lineTotal = item.sale_price - itemDiscount;
                   const isSelected = selectedItems.includes(item.scanId);

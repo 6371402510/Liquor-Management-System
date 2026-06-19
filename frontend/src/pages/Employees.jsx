@@ -43,13 +43,13 @@ export default function Employees() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('ALL')
-  
+
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  
+
   const [sortField, setSortField] = useState('first_name')
   const [sortDir, setSortDir] = useState('asc')
 
@@ -173,7 +173,7 @@ export default function Employees() {
   }
 
   const handleSort = (field) => {
-    if (sortField === field) { setSortDir(d => d === 'asc' ? 'desc' : 'asc') } 
+    if (sortField === field) { setSortDir(d => d === 'asc' ? 'desc' : 'asc') }
     else { setSortField(field); setSortDir('asc') }
   }
 
@@ -328,9 +328,9 @@ export default function Employees() {
                   <td className="table-cell">
                     <span className={clsx(
                       'text-xs font-medium px-2 py-0.5 rounded-full',
-                      e.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 
-                      e.status === 'ON_LEAVE' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400' : 
-                      'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                      e.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' :
+                        e.status === 'ON_LEAVE' ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400' :
+                          'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
                     )}>
                       {e.status.replace('_', ' ')}
                     </span>
@@ -364,7 +364,7 @@ export default function Employees() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            
+
             {error && showModal && (
               <div className="mx-6 mt-4 flex items-center gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
                 <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
@@ -396,7 +396,15 @@ export default function Employees() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Phone *</label>
-                    <input required type="tel" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="input-field" />
+                    <input required type="tel" maxLength={10} pattern="[0-9]{10}" value={form.phone} onChange={e => {
+                      const value = e.target.value.replace(/\D/g, '')
+                        if (value.length <= 10) {
+                        setForm(f => ({ ...f, phone: value }))
+                      }
+                    }}
+                      className="input-field"
+                      placeholder="Enter 10 digit phone number"
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Gender</label>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Wine, Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -19,6 +19,27 @@ export default function Login() {
   const { signIn, signUp } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const [daysLeft, setDaysLeft] = useState(365)
+
+  useEffect(() => {
+  const startDate = new Date("2026-06-19") // starting date
+
+  const updateCountdown = () => {
+    const today = new Date()
+
+    const diffTime = today - startDate
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+
+    // 365 -> 364 -> ... -> 0 -> -1 -> -2
+    setDaysLeft(365 - diffDays)
+  }
+
+  updateCountdown()
+
+  const timer = setInterval(updateCountdown, 86400000) // every day
+
+  return () => clearInterval(timer)
+}, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -91,7 +112,7 @@ export default function Login() {
         </div>
 
         <div className="relative z-10 text-center">
-          <div className="w-[120px] h-[100px] rounded-2xl bg-amber-500 flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-amber-500/30 overflow-hidden">
+         <div className="w-[100px] h-[100px] rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-amber-500/0 overflow-hidden">
             <img
               src={vichaarLogo}
               alt="Profile"
@@ -129,6 +150,40 @@ export default function Login() {
               </div>
             ))}
           </div>
+<div className="mt-6 px-14 py-1 rounded-xl bg-white/10 border border-white/20 text-center flex ">
+  <p className="text-gray-300 pt-2 text-sm">
+    Software License
+  </p>
+
+  <p className={`text-2xl font-bold   px-4 ${
+    daysLeft < 0 
+      ? "text-red-400" 
+      : "text-yellow-400"
+  }`}>
+    {daysLeft}
+  </p>
+
+  <p className="text-white pt-2 text-sm">
+    {daysLeft < 0 
+      ? "Days Expired" 
+      : "Days Remaining"}
+  </p>
+</div>
+<p  className="text-left mt-[10px]">Devloped & Marketed By : </p>
+<div className="mt-3 px-6 py-4 rounded-xl bg-white/10 border border-white/20 text-center">
+  
+  
+  <p  className="text-[20px] text-green-500">VICHAARLAB </p>
+  <p className="mt-[2px]">
+  Support: <span className="text-[#EA4335]">support@vichaarlab.com</span>
+</p>
+  <p  className="mt-[2px] ">Help Line: <span className="text-yellow-400">0674 3185541, 90909 72227</span></p>
+  <p  className="mt-[2px] "> Adress:  <span className=" font-semibold bg-gradient-to-r from-green-400 via-emerald-400 to-lime-400 bg-clip-text text-transparent mb-10">Nanadan Vihar, Patia, Bhubaneswar-24</span></p>
+
+
+
+</div>
+          
         </div>
       </div>
 
