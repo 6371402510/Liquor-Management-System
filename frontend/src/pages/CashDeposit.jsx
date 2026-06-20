@@ -47,6 +47,7 @@ export default function CashDeposit() {
   const [bankNameInput, setBankNameInput] = useState('')
   const [depositAmountInput, setDepositAmountInput] = useState('')
   const [bankSlipInput, setBankSlipInput] = useState(null)
+  const [bankAccountNumberInput, setBankAccountNumberInput] = useState('')
 
   // ─── Persisted Records ───
   const [records, setRecords] = useState(() => loadRecords(companyId))
@@ -125,9 +126,10 @@ export default function CashDeposit() {
       setSaved(false)
     }
     setExpandedRow(null)
-    
+
     // Reset form fields when date changes
     setDepositAmountInput('')
+    setBankAccountNumberInput('')
     setDepositMethod('bank')
     setBankNameInput('')
     setBankSlipInput(null)
@@ -153,10 +155,10 @@ export default function CashDeposit() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0]
     if (!file) return
-    
+
     if (file.size > 1048576) { // 1MB limit to prevent localStorage overflow
       alert("File size cannot exceed 1MB")
-      e.target.value = "" 
+      e.target.value = ""
       return
     }
 
@@ -179,6 +181,7 @@ export default function CashDeposit() {
       id: Date.now(),
       method: depositMethod,
       bankName: bankNameInput,
+      bankAccountNumber: bankAccountNumberInput,
       amount: amount,
       slip: bankSlipInput
     }
@@ -207,6 +210,7 @@ export default function CashDeposit() {
 
     // Reset form fields
     setDepositAmountInput('')
+    setBankAccountNumberInput('')
     setDepositMethod('bank')
     setBankNameInput('')
     setBankSlipInput(null)
@@ -237,7 +241,7 @@ export default function CashDeposit() {
   const handleSave = () => {
     const existingRecord = records[selectedDate] || {}
     const existingDeposits = existingRecord.bankDeposits || []
-    
+
     const newRecords = {
       ...records,
       [selectedDate]: {
@@ -415,63 +419,69 @@ export default function CashDeposit() {
           </h3>
 
           {/* List of added deposits */}
-         {bankDeposits.map((dep) => (
-  <div
-    key={dep.id}
-    className="p-2.5 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-100 dark:border-cyan-900/40"
-  >
-    <div className="flex items-center justify-between gap-2">
+          {bankDeposits.map((dep) => (
+            <div
+              key={dep.id}
+              className="p-2.5 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-100 dark:border-cyan-900/40"
+            >
+              <div className="flex items-center justify-between gap-2">
 
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
 
-        <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300 whitespace-nowrap">
-          ₹{dep.amount.toLocaleString()}
-        </span>
+                  <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300 whitespace-nowrap">
+                    ₹{dep.amount.toLocaleString()}
+                  </span>
 
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-200 dark:bg-cyan-800 text-cyan-800 dark:text-cyan-200 uppercase font-semibold">
-          {dep.method === 'bank' ? 'Bank' : 'CDM'}
-        </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-200 dark:bg-cyan-800 text-cyan-800 dark:text-cyan-200 uppercase font-semibold">
+                    {dep.method === 'bank' ? 'Bank' : 'CDM'}
+                  </span>
 
-        {dep.bankName && (
-          <span className="text-xs text-gray-600 dark:text-gray-400 truncate">
-            {dep.bankName}
-          </span>
-        )}
+                  {dep.bankName && (
+                    <span className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                      {dep.bankName}
+                    </span>
+                  )}
 
-          {dep.slip && (
-      <a
-        href={dep.slip.base64}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1 dark:text-blue-400"
-      >
-        📎 {dep.slip.name}
-      </a>
-    )}
+                  {dep.bankAccountNumber && (
+                    <span className="text-[11px] text-gray-500 dark:text-gray-500 font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                      A/C: {dep.bankAccountNumber}
+                    </span>
+                  )}
 
-
-      </div>
-
-    
-      <button
-        onClick={() => handleDeleteDeposit(dep.id)}
-        className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
-
-    </div>
+                  {dep.slip && (
+                    <a
+                      href={dep.slip.base64}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1 dark:text-blue-400"
+                    >
+                      📎 {dep.slip.name}
+                    </a>
+                  )}
 
 
-    
+                </div>
 
-  </div>
-))}
+
+                <button
+                  onClick={() => handleDeleteDeposit(dep.id)}
+                  className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+
+              </div>
+
+
+
+
+            </div>
+          ))}
 
           {/* Form to add new deposit */}
           <div className={clsx("space-y-3 pt-4", bankDeposits.length > 0 && "border-t dark:border-gray-700")}>
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Add New Deposit</p>
-            
+
             <div>
               <label className="block text-xs text-gray-500 mb-1.5">Deposit Method</label>
               <div className="flex gap-4">
@@ -487,42 +497,53 @@ export default function CashDeposit() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-  
-  <div>
-    <label className="block text-xs text-gray-500 mb-1.5">
-      {depositMethod === 'bank' ? 'Deposit Bank Name' : 'CDM Bank Name'}
-    </label>
-    <input 
-      type="text" 
-      value={bankNameInput} 
-      onChange={e => setBankNameInput(e.target.value)} 
-      placeholder={depositMethod === 'bank' ? "Enter bank name" : "Enter CDM bank name"} 
-      className="input-field text-sm" 
-    />
-  </div>
 
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5">
+                  {depositMethod === 'bank' ? 'Deposit Bank Name' : 'CDM Bank Name'}
+                </label>
+                <input
+                  type="text"
+                  value={bankNameInput}
+                  onChange={e => setBankNameInput(e.target.value)}
+                  placeholder={depositMethod === 'bank' ? "Enter bank name" : "Enter CDM bank name"}
+                  className="input-field text-sm"
+                />
+              </div>
 
-  <div>
-    <label className="block text-xs text-gray-500 mb-1.5">
-      Deposit Amount (₹)
-    </label>
-    <input 
-      type="number" 
-      value={depositAmountInput} 
-      onChange={e => setDepositAmountInput(e.target.value)} 
-      placeholder="Enter amount deposited" 
-      className="input-field text-sm" 
-      min="0" 
-    />
-  </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5">
+                  Bank Account Number
+                </label>
+                <input
+                  type="text"
+                  value={bankAccountNumberInput}
+                  onChange={e => setBankAccountNumberInput(e.target.value)}
+                  placeholder="Enter account number"
+                  className="input-field text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1.5">
+                  Deposit Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  value={depositAmountInput}
+                  onChange={e => setDepositAmountInput(e.target.value)}
+                  placeholder="Enter amount deposited"
+                  className="input-field text-sm"
+                  min="0"
+                />
+              </div>
 
-</div>
+            </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1.5">Upload Bank Slip</label>
-              <input 
-                type="file" 
-                accept="image/*,.pdf" 
-                onChange={handleFileUpload} 
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={handleFileUpload}
                 className="block w-full text-xs text-gray-500 
                   file:mr-4 file:py-2 file:px-4 
                   file:rounded-lg file:border-0 
@@ -530,13 +551,13 @@ export default function CashDeposit() {
                   file:bg-cyan-50 file:text-cyan-700 
                   hover:file:bg-cyan-100 
                   dark:file:bg-cyan-900/30 dark:file:text-cyan-400 
-                  dark:hover:file:bg-cyan-900/50" 
+                  dark:hover:file:bg-cyan-900/50"
               />
               {bankSlipInput && <p className="text-xs text-gray-400 mt-1">Selected: {bankSlipInput.name}</p>}
             </div>
 
-            <button 
-              onClick={handleAddDeposit} 
+            <button
+              onClick={handleAddDeposit}
               disabled={!depositAmountInput || Number(depositAmountInput) <= 0}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 transition-colors text-sm font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -656,26 +677,44 @@ export default function CashDeposit() {
                         <td className="p-3 text-right text-orange-600 dark:text-orange-400">₹{(row.totalExpenses || 0).toLocaleString()}</td>
                         <td className={clsx("p-3 text-right font-bold", (row.closingBalance || 0) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>₹{Math.abs(row.closingBalance || 0).toLocaleString()}{(row.closingBalance || 0) < 0 ? ' (Dr)' : ''}</td>
                         <td className="p-3 text-center">
-                          {row.expenses?.length > 0 && (
+                          {(row.expenses?.length > 0 || row.bankDeposits?.length > 0) && (
                             <button onClick={(e) => { e.stopPropagation(); setExpandedRow(isExpanded ? null : row.date) }} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
                               <ChevronRight className={clsx("w-3.5 h-3.5 transition-transform", isExpanded && "rotate-90")} />
                             </button>
                           )}
                         </td>
                       </tr>
-                      {isExpanded && row.expenses?.length > 0 && (
-                        <tr key={`${row.date}-exp`} className="bg-orange-50/30 dark:bg-orange-900/5">
+                      {isExpanded && (
+                        <tr key={`${row.date}-exp`} className="bg-slate-50/50 dark:bg-slate-800/20">
                           <td colSpan={9} className="p-0">
-                            <div className="px-8 py-3">
-                              <p className="text-[10px] uppercase font-semibold text-orange-500 tracking-wider mb-2">Expense Details</p>
-                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                                {row.expenses.map((exp, idx) => (
-                                  <div key={exp.id || idx} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-white dark:bg-gray-800 border border-orange-100 dark:border-orange-900/30 text-xs">
-                                    <span className="text-gray-600 dark:text-gray-400 truncate mr-2">{exp.description}</span>
-                                    <span className="font-semibold text-orange-600 dark:text-orange-400 flex-shrink-0">₹{exp.amount.toLocaleString()}</span>
+                            <div className="px-8 py-3 space-y-3">
+                              {row.bankDeposits?.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] uppercase font-semibold text-cyan-500 tracking-wider mb-2">Deposit Details</p>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                    {row.bankDeposits.map((dep) => (
+                                      <div key={dep.id} className="flex flex-col px-2.5 py-1.5 rounded bg-white dark:bg-gray-800 border border-cyan-100 dark:border-cyan-900/30 text-xs">
+                                        <span className="font-semibold text-cyan-600 dark:text-cyan-400">₹{dep.amount.toLocaleString()} <span className="text-[10px] font-normal text-gray-400">({dep.method === 'bank' ? 'Bank' : 'CDM'})</span></span>
+                                        {dep.bankName && <span className="text-gray-500 dark:text-gray-400">{dep.bankName}</span>}
+                                        {dep.bankAccountNumber && <span className="text-gray-500 dark:text-gray-400 font-mono text-[11px]">A/C: {dep.bankAccountNumber}</span>}
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
-                              </div>
+                                </div>
+                              )}
+                              {row.expenses?.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] uppercase font-semibold text-orange-500 tracking-wider mb-2">Expense Details</p>
+                                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                                    {row.expenses.map((exp, idx) => (
+                                      <div key={exp.id || idx} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-white dark:bg-gray-800 border border-orange-100 dark:border-orange-900/30 text-xs">
+                                        <span className="text-gray-600 dark:text-gray-400 truncate mr-2">{exp.description}</span>
+                                        <span className="font-semibold text-orange-600 dark:text-orange-400 flex-shrink-0">₹{exp.amount.toLocaleString()}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>

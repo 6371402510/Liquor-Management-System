@@ -10,9 +10,10 @@ import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API functions
 import { getPurchases, createPurchase, getPurchaseItems, updatePurchase } from '../apiservices/purchasesapi'
-import { getSuppliers } from '../apiservices/supplierapi'
+// import { getSuppliers,createSupplier } from '../apiservices/supplierapi'
 import { searchProducts, createProduct, updateProduct, getProductById } from '../apiservices/inventoryapi'
-
+import { getSuppliers } from '../apiservices/supplierapi'
+import { fetchSuppliersSafe } from './supplierHelper'
 // ─────────────────────────────────────────────────────────────
 // 1. INVENTORY CONSTANTS & HELPERS
 // ─────────────────────────────────────────────────────────────
@@ -543,12 +544,48 @@ export default function Purchases() {
     }
   }
 
-  const fetchSuppliers = async () => {
-    try {
-      const data = await getSuppliers()
-      setSuppliers(data || [])
-    } catch (err) { console.error('Failed to load suppliers') }
+// const fetchSuppliers = async () => {
+//   try {
+//     let data = await getSuppliers()
+    
+//     // Ensure default supplier exists
+//     const defaultExists = (data || []).some(s => s.name === 'Odisha State Beverages Corporation Limited')
+    
+//     if (!defaultExists) {
+//       const defaultSupplier = {
+//         name: 'Odisha State Beverages Corporation Limited',
+//         contact_person: '',
+//         phone: '0674 2303972',
+//         email: 'contact.osbcl-od@nic.in',
+//         address: `2nd Floor, Fortune Towers, Chandrasekharpur,
+// Bhubaneswar-751023 (Odisha)`,
+//         gst_number: '',
+//         license_number: '',
+//       }
+      
+//       // Double-check before creating
+//       const recheck = await getSuppliers()
+//       if (!(recheck || []).some(s => s.name === defaultSupplier.name)) {
+//         const created = await createSupplier(defaultSupplier)
+//         data = recheck?.length ? [...recheck, created] : [created]
+//       } else {
+//         data = recheck || []
+//       }
+//     }
+
+//     setSuppliers(data || [])
+//   } catch (err) { 
+//     console.error('Failed to load suppliers', err) 
+//   }
+// }
+const fetchSuppliers = async () => {
+  try {
+    const data = await fetchSuppliersSafe()
+    setSuppliers(data || [])
+  } catch (err) {
+    console.error('Failed to load suppliers', err)
   }
+}
 
   const handleItemChange = (key, val) => {
     setCurrentItem(prev => {

@@ -44,3 +44,35 @@ export const createUser = async (userData) => {
 
   return data
 }
+
+
+
+// Update an existing user (name, email, password, role, company, status)
+export const updateUser = async (userId, userData) => {
+  const token = localStorage.getItem('token')
+
+  const res = await fetch(`${API_BASE}/auth/users/${userId}`, {
+    method: 'PUT',
+    headers: {
+      accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(userData),
+  })
+
+  if (!res.ok) {
+    const errorText = await res.text()
+    console.error('API Error Response:', errorText)
+
+    try {
+      const data = JSON.parse(errorText)
+      throw new Error(data.detail || 'Failed to update user')
+    } catch (e) {
+      if (e.message === 'Failed to update user') throw e
+      throw new Error(`Failed to update user (Status: ${res.status})`)
+    }
+  }
+
+  return res.json()
+}

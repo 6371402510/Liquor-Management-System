@@ -1,18 +1,19 @@
 import { useState, useEffect } from 'react'
 import { Plus, CreditCard as Edit2, Trash2, X, Loader as Loader2, Search, Truck, Phone, Mail, AlertCircle } from 'lucide-react'
-
+import { getSuppliers, updateSupplier, deleteSupplier } from '../apiservices/supplierapi'
+import { fetchSuppliersSafe } from './supplierHelper'
 // Import API functions
-import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../apiservices/supplierapi'
-const defaultSupplier = {
-  name: 'Odisha State Beverages Corporation Limited',
-  contact_person: '',
-  phone: '0674 2303972',
-  email: 'contact.osbcl-od@nic.in',
-  address: `2nd Floor, Fortune Towers, Chandrasekharpur,
-Bhubaneswar-751023 (Odisha)`,
-  gst_number: '',
-  license_number: '',
-}
+// import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../apiservices/supplierapi'
+// const defaultSupplier = {
+//   name: 'Odisha State Beverages Corporation Limited',
+//   contact_person: '',
+//   phone: '0674 2303972',
+//   email: 'contact.osbcl-od@nic.in',
+//   address: `2nd Floor, Fortune Towers, Chandrasekharpur,
+// Bhubaneswar-751023 (Odisha)`,
+//   gst_number: '',
+//   license_number: '',
+// }
 const emptyForm = {
   name: '', contact_person: '', phone: '', email: '',
   address: '', gst_number: '', license_number: '',
@@ -30,21 +31,45 @@ export default function Suppliers() {
 
   useEffect(() => { fetchSuppliers() }, [])
 
- const fetchSuppliers = async () => {
+//  const fetchSuppliers = async () => {
+//   setLoading(true)
+//   setError('')
+
+//   try {
+//     let data = await getSuppliers()
+
+//     // Check if the default supplier already exists by NAME, not just array length
+//     const defaultExists = (data || []).some(s => s.name === defaultSupplier.name)
+
+//     if (!defaultExists) {
+//       // Fetch one more time to avoid race condition with another tab/page
+//       const recheck = await getSuppliers()
+//       const recheckExists = (recheck || []).some(s => s.name === defaultSupplier.name)
+
+//       if (!recheckExists) {
+//         // Safe to create - we've double-checked and it truly doesn't exist
+//         const created = await createSupplier(defaultSupplier)
+//         data = recheck?.length ? [...recheck, created] : [created]
+//       } else {
+//         data = recheck || []
+//       }
+//     }
+
+//     setSuppliers(data || [])
+
+//   } catch (err) {
+//     setError(err.message || 'Failed to load suppliers')
+//   } finally {
+//     setLoading(false)
+//   }
+// }
+
+const fetchSuppliers = async () => {
   setLoading(true)
   setError('')
-
   try {
-    let data = await getSuppliers()
-
-    // If no supplier exists, create default supplier
-    if (!data || data.length === 0) {
-      const created = await createSupplier(defaultSupplier)
-      data = [created]
-    }
-
+    const data = await fetchSuppliersSafe()
     setSuppliers(data || [])
-
   } catch (err) {
     setError(err.message || 'Failed to load suppliers')
   } finally {

@@ -13,7 +13,32 @@ export function AuthProvider({ children }) {
 
     if (token && userData) {
       try {
-        setUser(JSON.parse(userData))
+        const parsedUser = JSON.parse(userData)
+        
+        // ─── FIX: Fallback for Salesman/Manager missing companies array ───
+        if (
+          parsedUser.role !== "ADMIN" && 
+          parsedUser.company_id && 
+          (!parsedUser.companies || parsedUser.companies.length === 0)
+        ) {
+          parsedUser.companies = [{ id: parsedUser.company_id, company_name: "My Store" }]
+          localStorage.setItem('user', JSON.stringify(parsedUser))
+        }
+
+        // ─── FIX: Auto-set ALL company keys on page refresh ───
+        if (
+          parsedUser.role !== "ADMIN" && 
+          parsedUser.company_id && 
+          !localStorage.getItem('selectedCompanyId')
+        ) {
+          const compName = parsedUser.companies?.[0]?.company_name || "My Store"
+          
+          localStorage.setItem('selectedCompany', JSON.stringify({ id: parsedUser.company_id, company_name: compName }))
+          localStorage.setItem('selectedCompanyId', String(parsedUser.company_id)) // POS.jsx looks for this
+          localStorage.setItem('selectedCompanyName', compName)                 // POS.jsx looks for this
+        }
+
+        setUser(parsedUser)
       } catch {
         localStorage.clear()
       }
@@ -40,11 +65,32 @@ export function AuthProvider({ children }) {
         return { error: { message: data.detail || 'Login failed' } }
       }
 
-      localStorage.setItem('token', data.access_token)
-      localStorage.setItem('user', JSON.stringify(data.user))
-      setUser(data.user)
+      const loggedInUser = data.user
 
-      return { error: null, data: data.user }
+      // ─── FIX: Fallback for Salesman/Manager missing companies array ───
+      if (
+        loggedInUser.role !== "ADMIN" && 
+        loggedInUser.company_id && 
+        (!loggedInUser.companies || loggedInUser.companies.length === 0)
+      ) {
+        loggedInUser.companies = [{ id: loggedInUser.company_id, company_name: "My Store" }]
+      }
+
+      // ─── FIX: Auto-set ALL company keys for Manager/Salesman ───
+      if (loggedInUser.role !== "ADMIN" && loggedInUser.company_id) {
+        const compName = loggedInUser.companies?.[0]?.company_name || "My Store"
+        
+        localStorage.setItem('selectedCompany', JSON.stringify({ id: loggedInUser.company_id, company_name: compName }))
+        localStorage.setItem('selectedCompanyId', String(loggedInUser.company_id)) // POS.jsx looks for this
+        localStorage.setItem('selectedCompanyName', compName)                 // POS.jsx looks for this
+      }
+      // Note: ADMIN does NOT get auto-set here
+
+      localStorage.setItem('token', data.access_token)
+      localStorage.setItem('user', JSON.stringify(loggedInUser))
+      setUser(loggedInUser)
+
+      return { error: null, data: loggedInUser }
     } catch (err) {
       return { error: { message: 'Network error.' } }
     }
@@ -92,6 +138,8 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     localStorage.removeItem('selectedCompany')
+    localStorage.removeItem('selectedCompanyId')   // Clear this too
+    localStorage.removeItem('selectedCompanyName')  // Clear this too
     setUser(null)
   }
 

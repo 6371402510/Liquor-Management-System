@@ -66,7 +66,8 @@ export default function ExciseReport() {
   const [filterDateTo, setFilterDateTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [filterCategory, setFilterCategory] = useState('ALL')
   const [search, setSearch] = useState('')
-
+  const [filterProductType, setFilterProductType] = useState('ALL')
+  const [filterSize, setFilterSize] = useState('ALL')
   // ─── UI State ───
   const [showFilters, setShowFilters] = useState(true)
   const [sortField, setSortField] = useState('slNo')
@@ -192,10 +193,12 @@ export default function ExciseReport() {
     setFilterDateTo(format(new Date(), 'yyyy-MM-dd'))
     setSearch('')
     setFilterCategory('ALL')
+    setFilterProductType('ALL')  // ← added
+    setFilterSize('ALL')  // ← added
     setCurrentPage(1)
   }
 
-  const hasActiveFilters = search || filterCategory !== 'ALL'
+  const hasActiveFilters = search || filterCategory !== 'ALL' || filterProductType !== 'ALL'
 
   // ─── 3. Generate Report Data ───
   const reportData = useMemo(() => {
@@ -205,7 +208,9 @@ export default function ExciseReport() {
         const q = search.toLowerCase()
         const matchSearch = !q || (p.name || '').toLowerCase().includes(q) || (p.brand || '').toLowerCase().includes(q)
         const matchCat = filterCategory === 'ALL' || p.category === filterCategory
-        return matchSearch && matchCat
+        const matchType = filterProductType === 'ALL' || p.product_type === filterProductType
+        const matchSize = filterSize === 'ALL' || p.bottle_size === filterSize
+        return matchSearch && matchCat && matchType && matchSize
       })
       .map(p => {
         const opening = Number(p.opening_stock) || 0
@@ -236,7 +241,7 @@ export default function ExciseReport() {
           category: p.category
         }
       })
-  }, [products, purchaseQtyMap, transferQtyMap, search, filterCategory])
+  }, [products, purchaseQtyMap, transferQtyMap, search, filterCategory, filterProductType, filterSize])
 
   // ─── Sorting ───
   const sortedData = useMemo(() => {
@@ -255,6 +260,20 @@ export default function ExciseReport() {
     else { setSortField(field); setSortDir('asc') }
   }
 
+
+  const productTypes = useMemo(() => {
+    const types = [...new Set(products.map(p => p.product_type).filter(Boolean))]
+    return types.sort()
+  }, [products])
+
+  const bottleSizes = useMemo(() => {
+    const sizes = [...new Set(products.map(p => p.bottle_size).filter(Boolean))]
+    return sizes.sort((a, b) => {
+      const numA = parseInt(a) || 0
+      const numB = parseInt(b) || 0
+      return numA - numB
+    })
+  }, [products])
   // ─── Summary Stats ───
   const totals = useMemo(() => {
     return reportData.reduce((acc, row) => {
@@ -401,11 +420,26 @@ export default function ExciseReport() {
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2"><Filter className="w-4 h-4 text-indigo-500" /> Filters</h3>
             <button onClick={clearFilters} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 font-medium"><RotateCcw className="w-3 h-3" /> Clear</button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <div><label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Period From</label><input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} className="input-field text-xs" /></div>
             <div><label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Period To</label><input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} className="input-field text-xs" /></div>
             <div><label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Category</label><select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="input-field text-xs"><option value="ALL">All</option>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
             <div><label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Search Product</label><div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" /><input type="text" placeholder="Name or Brand..." value={search} onChange={e => setSearch(e.target.value)} className="input-field text-xs pl-8" /></div></div>
+            <div>
+              <label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Product Type</label>
+              <select value={filterProductType} onChange={e => setFilterProductType(e.target.value)} className="input-field text-xs">
+                <option value="ALL">All Types</option>
+                {productTypes.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Bottle Size</label>
+              <select value={filterSize} onChange={e => setFilterSize(e.target.value)} className="input-field text-xs">
+                <option value="ALL">All Sizes</option>
+                {bottleSizes.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
           </div>
 
           {/* Quick Date Presets */}

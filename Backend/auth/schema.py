@@ -23,3 +23,12 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UpdateUserSchema(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None  # If empty, password won't change
+    role: Optional[Literal["MANAGER", "SALESMAN"]] = None
+    company_id: Optional[int] = None
+    is_active: Optional[bool] = None

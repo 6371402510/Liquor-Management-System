@@ -53,7 +53,7 @@ export default function Sidebar({ open, onClose }) {
       roles: ['ADMIN', 'MANAGER', 'SALESMAN'], // Everyone can see POS parent
       children: [
         { to: '/pos', label: ' Counter', roles: ['ADMIN', 'MANAGER', 'SALESMAN'] },
-        { to: '/pos-godown', label: 'Godown', roles: ['ADMIN', 'MANAGER'] }, // Salesman can't see Godown
+        { to: '/pos-godown', label: 'WareHouse', roles: ['ADMIN', 'MANAGER'] }, // Salesman can't see Godown
       ],
     },
     { to: '/purchases', icon: ShoppingBag, label: 'Purchase', roles: ['ADMIN', 'MANAGER'] },
@@ -64,6 +64,7 @@ export default function Sidebar({ open, onClose }) {
     { to: '/stock-transfer-report', icon: FileText, label: 'Stock Transfer Report', roles: ['ADMIN', 'MANAGER'] },
     { to: '/reports', icon: BarChart3, label: 'Sales Reports', roles: ['ADMIN', 'MANAGER'] },
     { to: '/excise-register', icon: FileText, label: 'Excise Register', roles: ['ADMIN', 'MANAGER'] },
+    { to: '/exciseSizeWiseReport', icon: FileText, label: 'Excise size report', roles: ['ADMIN', 'MANAGER'] },
     { to: '/expenses', icon: Receipt, label: 'Expenses', roles: ['ADMIN', 'MANAGER'] },
     { to: '/employees', icon: Users, label: 'Employees', roles: ['ADMIN', 'MANAGER'] },
     { to: '/employee-attendance', icon: Users, label: 'Employee Attendance', roles: ['ADMIN', 'MANAGER'] },

@@ -119,7 +119,7 @@ export default function Login() {
               className="w-full h-full object-cover"
             />
           </div>
-          <h1 className="text-4xl font-bold text-white mb-3">
+          <h1 className="text-4xl font-bold text-green-500 mb-3">
   VICHAAR <span className="text-yellow-400">BEVTRAC</span>
 </h1>
 
@@ -169,16 +169,16 @@ export default function Login() {
       : "Days Remaining"}
   </p>
 </div>
-<p  className="text-left mt-[10px]">Devloped & Marketed By : </p>
+<p  className="text-left mt-[10px] text-white">Devloped & Marketed By : </p>
 <div className="mt-3 px-6 py-4 rounded-xl bg-white/10 border border-white/20 text-center">
   
   
   <p  className="text-[20px] text-green-500">VICHAARLAB </p>
-  <p className="mt-[2px]">
+  <p className="mt-[2px] text-white">
   Support: <span className="text-[#EA4335]">support@vichaarlab.com</span>
 </p>
-  <p  className="mt-[2px] ">Help Line: <span className="text-yellow-400">0674 3185541, 90909 72227</span></p>
-  <p  className="mt-[2px] "> Adress:  <span className=" font-semibold bg-gradient-to-r from-green-400 via-emerald-400 to-lime-400 bg-clip-text text-transparent mb-10">Nanadan Vihar, Patia, Bhubaneswar-24</span></p>
+  <p  className="mt-[2px] text-white ">Help Line: <span className="text-yellow-400">0674 3185541, 90909 72227</span></p>
+  <p  className="mt-[2px] text-white "> Adress:  <span className=" font-semibold bg-gradient-to-r from-green-400 via-emerald-400 to-lime-400 bg-clip-text text-transparent mb-10">Nanadan Vihar, Patia, Bhubaneswar-24</span></p>
 
 
 
@@ -200,9 +200,13 @@ export default function Login() {
 
         <div className="w-full max-w-sm">
           <div className="flex justify-center mb-8 lg:hidden">
-            <div className="w-14 h-14 rounded-xl bg-amber-500 flex items-center justify-center">
-              <Wine className="w-7 h-7 text-white" />
-            </div>
+            <div className="w-[100px] h-[100px] rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-amber-500/0 overflow-hidden">
+            <img
+              src={vichaarLogo}
+              alt="Profile"
+              className="w-full h-full object-cover"
+            />
+          </div>
           </div>
 
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
