@@ -1247,14 +1247,14 @@ export default function POSGodown() {
                     <div className="flex gap-3">
                       <div className="flex-1 min-w-0 space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-mono text-gray-500 dark:text-gray-400">B.No:{product.id}</span>
-                          <span className="text-[9px] text-gray-500 dark:text-gray-400">{format(new Date(), 'dd/MM/yy')}</span>
+                          <span className="text-[12px] font-mono text-green-500 dark:text-green-400">B.No:{product.id}</span>
+                          <span className="text-[11px] text-green-500 dark:text-green-400">{format(new Date(), 'dd/MM/yy')}</span>
                         </div>
                         <p className="text-[11px] font-bold text-gray-900 dark:text-white truncate">{product.name}</p>
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-semibold text-primary-600 dark:text-primary-400">MRP: ₹{product.sale_price}</span>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] text-gray-500 dark:text-gray-400 flex items-center gap-0.5"><Layers className="w-2.5 h-2.5" /> {product.godown_stock}</span>
+                            <span className="text-[11px] text-gray-500 dark:text-green-400 flex items-center gap-0.5"><Layers className="w-2.5 h-2.5" /> {product.godown_stock}</span>
                             {cartCount > 0 && (
                               <span className="text-[9px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded-full">{cartCount} in bill</span>
                             )}
@@ -1288,8 +1288,8 @@ export default function POSGodown() {
                   <button key={p.id} onClick={() => addToCart(p)} className="w-full flex items-center gap-2 p-1.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <div className="w-7 h-7 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[7px] font-bold text-gray-500">{p.category?.slice(0, 2)}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
-                      <p className="text-[8px] text-gray-400">Stock: {p.godown_stock} {cartCount > 0 && `· ${cartCount} in bill`}</p>
+                      <p className="text-[12px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
+                      <p className="text-[11px] dark:text-white text-blue-700 ">Stock: {p.godown_stock} {cartCount > 0 && `· ${cartCount} in bill`}</p>
                     </div>
                     <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300">₹{p.sale_price}</p>
                   </button>
