@@ -24,6 +24,7 @@ class PurchaseItemBase(BaseModel):
     total_bottles: int = Field(default=0, alias="totalBottles")
     qty_bulk_liters: float = Field(default=0.0, alias="qtyBulkLiters")
     qty_lp_liters: float = Field(default=0.0, alias="qtyLPLiters")
+    mger_value: float = Field(default=0.0, alias="mgerValue")
     opening_stock: int = Field(default=0, alias="openingStock")
     min_stock: int = Field(default=0, alias="minStock")
     total_cost: float = 0.0

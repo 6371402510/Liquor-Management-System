@@ -43,6 +43,7 @@ from inventory.router import router as inventory_router
 from supplier.router import router as supplier_router
 from purchases.router import router as purchases_router
 from stock_transfer.router import router as stock_transfer_router
+from counter_to_godown.router import router as counter_to_godown_router
 from employee.router import router as employee_router
 from sales_counter.router import router as sales_counter_router
 from sales_godown.router import router as sales_godown_router
@@ -50,6 +51,7 @@ from expenses.router import expense_router, category_router
 from employee_attendance.router import router as attendance_router
 from dashboard.router import router as dashboard_router
 from admin_dashboard.router import router as admin_dashboard_router
+from damage.router import router as damage_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -78,11 +80,17 @@ app.include_router(category_router, prefix="/api")
 app.include_router(attendance_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 app.include_router(admin_dashboard_router, prefix="/api")
-# app.mount(
-#     "/assets",
-#     StaticFiles(directory="../frontend/dist/assets"),
-#     name="assets"
-# )
+app.include_router(counter_to_godown_router, prefix="/api")
+app.include_router(damage_router, prefix="/api")
+
+
+
+# ─── ENSURE UPLOAD DIRECTORY EXISTS ───
+UPLOAD_DIR = Path("uploads/damages")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# ─── SERVE UPLOADS AS STATIC FILES ───
+app.mount("/api/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # @app.get("/")
 # async def root():

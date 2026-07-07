@@ -12,9 +12,17 @@ class DashboardStats(BaseModel):
     monthPurchases: float = 0
     monthExpenses: float = 0
     totalEmployees: int = 0
-    totalBottlesInStock: int = 0     # NEW
-    totalBottlesSold: int = 0        # NEW
-    totalBottlesPurchased: int = 0   # NEW
+    totalBottlesInStock: int = 0
+    totalBottlesSold: int = 0
+    totalBottlesPurchased: int = 0
+    
+    # ═══════════════════════════════════════════════════════════
+    # MGR STATUS FIELDS
+    # ═══════════════════════════════════════════════════════════
+    monthly_mgr_target: float = 30890000.0  # Fixed Monthly Target
+    achieved_mgr: float = 0                 # MGR achieved this month
+    to_be_achieved_mgr: float = 0           # Remaining MGR to achieve
+    mgr_percentage: float = 0               # Achievement percentage
 
 class DailySale(BaseModel):
     date: str
@@ -67,7 +75,6 @@ class ExpenseBreakdown(BaseModel):
     category: str
     total_amount: float
 
-# ─── NEW SCHEMAS ───
 class PaymentModeBreakdown(BaseModel):
     mode: str
     total_amount: float
@@ -79,9 +86,19 @@ class TopSellingBrand(BaseModel):
 class ExciseSummary(BaseModel):
     stock_bl: float
     stock_lpl: float
+    stock_mger: float
     sold_bl: float
     sold_lpl: float
-# ─── END NEW SCHEMAS ───
+
+# ═══════════════════════════════════════════════════════════
+# NEW: MGR STATUS SCHEMA (Separate for detailed view)
+# ═══════════════════════════════════════════════════════════
+class MGRStatus(BaseModel):
+    monthly_target: float
+    achieved: float
+    to_be_achieved: float
+    percentage: float
+    percentage_display: str  # "45.5%"
 
 class DashboardResponse(BaseModel):
     stats: DashboardStats
@@ -92,6 +109,7 @@ class DashboardResponse(BaseModel):
     recentSales: List[RecentSale]
     recentPurchases: List[RecentPurchase]
     lowStockItems: List[LowStockItem]
-    paymentModeBreakdown: List[PaymentModeBreakdown]   # NEW
-    topSellingBrands: List[TopSellingBrand]            # NEW
-    exciseSummary: ExciseSummary                       # NEW
+    paymentModeBreakdown: List[PaymentModeBreakdown]
+    topSellingBrands: List[TopSellingBrand]
+    exciseSummary: ExciseSummary
+    mgr_status: MGRStatus  # NEW

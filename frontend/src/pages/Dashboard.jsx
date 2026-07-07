@@ -11,7 +11,10 @@ import {
   Wallet,
   TrendingDown,
   CalendarDays,
-  RotateCcw
+  RotateCcw,
+  Target,
+  CheckCircle,
+  Clock
 } from 'lucide-react'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -32,7 +35,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // ─── Sync companyId from localStorage (if user switches company in another tab) ───
+  // ─── Sync companyId from localStorage ───
   useEffect(() => {
     const syncCompanyId = () => {
       const newId = localStorage.getItem('selectedCompanyId')
@@ -42,24 +45,17 @@ export default function Dashboard() {
     return () => window.removeEventListener('storage', syncCompanyId)
   }, [companyId])
 
-  // ─── Fetch Dashboard Data (When date or company changes) ───
+  // ─── Fetch Dashboard Data ───
   useEffect(() => {
     if (companyId) fetchDashboardData()
   }, [companyId, selectedDate])
 
-  // ═══════════════════════════════════════════════════════════
-  // ─── NEW: OFFLINE SYNC (When company loads or comes online) ──
-  // ═══════════════════════════════════════════════════════════
+  // ─── OFFLINE SYNC ───
   useEffect(() => {
     if (!companyId) return;
-
-    // 1. Sync products immediately on load
     syncProductsToLocalDB(companyId);
-
-    // 2. Re-sync automatically if the user's internet comes back online
     const handleOnline = () => syncProductsToLocalDB(companyId);
     window.addEventListener('online', handleOnline);
-
     return () => window.removeEventListener('online', handleOnline);
   }, [companyId])
 
@@ -77,6 +73,7 @@ export default function Dashboard() {
   }
 
   const fmt = (n) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n || 0)
+  const fmtCurrency = (n) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0)
   const resetToToday = () => setSelectedDate(format(new Date(), 'yyyy-MM-dd'))
 
   // ─── Guard: No Company Selected ───
@@ -121,8 +118,46 @@ export default function Dashboard() {
     lowStockItems,
     paymentModeBreakdown,
     topSellingBrands,
-    exciseSummary
+    exciseSummary,
+    mgr_status  // ═══ NEW ═══
   } = data;
+
+  // ═══════════════════════════════════════════════════════════
+  // MGR HELPERS
+  // ═══════════════════════════════════════════════════════════
+  const mgrPct = mgr_status?.percentage || 0
+  const mgrAchieved = mgr_status?.achieved || 0
+  const mgrTarget = mgr_status?.monthly_target || 30890000
+  const mgrToBe = mgr_status?.to_be_achieved || 0
+  const daysLeft = Math.max(0, new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate())
+  const dailyTargetNeeded = daysLeft > 0 ? mgrToBe / daysLeft : 0
+
+  const getMGRProgressColor = () => {
+    if (mgrPct >= 100) return 'bg-green-500'
+    if (mgrPct >= 75) return 'bg-blue-500'
+    if (mgrPct >= 50) return 'bg-yellow-500'
+    return 'bg-red-500'
+  }
+
+  const getMGRProgressBg = () => {
+    if (mgrPct >= 100) return 'bg-green-100 dark:bg-green-900/30'
+    if (mgrPct >= 75) return 'bg-blue-100 dark:bg-blue-900/30'
+    if (mgrPct >= 50) return 'bg-yellow-100 dark:bg-yellow-900/30'
+    return 'bg-red-100 dark:bg-red-900/30'
+  }
+
+  const getMGRStatusText = () => {
+    if (mgrPct >= 100) return 'Target Achieved! 🎉'
+    if (mgrPct >= 75) return 'Almost There!'
+    if (mgrPct >= 50) return 'On Track'
+    return 'Needs Attention'
+  }
+
+  const getMGRStatusIcon = () => {
+    if (mgrPct >= 100) return <CheckCircle className="text-green-500" size={22} />
+    if (mgrPct >= 50) return <TrendingUp className="text-blue-500" size={22} />
+    return <AlertTriangle className="text-red-500" size={22} />
+  }
 
   const statCards = [
     {
@@ -185,9 +220,8 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* ─── Stat Cards ─── */}
-
-       <div className="flex items-center gap-3">
+      {/* ─── Date Selector ─── */}
+      <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800">
           <CalendarDays className="w-3.5 h-3.5 text-primary-500" />
           <span className="text-xs font-semibold text-primary-700 dark:text-primary-300">
@@ -207,7 +241,8 @@ export default function Dashboard() {
         )}
       </div>
       
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 ">
+      {/* ─── Stat Cards ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {statCards.map(s => (
           <div key={s.label} className="card p-4 text-center">
             <div className="flex items-start justify-between mb-3">
@@ -220,6 +255,146 @@ export default function Dashboard() {
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{s.sub}</p>
           </div>
         ))}
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ═══              MGR STATUS CARD (NEW)                 ═══ */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <div className="card p-5">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0">
+              <Target className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">MGR Status — Monthly Target</h3>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500">Monitored by Excise Department</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={clsx(
+              "text-xs font-semibold px-2.5 py-1 rounded-full",
+              mgrPct >= 100 
+                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                : mgrPct >= 50
+                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                  : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+            )}>
+              {getMGRStatusText()}
+            </span>
+            {getMGRStatusIcon()}
+          </div>
+        </div>
+
+        {/* Progress Bar */}
+        <div className="mb-5">
+          <div className="flex justify-between items-end mb-2">
+            <div>
+              <span className={clsx(
+                "text-3xl font-extrabold tracking-tight",
+                mgrPct >= 100 ? "text-green-600 dark:text-green-400" :
+                mgrPct >= 50 ? "text-blue-600 dark:text-blue-400" :
+                "text-red-600 dark:text-red-400"
+              )}>
+                {mgrPct.toFixed(2)}%
+              </span>
+              <span className="text-xs text-gray-400 ml-2">achieved</span>
+            </div>
+            <span className="text-xs text-gray-400">
+              {fmtCurrency(mgrAchieved)} / {fmtCurrency(mgrTarget)}
+            </span>
+          </div>
+          <div className={clsx("h-5 w-full rounded-full overflow-hidden", getMGRProgressBg())}>
+            <div 
+              className={clsx("h-full rounded-full transition-all duration-700 ease-out", getMGRProgressColor())}
+              style={{ width: `${Math.min(mgrPct, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* 3 Column Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Monthly Target */}
+          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-100 dark:border-gray-700/50">
+            <div className="flex items-center gap-2 mb-2">
+              <Target className="w-4 h-4 text-gray-400" />
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Monthly Target</p>
+            </div>
+            <p className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+              {fmtCurrency(mgrTarget)}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-1">Fixed monthly MGR quota</p>
+          </div>
+
+          {/* Achieved MGR */}
+          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-800/50">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="w-4 h-4 text-blue-500" />
+              <p className="text-[11px] font-semibold text-blue-500 uppercase tracking-wider">Achieved MGR</p>
+            </div>
+            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+              {fmtCurrency(mgrAchieved)}
+            </p>
+            <p className="text-[11px] text-blue-400 mt-1">From purchases this month</p>
+          </div>
+
+          {/* To Be Achieved */}
+          <div className={clsx(
+            "rounded-xl p-4 border",
+            mgrToBe > 0 
+              ? "bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800/50"
+              : "bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/50"
+          )}>
+            <div className="flex items-center gap-2 mb-2">
+              {mgrToBe > 0 
+                ? <AlertTriangle className="w-4 h-4 text-red-500" />
+                : <CheckCircle className="w-4 h-4 text-green-500" />
+              }
+              <p className={clsx(
+                "text-[11px] font-semibold uppercase tracking-wider",
+                mgrToBe > 0 ? "text-red-500" : "text-green-500"
+              )}>To Be Achieved</p>
+            </div>
+            <p className={clsx(
+              "text-2xl font-bold",
+              mgrToBe > 0 ? "text-red-700 dark:text-red-300" : "text-green-700 dark:text-green-300"
+            )}>
+              {fmtCurrency(mgrToBe)}
+            </p>
+            <p className={clsx(
+              "text-[11px] mt-1",
+              mgrToBe > 0 ? "text-red-400" : "text-green-400"
+            )}>
+              {mgrToBe > 0 ? 'Remaining to reach target' : 'Target fully achieved!'}
+            </p>
+          </div>
+        </div>
+
+        {/* Bottom Info Row */}
+        <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center gap-x-8 gap-y-2">
+          <div className="flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5 text-gray-400" />
+            <span className="text-xs text-gray-500 dark:text-gray-400">Days Left:</span>
+            <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{daysLeft} days</span>
+          </div>
+          {mgrToBe > 0 && daysLeft > 0 && (
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-xs text-gray-500 dark:text-gray-400">Daily Target Needed:</span>
+              <span className="text-xs font-bold text-orange-600 dark:text-orange-400">{fmtCurrency(dailyTargetNeeded)}/day</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <div className={clsx(
+              "w-2 h-2 rounded-full",
+              mgrPct >= 100 ? "bg-green-500" : mgrPct >= 50 ? "bg-blue-500" : "bg-red-500"
+            )} />
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {mgrPct >= 100 ? 'On target' : `${(100 - mgrPct).toFixed(2)}% more needed`}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* ─── Charts Row 1 ─── */}
@@ -268,11 +443,11 @@ export default function Dashboard() {
         
         {/* Excise Summary */}
         <div className="card p-5">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Excise Summary (BL / LPL)</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Excise Summary (BL / LPL / MGER)</h3>
           <div className="space-y-4">
             <div>
               <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Current Stock</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
                   <p className="text-lg font-bold text-blue-700 dark:text-blue-300">{exciseSummary.stock_bl.toFixed(2)}</p>
                   <p className="text-[10px] text-blue-500">Bulk Liters</p>
@@ -280,6 +455,10 @@ export default function Dashboard() {
                 <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
                   <p className="text-lg font-bold text-purple-700 dark:text-purple-300">{exciseSummary.stock_lpl.toFixed(2)}</p>
                   <p className="text-[10px] text-purple-500">LP Liters</p>
+                </div>
+                <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
+                  <p className="text-lg font-bold text-orange-700 dark:text-orange-300">{exciseSummary.stock_mger.toFixed(2)}</p>
+                  <p className="text-[10px] text-orange-500">MGER</p>
                 </div>
               </div>
             </div>
@@ -353,34 +532,34 @@ export default function Dashboard() {
         </div>
       </div>
 
-        {/* Expense Breakdown */}
-        <div className="card p-5">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Expenses by Category</h3>
-          {expenseBreakdown.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">No expenses this month</p>
-          ) : (
-            <div className="space-y-3">
-              {expenseBreakdown.slice(0, 6).map((item, i) => {
-                const totalExpense = expenseBreakdown.reduce((s, e) => s + e.total_amount, 0)
-                const pct = totalExpense > 0 ? (item.total_amount / totalExpense * 100) : 0
-                return (
-                  <div key={item.category}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{item.category}</span>
-                      <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">₹{fmt(item.total_amount)}</span>
-                    </div>
-                    <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5">
-                      <div
-                        className="h-1.5 rounded-full transition-all duration-500"
-                        style={{ width: `${pct}%`, backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
-                      />
-                    </div>
+      {/* ─── Expense Breakdown ─── */}
+      <div className="card p-5">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Expenses by Category</h3>
+        {expenseBreakdown.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-8">No expenses this month</p>
+        ) : (
+          <div className="space-y-3">
+            {expenseBreakdown.slice(0, 6).map((item, i) => {
+              const totalExpense = expenseBreakdown.reduce((s, e) => s + e.total_amount, 0)
+              const pct = totalExpense > 0 ? (item.total_amount / totalExpense * 100) : 0
+              return (
+                <div key={item.category}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{item.category}</span>
+                    <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">₹{fmt(item.total_amount)}</span>
                   </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
+                  <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5">
+                    <div
+                      className="h-1.5 rounded-full transition-all duration-500"
+                      style={{ width: `${pct}%`, backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
       
       {/* ─── Lists Row ─── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

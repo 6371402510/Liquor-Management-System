@@ -33,7 +33,7 @@ const SUB_CATEGORIES_BY_CATEGORY = {
 
 const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE']
 
-const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE', ]
+const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE',]
 
 const BOTTLE_SIZES_BY_TYPE = {
   'IMFL': ['90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
@@ -353,6 +353,7 @@ function normalizeItem(item) {
     total_bottles: Number(item.total_bottles ?? item.totalBottles ?? item.qty_bottles ?? item.qtyBottles) || 0,
     qty_bulk_liters: Number(item.qty_bulk_liters ?? item.qtyBulkLiters) || 0,
     qty_lp_liters: Number(item.qty_lp_liters ?? item.qtyLPLiters) || 0,
+    mger_value: Number(item.mger_value ?? item.mgerValue) || 0,
     opening_stock: Number(item.opening_stock ?? item.openingStock) || 0,
     min_stock: Number(item.min_stock ?? item.minStock) || 0,
     total_cost: Number(item.total_cost) || 0,
@@ -379,6 +380,7 @@ const EMPTY_ITEM = {
   totalQty: 0,
   qtyBulkLiters: 0,
   qtyLPLiters: 0,
+  mgerValue: 0,
   openingStock: 0,
   minStock: 0,
 }
@@ -528,12 +530,13 @@ export default function Purchases() {
           totalQty: Number(item.total_bottles) || 0,
           qtyBulkLiters: Number(item.qty_bulk_liters) || 0,
           qtyLPLiters: Number(item.qty_lp_liters) || 0,
+          mgerValue: Number(item.mger_value ?? item.mgerValue) || 0, // <--- ADD THIS LINE
           openingStock: Number(item.opening_stock) || 0,
           minStock: Number(item.min_stock) || 0,
         }
       })
 
-      setItems(mappedItems)
+      setItems([...mappedItems].reverse().map((item, i) => ({ ...item, serialNo: i + 1 })))
       setEditingPurchaseId(purchase.id)
       setEditingItemIndex(null)
       setShowForm(true)
@@ -544,53 +547,60 @@ export default function Purchases() {
     }
   }
 
-// const fetchSuppliers = async () => {
-//   try {
-//     let data = await getSuppliers()
-    
-//     // Ensure default supplier exists
-//     const defaultExists = (data || []).some(s => s.name === 'Odisha State Beverages Corporation Limited')
-    
-//     if (!defaultExists) {
-//       const defaultSupplier = {
-//         name: 'Odisha State Beverages Corporation Limited',
-//         contact_person: '',
-//         phone: '0674 2303972',
-//         email: 'contact.osbcl-od@nic.in',
-//         address: `2nd Floor, Fortune Towers, Chandrasekharpur,
-// Bhubaneswar-751023 (Odisha)`,
-//         gst_number: '',
-//         license_number: '',
-//       }
-      
-//       // Double-check before creating
-//       const recheck = await getSuppliers()
-//       if (!(recheck || []).some(s => s.name === defaultSupplier.name)) {
-//         const created = await createSupplier(defaultSupplier)
-//         data = recheck?.length ? [...recheck, created] : [created]
-//       } else {
-//         data = recheck || []
-//       }
-//     }
+  // const fetchSuppliers = async () => {
+  //   try {
+  //     let data = await getSuppliers()
 
-//     setSuppliers(data || [])
-//   } catch (err) { 
-//     console.error('Failed to load suppliers', err) 
-//   }
-// }
-const fetchSuppliers = async () => {
-  try {
-    const data = await fetchSuppliersSafe()
-    setSuppliers(data || [])
-  } catch (err) {
-    console.error('Failed to load suppliers', err)
+  //     // Ensure default supplier exists
+  //     const defaultExists = (data || []).some(s => s.name === 'Odisha State Beverages Corporation Limited')
+
+  //     if (!defaultExists) {
+  //       const defaultSupplier = {
+  //         name: 'Odisha State Beverages Corporation Limited',
+  //         contact_person: '',
+  //         phone: '0674 2303972',
+  //         email: 'contact.osbcl-od@nic.in',
+  //         address: `2nd Floor, Fortune Towers, Chandrasekharpur,
+  // Bhubaneswar-751023 (Odisha)`,
+  //         gst_number: '',
+  //         license_number: '',
+  //       }
+
+  //       // Double-check before creating
+  //       const recheck = await getSuppliers()
+  //       if (!(recheck || []).some(s => s.name === defaultSupplier.name)) {
+  //         const created = await createSupplier(defaultSupplier)
+  //         data = recheck?.length ? [...recheck, created] : [created]
+  //       } else {
+  //         data = recheck || []
+  //       }
+  //     }
+
+  //     setSuppliers(data || [])
+  //   } catch (err) { 
+  //     console.error('Failed to load suppliers', err) 
+  //   }
+  // }
+  const fetchSuppliers = async () => {
+    try {
+      const data = await fetchSuppliersSafe()
+      setSuppliers(data || [])
+    } catch (err) {
+      console.error('Failed to load suppliers', err)
+    }
   }
-}
 
   const handleItemChange = (key, val) => {
     setCurrentItem(prev => {
       const updated = { ...prev, [key]: val }
 
+      // ─── When user types QUANTITY (bottles) directly ───
+      if (key === 'totalQty') {
+        // Just set the value — don't touch cases
+        // Cases is a separate optional input
+      }
+
+      // ─── When user types CASES — auto-calculate bottles ───
       if (key === 'qtyCases') {
         const cases = Number(val) || 0
         const bpc = Number(prev.bottlesPerCase) || 0
@@ -600,18 +610,47 @@ const fetchSuppliers = async () => {
           updated.totalQty = 0
         }
       }
+
+      // ─── When bottles-per-case changes — recalculate if cases > 0 ───
       if (key === 'bottlesPerCase') {
         const cases = Number(prev.qtyCases) || 0
         const bpc = Number(val) || 0
         if (cases > 0 && bpc > 0) {
           updated.totalQty = cases * bpc
         }
+        // Also recalculate rate per case
+        const ratePerUnit = Number(prev.purchaseRatePerUnit) || 0
+        if (ratePerUnit > 0 && bpc > 0) {
+          updated.purchaseRatePerCase = ratePerUnit * bpc
+        }
       }
 
-      const latestQty = Number(updated.totalQty ?? prev.totalQty) || 0
-      const latestSize = updated.bottleSize ?? prev.bottleSize
-      const latestType = updated.productType ?? prev.productType
+      // ─── When per-unit rate changes — auto-calculate per-case rate ───
+      if (key === 'purchaseRatePerUnit') {
+        const ratePerUnit = Number(val) || 0
+        const bpc = Number(prev.bottlesPerCase) || 0
+        if (ratePerUnit > 0 && bpc > 0) {
+          updated.purchaseRatePerCase = ratePerUnit * bpc
+        } else {
+          updated.purchaseRatePerCase = 0
+        }
+      }
 
+      // ─── When per-case rate changes — auto-calculate per-unit rate ───
+      if (key === 'purchaseRatePerCase') {
+        const ratePerCase = Number(val) || 0
+        const bpc = Number(prev.bottlesPerCase) || 0
+        if (ratePerCase > 0 && bpc > 0) {
+          updated.purchaseRatePerUnit = ratePerCase / bpc
+        } else {
+          updated.purchaseRatePerUnit = 0
+        }
+      }
+
+      // ─── Calculate Bulk Liters & LP Liters ───
+      const latestQty = Number(updated.totalQty) || 0
+      const latestSize = updated.bottleSize || prev.bottleSize
+      const latestType = updated.productType || prev.productType
       const { qtyBulkLiters, qtyLPLiters } = calculateBLandLPL(latestQty, latestSize, latestType)
       updated.qtyBulkLiters = qtyBulkLiters
       updated.qtyLPLiters = qtyLPLiters
@@ -619,14 +658,27 @@ const fetchSuppliers = async () => {
       return updated
     })
   }
-
   const calcLineTotal = (item) => {
+    const totalQty = Number(item.totalQty) || 0
+    const ratePerUnit = Number(item.purchaseRatePerUnit) || 0
+
+    // Priority 1: Direct Quantity × Rate per unit (when typing bottles directly)
+    if (totalQty > 0 && ratePerUnit > 0) {
+      return totalQty * ratePerUnit
+    }
+
+    // Fallback: Cases × Rate per case (normal case entry)
     const ratePerCase = Number(item.purchaseRatePerCase) || 0
     const cases = Number(item.qtyCases) || 0
     return ratePerCase * cases
   }
 
   const calcRatePerUnit = (item) => {
+    // Priority 1: Direct per-unit rate from product/rate input
+    if (Number(item.purchaseRatePerUnit) > 0) {
+      return Number(item.purchaseRatePerUnit)
+    }
+
     const ratePerCase = Number(item.purchaseRatePerCase) || 0
     const bpc = Number(item.bottlesPerCase) || 0
 
@@ -678,8 +730,10 @@ const fetchSuppliers = async () => {
     const bpc = product.bottles_per_case || SIZE_BOTTLES_MAP[product.bottle_size] || 0
     const productType = product.product_type || 'IMFL'
 
+    // PRIMARY: Rate per bottle from product
     const purchaseRatePerUnit = Number(product.purchase_rate) || 0
-    const autoRatePerCase = purchaseRatePerUnit > 0 && bpc > 0 ? purchaseRatePerUnit * bpc : ''
+    // AUTO-CALCULATE: Rate per case (for display only)
+    const autoRatePerCase = purchaseRatePerUnit > 0 && bpc > 0 ? purchaseRatePerUnit * bpc : 0
 
     const newItem = {
       ...EMPTY_ITEM,
@@ -694,7 +748,8 @@ const fetchSuppliers = async () => {
       productType,
       mrp: product.mrp || '',
       sellingRate: product.sale_price || '',
-      purchaseRatePerCase: autoRatePerCase,
+      purchaseRatePerUnit: purchaseRatePerUnit,   // ← Pre-fill per-bottle rate
+      purchaseRatePerCase: autoRatePerCase,       // ← Auto-calc per-case
       openingStock: product.current_stock || 0,
     }
 
@@ -706,8 +761,8 @@ const fetchSuppliers = async () => {
     setSearchQuery(product.name)
     setShowDropdown(false)
     setTimeout(() => {
-      const casesInput = document.getElementById('qtyCasesInput')
-      if (casesInput) casesInput.focus()
+      const qtyInput = document.getElementById('qtyBottlesInput')
+      if (qtyInput) qtyInput.focus()
     }, 100)
   }
 
@@ -729,7 +784,10 @@ const fetchSuppliers = async () => {
         i === editingItemIndex ? { ...itemToSave, serialNo: item.serialNo } : item
       ))
     } else {
-      setItems(prev => [...prev, { ...itemToSave, serialNo: prev.length + 1 }])
+      setItems(prev => {
+  const withNew = [{ ...itemToSave, serialNo: 1 }, ...prev]
+  return withNew.map((item, i) => ({ ...item, serialNo: i + 1 }))
+})
     }
 
     setCurrentItem(EMPTY_ITEM)
@@ -759,6 +817,7 @@ const fetchSuppliers = async () => {
     }
   }
 
+
   const calcTotals = () => {
     const subtotal = items.reduce((s, i) => s + calcLineTotal(i), 0)
     const vatTotal = subtotal * Number(purchaseVat) / 100
@@ -767,6 +826,45 @@ const fetchSuppliers = async () => {
     const tcsTotal = subtotal * Number(purchaseTcs) / 100
     return { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total: subtotal + vatTotal + cessTotal + specialTotal + tcsTotal }
   }
+
+
+
+  const calcItemTableTotals = () => {
+  return items.reduce((acc, item) => {
+    acc.totalBottles += Number(item.totalQty) || 0
+    acc.totalCases += Number(item.qtyCases) || 0
+    acc.totalBL += Number(item.qtyBulkLiters) || 0
+    acc.totalLPL += Number(item.qtyLPLiters) || 0
+    acc.totalMger += Number(item.mgerValue) || 0
+    acc.totalCost += calcLineTotal(item)
+    acc.totalMRP += (Number(item.mrp) || 0) * (Number(item.totalQty) || 0)
+    return acc
+  }, {
+    totalBottles: 0,
+    totalCases: 0,
+    totalBL: 0,
+    totalLPL: 0,
+    totalMger: 0,
+    totalCost: 0,
+    totalMRP: 0,
+  })
+}
+
+
+const roundTaxAmount = () => {
+  const { subtotal } = calcTotals();
+
+  if (subtotal <= 0) return;
+
+  const roundedAmount = Math.round((subtotal * Number(purchaseTcs)) / 100);
+
+  const newPercent = (roundedAmount * 100) / subtotal;
+
+  setPurchaseTcs(newPercent.toFixed(6)); // keep more precision
+};
+
+
+
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -809,6 +907,7 @@ const fetchSuppliers = async () => {
           totalBottles: Number(item.totalQty) || 0,
           qtyBulkLiters: Number(item.qtyBulkLiters) || 0,
           qtyLPLiters: Number(item.qtyLPLiters) || 0,
+          mgerValue: Number(item.mgerValue) || 0, // <--- ADD THIS
           openingStock: Number(item.openingStock) || 0,
           minStock: Number(item.minStock) || 0,
           total_cost: calcLineTotal(item),
@@ -879,65 +978,65 @@ const fetchSuppliers = async () => {
     return true
   })
 
- const isTauri = () => '__TAURI_INTERNALS__' in window
+  const isTauri = () => '__TAURI_INTERNALS__' in window
 
-const downloadAsBlob = (data, fileName) => {
-  const blob = new Blob([data], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = fileName
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
+  const downloadAsBlob = (data, fileName) => {
+    const blob = new Blob([data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 
-const handleExportExcel = async () => {
-  if (filteredPurchases.length === 0) { alert('No data to export'); return }
+  const handleExportExcel = async () => {
+    if (filteredPurchases.length === 0) { alert('No data to export'); return }
 
-  const exportData = filteredPurchases.map(p => ({
-    'Invoice No.': p.invoice_number || '',
-    'Billing Date': p.billing_date || p.purchase_date || '',
-    'Invoice Date': p.invoice_date || '',
-    'Supplier': p.supplier_name || '',
-    'Transport Pass': p.notes || '',
-    'Vehicle Number': p.vehicle_number || '',
-    'Subtotal': Number(p.subtotal) || 0,
-    'VAT Amount': Number(p.vat_amount) || 0,
-    'CESS Amount': Number(p.cess_amount) || 0,
-    'Special Amount': Number(p.special_amount) || 0,
-    'TCS Amount': Number(p.tcs_amount) || 0,
-    'Total Amount': Number(p.total_amount) || 0,
-    'Status': p.status || '',
-  }))
+    const exportData = filteredPurchases.map(p => ({
+      'Invoice No.': p.invoice_number || '',
+      'Billing Date': p.billing_date || p.purchase_date || '',
+      'Invoice Date': p.invoice_date || '',
+      'Supplier': p.supplier_name || '',
+      'Transport Pass': p.notes || '',
+      'Vehicle Number': p.vehicle_number || '',
+      'Subtotal': Number(p.subtotal) || 0,
+      'VAT Amount': Number(p.vat_amount) || 0,
+      'CESS Amount': Number(p.cess_amount) || 0,
+      'Special Amount': Number(p.special_amount) || 0,
+      'TCS Amount': Number(p.tcs_amount) || 0,
+      'Total Amount': Number(p.total_amount) || 0,
+      'Status': p.status || '',
+    }))
 
-  const ws = XLSX.utils.json_to_sheet(exportData)
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Purchases Data')
+    const ws = XLSX.utils.json_to_sheet(exportData)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Purchases Data')
 
-  const fileName = `Purchases_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+    const fileName = `Purchases_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
 
-  if (isTauri()) {
-    try {
-      const filePath = await save({
-        defaultPath: fileName,
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-      })
-      if (filePath) {
-        await writeFile(filePath, new Uint8Array(wbout))
+    if (isTauri()) {
+      try {
+        const filePath = await save({
+          defaultPath: fileName,
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+        })
+        if (filePath) {
+          await writeFile(filePath, new Uint8Array(wbout))
+        }
+      } catch (err) {
+        console.error('Tauri export error:', err)
+        downloadAsBlob(wbout, fileName)
       }
-    } catch (err) {
-      console.error('Tauri export error:', err)
+    } else {
       downloadAsBlob(wbout, fileName)
     }
-  } else {
-    downloadAsBlob(wbout, fileName)
   }
-}
 
   const { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total } = calcTotals()
   const isTotalQtyAuto = Number(currentItem.qtyCases) > 0 && Number(currentItem.bottlesPerCase) > 0
@@ -1213,7 +1312,24 @@ const handleExportExcel = async () => {
                     </div>
                     <div>
                       <label className="block text-md font-semibold text-black-800 mb-1">LP Liters (LPL) <span className="ml-1 text-[10px] text-purple-500 font-medium">auto</span></label>
-                      <input type="text" value={currentItem.qtyLPLiters > 0 ? currentItem.qtyLPLiters.toFixed(3) : '—'} readOnly className="input-field text-sm font-semibold bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 cursor-not-allowed" />
+                      <input
+                        type="text"
+                        value={currentItem.qtyLPLiters > 0 ? currentItem.qtyLPLiters.toFixed(3) : '—'}
+                        readOnly
+                        className="input-field text-sm font-semibold bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 cursor-not-allowed"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-md font-semibold text-black-800 mb-1">MGER Value</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={currentItem.mgerValue || ''}
+                        onChange={e => handleItemChange('mgerValue', e.target.value)}
+                        className="input-field text-sm font-semibold"
+                        placeholder="Enter MGER"
+                      />
                     </div>
                   </div>
                 </div>
@@ -1277,6 +1393,7 @@ const handleExportExcel = async () => {
                           <th className="text-center py-2 px-2 font-medium text-green-500">Btls</th>
                           <th className="text-center py-2 px-2 font-medium text-cyan-500">BL</th>
                           <th className="text-center py-2 px-2 font-medium text-purple-500">LPL</th>
+                          <th className="px-3 py-2 text-right">MGER</th> {/* <--- ADD THIS */}
                           <th className="text-center py-2 px-2 font-medium text-gray-500">Opening</th>
                           <th className="text-center py-2 px-2 font-medium text-gray-500">Min</th>
                           <th className="text-right py-2 px-2 font-medium text-orange-500">Rate/Case</th>
@@ -1303,6 +1420,7 @@ const handleExportExcel = async () => {
                               <td className="py-2 px-2 text-center font-bold text-green-600">{item.totalQty}</td>
                               <td className="py-2 px-2 text-center font-semibold text-cyan-600 dark:text-cyan-400">{item.qtyBulkLiters > 0 ? item.qtyBulkLiters.toFixed(3) : '-'}</td>
                               <td className="py-2 px-2 text-center font-semibold text-purple-600 dark:text-purple-400">{item.qtyLPLiters > 0 ? item.qtyLPLiters.toFixed(3) : '-'}</td>
+                              <td className="px-3 py-2 text-right text-xs text-gray-500">{item.mgerValue || 0}</td> {/* <--- ADD THIS */}
                               <td className="py-2 px-2 text-center">{item.openingStock || '-'}</td>
                               <td className="py-2 px-2 text-center">{item.minStock || '-'}</td>
                               <td className="py-2 px-2 text-right font-semibold text-orange-600">₹{Number(item.purchaseRatePerCase).toFixed(2)}</td>
@@ -1378,11 +1496,16 @@ const handleExportExcel = async () => {
 
                 <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
                   <div className="flex items-center gap-2">
-                    <span className="w-16">TCS</span>
-                    <input type="number" value={purchaseTcs} onChange={e => setPurchaseTcs(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+                   <span className="w-16">TCS</span>
+                    <div className="flex items-center gap-1">
+                      <input type="number" value={purchaseTcs} onChange={e => setPurchaseTcs(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+                      <button type="button" onClick={roundTaxAmount}
+ className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition-colors" title="Round TCS amount">⤴</button>
+                    </div>
                     <span>%</span>
+                    <span className="w-24 text-right font-medium">₹{tcsTotal.toFixed(2)}</span>
                   </div>
-                  <span className="w-24 text-right">₹{tcsTotal.toFixed(2)}</span>
+                  
                 </div>
 
                 <div className="flex justify-between items-center border-t border-gray-200 dark:border-gray-700 pt-2 font-bold text-base text-gray-800 dark:text-gray-200">
@@ -1487,6 +1610,9 @@ const handleExportExcel = async () => {
                               <th className="text-center py-1 font-medium font-bold text-green-500">Btls</th>
                               <th className="text-center py-1 font-medium text-cyan-500">BL</th>
                               <th className="text-center py-1 font-medium text-purple-500">LPL</th>
+                              <th className="text-center py-2 px-2 font-medium text-orange-500">MGER</th>
+
+
                               <th className="text-right py-1 font-medium text-orange-500">Rate/Case</th>
                               <th className="text-right py-1 font-medium text-green-500">Rate/Unit</th>
                               <th className="text-right py-1 font-medium">Total</th>
@@ -1513,12 +1639,39 @@ const handleExportExcel = async () => {
                                   <td className="text-center py-1.5 font-bold text-green-600">{totalBtls || '-'}</td>
                                   <td className="text-center py-1.5 font-semibold text-cyan-600 dark:text-cyan-400">{item.qty_bulk_liters > 0 ? item.qty_bulk_liters.toFixed(3) : '-'}</td>
                                   <td className="text-center py-1.5 font-semibold text-purple-600 dark:text-purple-400">{item.qty_lp_liters > 0 ? item.qty_lp_liters.toFixed(3) : '-'}</td>
+                                  <td className="px-2 py-2 text-center font-semibold text-orange-600">
+                                   {item.mger_value || 0}
+                                  </td>
                                   <td className="text-right py-1.5 font-semibold text-orange-600">₹{ratePerCase.toFixed(2)}</td>
                                   <td className="text-right py-1.5 font-semibold text-green-600">₹{ratePerUnit.toFixed(2)}</td>
                                   <td className="text-right py-1.5 font-medium">₹{item.total_cost.toFixed(2)}</td>
                                 </tr>
                               )
                             })}
+                            {expandedItems[expandedId]?.length > 0 && (() => {
+  const t = expandedItems[expandedId].reduce((acc, item) => {
+    acc.totalBottles += Number(item.total_bottles) || 0
+    acc.totalCases += Number(item.qty_cases) || 0
+    acc.totalBL += Number(item.qty_bulk_liters) || 0
+    acc.totalLPL += Number(item.qty_lp_liters) || 0
+    acc.totalMger += Number(item.mger_value) || 0
+    acc.totalCost += Number(item.total_cost) || 0
+    return acc
+  }, { totalBottles: 0, totalCases: 0, totalBL: 0, totalLPL: 0, totalMger: 0, totalCost: 0 })
+
+  return (
+    <tr className="bg-emerald-50 dark:bg-emerald-900/20 border-t-2 border-emerald-300 dark:border-emerald-700 font-bold text-xs">
+      <td className="px-2 py-2 text-emerald-800 dark:text-emerald-300" colSpan={3}>TOTAL</td>
+      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalCases}</td>
+      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBottles}</td>
+      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBL.toFixed(3)}</td>
+      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalLPL.toFixed(3)}</td>
+      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalMger.toFixed(2)}</td>
+      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">₹{t.totalCost.toFixed(2)}</td>
+      <td colSpan={2}></td>
+    </tr>
+  )
+})()}
                           </tbody>
                         </table>
                       </td>
@@ -1526,6 +1679,8 @@ const handleExportExcel = async () => {
                   )}
                 </Fragment>
               ))}
+
+              
             </tbody>
           </table>
         </div>

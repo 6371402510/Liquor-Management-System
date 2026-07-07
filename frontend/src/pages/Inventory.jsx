@@ -891,18 +891,25 @@ export default function Inventory() {
                   { label: 'Btls/Case', field: 'bottles_per_case' },
                   { label: 'Sale ₹', field: 'sale_price' },
                   { label: 'Status', field: 'status' },
-                ].map(({ label, field }) => (
-                  <th key={field} onClick={() => handleSort(field)} className="table-header text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none whitespace-nowrap  ${field === 'name' ? 'w-72 min-w-[280px]' : ''}">
-                    <span className="flex items-center gap-1">{label} <SortIcon field={field} /></span>
-                  </th>
-                ))}
+                  { label: 'Actions', field: 'actions' },
+               ].map(({ label, field }) => (
+  field === 'actions' ? (
+    <th key={field} className="table-header text-left whitespace-nowrap px-4">
+      {label}
+    </th>
+  ) : (
+    <th key={field} onClick={() => handleSort(field)} className="table-header text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none whitespace-nowrap ${field === 'name' ? 'w-72 min-w-[280px]' : ''}">
+      <span className="flex items-center gap-1">{label} <SortIcon field={field} /></span>
+    </th>
+  )
+))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
               {loading ? (
-                <tr><td colSpan={13} className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary-500 mx-auto" /></td></tr>
+                <tr><td colSpan={14} className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary-500 mx-auto" /></td></tr>
               ) : sorted.length === 0 ? (
-                <tr><td colSpan={13} className="text-center py-10 text-sm text-gray-400">No products found</td></tr>
+                <tr><td colSpan={14} className="text-center py-10 text-sm text-gray-400">No products found</td></tr>
               ) : sorted.map(p => {
                 const stock = p.current_stock ?? 0
                 const reorder = p.reorder_level ?? 0
@@ -964,6 +971,30 @@ export default function Inventory() {
                     <td className="table-cell">
                       <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', p.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400')}>{p.status || 'ACTIVE'}</span>
                     </td>
+
+      
+
+{/* ─── ACTIONS COLUMN ─── */}
+<td className="table-cell px-4">
+  <div className="flex items-center gap-1">
+    <button
+      type="button"
+      onClick={() => openEdit(p)}
+      title="Edit Product"
+      className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 transition-colors"
+    >
+      <Edit2 className="w-4 h-4" />
+    </button>
+    <button
+      type="button"
+      onClick={() => handleDelete(p.id)}
+      title="Delete Product"
+      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/30 transition-colors"
+    >
+      <Trash2 className="w-4 h-4" />
+    </button>
+  </div>
+</td>
                   </tr>
                 )
               })}

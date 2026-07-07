@@ -71,6 +71,22 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
 
     total_bottles_purchased = db.query(func.coalesce(func.sum(PurchaseItem.total_bottles), 0)).join(Purchase, PurchaseItem.purchase_id == Purchase.id).filter(and_(Purchase.created_at >= month_start, Purchase.created_at <= today_start + timedelta(days=1), company_filter(Purchase))).scalar() or 0
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # FIXED: MGR STATUS CALCULATION (Uses same logic as Excise Summary)
+    # ═══════════════════════════════════════════════════════════════════════
+    MONTHLY_MGR_TARGET = 30890000.0  # Fixed Monthly Target: ₹3,08,90,000
+    
+    # Pulling total MGER value (same query as excise_summary.stock_mger)
+    achieved_mgr = float(
+        db.query(func.coalesce(func.sum(PurchaseItem.mger_value), 0))
+        .join(Purchase, PurchaseItem.purchase_id == Purchase.id)
+        .filter(company_filter(Purchase))
+        .scalar() or 0
+    )
+    
+    to_be_achieved_mgr = max(0, MONTHLY_MGR_TARGET - achieved_mgr)
+    mgr_percentage = (achieved_mgr / MONTHLY_MGR_TARGET * 100) if MONTHLY_MGR_TARGET > 0 else 0
+
     stats = schema.DashboardStats(
         todaySales=today_sales, todayOrders=today_orders, monthSales=month_sales,
         monthPurchases=month_purchases, monthExpenses=month_expenses,
@@ -78,7 +94,12 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
         totalSuppliers=total_suppliers, totalEmployees=total_employees,
         totalBottlesInStock=int(total_bottles_in_stock),
         totalBottlesSold=total_bottles_sold,
-        totalBottlesPurchased=int(total_bottles_purchased)
+        totalBottlesPurchased=int(total_bottles_purchased),
+        # MGR Fields
+        monthly_mgr_target=MONTHLY_MGR_TARGET,
+        achieved_mgr=achieved_mgr,
+        to_be_achieved_mgr=to_be_achieved_mgr,
+        mgr_percentage=round(mgr_percentage, 2)
     )
 
     # ═══════════════════════════════════════
@@ -99,9 +120,9 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     category_data_db = db.query(Product.category.label('name'), func.count(Product.id).label('value')).filter(company_filter(Product)).group_by(Product.category).all()
     category_data = [schema.CategoryData(name=row.name or 'OTHER', value=row.value) for row in category_data_db]
 
-    expense_breakdown_db = db.query( ExpenseCategory.name.label('category'), func.coalesce(func.sum(Expense.amount), 0).label('total_amount') ).join( ExpenseCategory, Expense.category_id == ExpenseCategory.id ).filter( and_(Expense.expense_date >= month_start.date(), Expense.expense_date <= today_date, company_filter(Expense))).group_by(ExpenseCategory.name).all()
-       
+    expense_breakdown_db = db.query(ExpenseCategory.name.label('category'), func.coalesce(func.sum(Expense.amount), 0).label('total_amount')).join(ExpenseCategory, Expense.category_id == ExpenseCategory.id).filter(and_(Expense.expense_date >= month_start.date(), Expense.expense_date <= today_date, company_filter(Expense))).group_by(ExpenseCategory.name).all()
     expense_breakdown = [schema.ExpenseBreakdown(category=row.category or 'OTHER', total_amount=float(row.total_amount)) for row in expense_breakdown_db]
+
     # ═══════════════════════════════════════
     # 3. LISTS
     # ═══════════════════════════════════════
@@ -118,7 +139,7 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     low_stock_items = db.query(Product).filter(and_(Product.current_stock <= Product.reorder_level, company_filter(Product))).order_by(Product.current_stock.asc()).limit(5).all()
 
     # ═══════════════════════════════════════
-    # 4. NEW METRICS
+    # 4. PAYMENT MODE & BRANDS
     # ═══════════════════════════════════════
     counter_modes = db.query(Sale.payment_mode.label('mode'), func.coalesce(func.sum(Sale.total_amount), 0).label('total_amount')).filter(and_(Sale.created_at >= month_start, Sale.created_at <= today_start + timedelta(days=1), company_filter(Sale))).group_by(Sale.payment_mode).all()
     godown_modes = db.query(GodownSale.payment_mode.label('mode'), func.coalesce(func.sum(GodownSale.total_amount), 0).label('total_amount')).filter(and_(GodownSale.created_at >= month_start, GodownSale.created_at <= today_start + timedelta(days=1), company_filter(GodownSale))).group_by(GodownSale.payment_mode).all()
@@ -138,9 +159,21 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     sorted_brands = sorted(brand_map.items(), key=lambda x: x[1], reverse=True)[:5]
     top_selling_brands = [schema.TopSellingBrand(brand=br, bottles_sold=qty) for br, qty in sorted_brands]
 
-    # Excise Summary
+    # ═══════════════════════════════════════
+    # 5. EXCISE SUMMARY
+    # ═══════════════════════════════════════
     products_for_excise = db.query(Product.current_stock, Product.bottle_size, Product.product_type).filter(company_filter(Product)).all()
     stock_bl, stock_lpl = 0.0, 0.0
+    
+    # This is the working query that now matches achieved_mgr exactly
+    stock_mger = db.query(
+        func.coalesce(func.sum(PurchaseItem.mger_value), 0)
+    ).join(
+        Purchase, PurchaseItem.purchase_id == Purchase.id
+    ).filter(
+        company_filter(Purchase)
+    ).scalar() or 0.0
+
     for p in products_for_excise:
         size_ml = parse_size_ml(p.bottle_size)
         stock = p.current_stock or 0
@@ -162,14 +195,35 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
             if item.product_type != 'BEER': sold_lpl += bl * 0.75
 
     excise_summary = schema.ExciseSummary(
-        stock_bl=round(stock_bl, 2), stock_lpl=round(stock_lpl, 2),
-        sold_bl=round(sold_bl, 2), sold_lpl=round(sold_lpl, 2)
+        stock_bl=round(stock_bl, 2), 
+        stock_lpl=round(stock_lpl, 2),
+        stock_mger=round(stock_mger, 2),
+        sold_bl=round(sold_bl, 2), 
+        sold_lpl=round(sold_lpl, 2)
+    )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 6. MGR STATUS OBJECT
+    # ═══════════════════════════════════════════════════════════════════════
+    mgr_status = schema.MGRStatus(
+        monthly_target=MONTHLY_MGR_TARGET,
+        achieved=achieved_mgr,
+        to_be_achieved=to_be_achieved_mgr,
+        percentage=round(mgr_percentage, 2),
+        percentage_display=f"{round(mgr_percentage, 2)}%"
     )
 
     return schema.DashboardResponse(
-        stats=stats, dailySales=daily_sales_list, dailyPurchases=daily_purchases_list,
-        categoryData=category_data, expenseBreakdown=expense_breakdown,
-        recentSales=recent_sales, recentPurchases=recent_purchases, lowStockItems=low_stock_items,
-        paymentModeBreakdown=payment_mode_breakdown, topSellingBrands=top_selling_brands,
-        exciseSummary=excise_summary
+        stats=stats, 
+        dailySales=daily_sales_list, 
+        dailyPurchases=daily_purchases_list,
+        categoryData=category_data, 
+        expenseBreakdown=expense_breakdown,
+        recentSales=recent_sales, 
+        recentPurchases=recent_purchases, 
+        lowStockItems=low_stock_items,
+        paymentModeBreakdown=payment_mode_breakdown, 
+        topSellingBrands=top_selling_brands,
+        exciseSummary=excise_summary,
+        mgr_status=mgr_status
     )

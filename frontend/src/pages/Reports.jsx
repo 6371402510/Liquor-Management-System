@@ -17,7 +17,7 @@ import { getGodownProducts, getGodownSales } from '../apiservices/godown-counter
 
 const GROUP_BY_OPTIONS = [
   { value: 'date', label: 'Date Wise' },
-  { value: 'bill', label: 'Bill Wise' }, 
+  { value: 'bill', label: 'Bill Wise' },
   { value: 'month', label: 'Month Wise' },
   { value: 'year', label: 'Year Wise' },
   { value: 'hour', label: 'Hour Wise' },
@@ -25,6 +25,7 @@ const GROUP_BY_OPTIONS = [
   { value: 'brand', label: 'Brand Wise' },
   { value: 'category', label: 'Category Wise' },
   { value: 'size', label: 'Size Wise' },
+  { value: 'discount', label: 'Discount Wise' }, // ✅ DISCOUNT: already existed, now implemented
 ]
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
@@ -58,6 +59,7 @@ export default function Reports() {
   const [groupBy, setGroupBy] = useState('date')
   const [salesType, setSalesType] = useState('ALL')
   const [paymentMode, setPaymentMode] = useState('ALL')
+  const [discountFilter, setDiscountFilter] = useState('ALL') // ✅ DISCOUNT: new filter state
 
   // ─── Listen for company changes ───
   useEffect(() => {
@@ -77,7 +79,6 @@ export default function Reports() {
   }, [companyId])
 
   // ─── Fetch products map ───
-  // API: getPosProducts(companyId, search) / getGodownProducts(companyId, search)
   useEffect(() => {
     if (!companyId) {
       setProductsMap({})
@@ -87,8 +88,8 @@ export default function Reports() {
     const fetchProducts = async () => {
       try {
         const data = activeTab === 'counter'
-          ? await getPosProducts(Number(companyId), '')       // ✅ companyId FIRST
-          : await getGodownProducts(Number(companyId), '')    // ✅ companyId FIRST
+          ? await getPosProducts(Number(companyId), '')
+          : await getGodownProducts(Number(companyId), '')
         const map = {};
         (data || []).forEach(p => { map[p.id] = p; });
         setProductsMap(map);
@@ -100,7 +101,6 @@ export default function Reports() {
   }, [activeTab, companyId]);
 
   // ─── Fetch report data ───
-  // API: getCounterSales(companyId, dateFrom, dateTo) / getGodownSales(companyId, dateFrom, dateTo)
   useEffect(() => {
     if (!companyId) {
       setRawData([])
@@ -115,30 +115,36 @@ export default function Reports() {
     try {
       let salesData;
       if (activeTab === 'counter') {
-        salesData = await getCounterSales(Number(companyId), dateFrom, dateTo);   // ✅ companyId FIRST
+        salesData = await getCounterSales(Number(companyId), dateFrom, dateTo);
       } else {
-        salesData = await getGodownSales(Number(companyId), dateFrom, dateTo);    // ✅ companyId FIRST
+        salesData = await getGodownSales(Number(companyId), dateFrom, dateTo);
       }
 
-      const transformed = (salesData || []).map(sale => ({
-        id: sale.invoice_number,
-        date: sale.created_at,
-        type: activeTab,
-        transactionType: 'SALE',
-        paymentMode: sale.payment_mode,
-        customerId: sale.customer_phone,
-        totalAmount: sale.total_amount,
-        items: (sale.items || []).map(item => ({
-          productId: item.product_id,
-          name: item.product_name,
-          brand: productsMap[item.product_id]?.brand || 'Unknown',
-          category: productsMap[item.product_id]?.category || 'Unknown',
-          size: productsMap[item.product_id]?.bottle_size || 'Unknown',
-          qty: item.quantity,
-          amount: item.total_price,
-        }))
-      }));
+     const transformed = (salesData || []).map(sale => {
+  // ✅ DISCOUNT: Calculate bill-level discount by summing item discounts
+  const billDiscount = (sale.items || []).reduce((sum, item) => sum + (item.discount || 0), 0)
 
+  return {
+    id: sale.invoice_number,
+    date: sale.created_at,
+    type: activeTab,
+    transactionType: 'SALE',
+    paymentMode: sale.payment_mode,
+    customerId: sale.customer_phone,
+    totalAmount: sale.total_amount,
+    discount: billDiscount, // ✅ DISCOUNT: sum of item discounts
+    items: (sale.items || []).map(item => ({
+      productId: item.product_id,
+      name: item.product_name,
+      brand: productsMap[item.product_id]?.brand || 'Unknown',
+      category: productsMap[item.product_id]?.category || 'Unknown',
+      size: productsMap[item.product_id]?.bottle_size || 'Unknown',
+      qty: item.quantity,
+      amount: item.total_price,
+      discount: item.discount || 0, // ✅ DISCOUNT: direct field from SaleItem model
+    }))
+  }
+})
       setRawData(transformed);
     } catch (err) {
       setError(err.message || 'Failed to load sales report');
@@ -148,12 +154,15 @@ export default function Reports() {
     }
   }
 
-   const { summary, tableData, topSelling } = useMemo(() => {
+  const { summary, tableData, topSelling } = useMemo(() => {
     let filtered = rawData.filter(row => {
       const rowDate = format(new Date(row.date), 'yyyy-MM-dd')
       if (rowDate < dateFrom || rowDate > dateTo) return false
       if (salesType !== 'ALL' && row.transactionType !== salesType) return false
       if (paymentMode !== 'ALL' && row.paymentMode !== paymentMode) return false
+      // ✅ DISCOUNT: filter by discount presence
+      if (discountFilter === 'WITH_DISCOUNT' && (!row.discount || row.discount <= 0)) return false
+      if (discountFilter === 'WITHOUT_DISCOUNT' && row.discount > 0) return false
       return true
     })
 
@@ -162,6 +171,7 @@ export default function Reports() {
     const nonBillCustomers = totalBills - totalCustomers
     const totalSales = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + f.totalAmount, 0)
     const totalReturns = filtered.filter(f => f.transactionType === 'RETURN').reduce((s, f) => s + Math.abs(f.totalAmount), 0)
+    const totalDiscount = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.discount || 0), 0) // ✅ DISCOUNT
 
     const byPayment = (type) => filtered.filter(f => f.paymentMode === type && f.transactionType === 'SALE').reduce((s, f) => s + f.totalAmount, 0)
 
@@ -171,6 +181,7 @@ export default function Reports() {
       nonBillCustomers,
       totalSales,
       totalReturns,
+      totalDiscount, // ✅ DISCOUNT
       upi: byPayment('UPI'),
       cash: byPayment('CASH'),
       card: byPayment('CARD'),
@@ -182,7 +193,7 @@ export default function Reports() {
       const d = new Date(row.date)
       switch (groupBy) {
         case 'date': return format(d, 'yyyy-MM-dd')
-        case 'bill': return row.id // <-- Group by Invoice Number
+        case 'bill': return row.id
         case 'month': return format(d, 'yyyy-MM')
         case 'year': return format(d, 'yyyy')
         case 'hour': return `${format(d, 'yyyy-MM-dd')} ${d.getHours()}:00`
@@ -190,6 +201,11 @@ export default function Reports() {
         case 'brand': return item?.brand || 'Unknown'
         case 'category': return item?.category || 'Unknown'
         case 'size': return item?.size || 'Unknown'
+        // ✅ DISCOUNT: group by discount amount
+        case 'discount': {
+          const disc = row.discount || 0
+          return disc > 0 ? `₹${disc.toFixed(2)}` : 'No Discount'
+        }
         default: return format(d, 'yyyy-MM-dd')
       }
     }
@@ -198,17 +214,19 @@ export default function Reports() {
       if (['item', 'brand', 'category', 'size'].includes(groupBy)) {
         row.items.forEach(item => {
           const key = getGroupKey(row, item)
-          if (!groups[key]) groups[key] = { qty: 0, amount: 0, bills: new Set() }
+          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, bills: new Set() } // ✅ DISCOUNT
           groups[key].qty += item.qty * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].amount += item.amount * (row.transactionType === 'RETURN' ? -1 : 1)
+          groups[key].discount += (item.discount || 0) * (row.transactionType === 'RETURN' ? -1 : 1) // ✅ DISCOUNT
           groups[key].bills.add(row.id)
         })
       } else {
         const key = getGroupKey(row)
-        if (!groups[key]) groups[key] = { amount: 0, bills: new Set(), customers: new Set(), returns: 0, upi: 0, cash: 0, card: 0 }
+        if (!groups[key]) groups[key] = { amount: 0, bills: new Set(), customers: new Set(), returns: 0, discount: 0, upi: 0, cash: 0, card: 0 } // ✅ DISCOUNT
 
         const amt = row.totalAmount
         groups[key].amount += amt
+        groups[key].discount += (row.discount || 0) // ✅ DISCOUNT
         groups[key].bills.add(row.id)
         if (row.customerId) groups[key].customers.add(row.customerId)
 
@@ -226,6 +244,7 @@ export default function Reports() {
           if (!groups[key].paymentMode) groups[key].paymentMode = row.paymentMode
           if (!groups[key].customerId) groups[key].customerId = row.customerId
           if (!groups[key].billItems) groups[key].billItems = row.items
+          if (!groups[key].discount) groups[key].discount = row.discount // ✅ DISCOUNT
         }
       }
     })
@@ -237,18 +256,22 @@ export default function Reports() {
       qty: val.qty || 0,
       amount: val.amount,
       returns: val.returns || 0,
+      discount: val.discount || 0, // ✅ DISCOUNT
       upi: val.upi || 0,
       cash: val.cash || 0,
       card: val.card || 0,
-      // Extra data for Bill Wise view
       date: val.date || null,
       paymentMode: val.paymentMode || null,
       customerId: val.customerId || null,
       billItems: val.billItems || null,
     })).sort((a, b) => {
-      // Sort bills by newest first, others alphabetically
       if (groupBy === 'bill' && a.date && b.date) {
         return new Date(b.date) - new Date(a.date)
+      }
+      // ✅ DISCOUNT: sort discount-wise numerically (No Discount first, then ascending)
+      if (groupBy === 'discount') {
+        const getVal = (g) => g === 'No Discount' ? -1 : parseFloat(g.replace('₹', ''))
+        return getVal(a.group) - getVal(b.group)
       }
       return a.group.localeCompare(b.group)
     })
@@ -267,8 +290,9 @@ export default function Reports() {
       .slice(0, 10)
 
     return { summary, tableData, topSelling }
-  }, [rawData, dateFrom, dateTo, groupBy, salesType, paymentMode])
-    const handleExport = async () => {
+  }, [rawData, dateFrom, dateTo, groupBy, salesType, paymentMode, discountFilter]) // ✅ DISCOUNT: added dependency
+
+  const handleExport = async () => {
     if (tableData.length === 0) return alert('No data to export')
 
     const exportData = tableData.map(row => ({
@@ -277,6 +301,7 @@ export default function Reports() {
       'Customers': row.customers,
       'Qty': row.qty,
       'Total Amount': row.amount,
+      'Discount': row.discount, // ✅ DISCOUNT
       'Returns': row.returns,
       'UPI': row.upi,
       'Cash': row.cash,
@@ -287,7 +312,6 @@ export default function Reports() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Sales Report')
 
-    // ─── Save File (Tauri + Browser) ───
     const fileName = `${activeTab}_sales_report_${companyName}_${new Date().toISOString().slice(0, 10)}.xlsx`
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
 
@@ -339,7 +363,6 @@ export default function Reports() {
               <Warehouse className="w-4 h-4" /> Godown Sales
             </button>
           </div>
-          {/* ─── COMPANY BADGE ─── */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800">
             <Store className="w-3.5 h-3.5 text-primary-500" />
             <span className="text-xs font-semibold text-primary-700 dark:text-primary-300">{companyName}</span>
@@ -358,7 +381,8 @@ export default function Reports() {
       )}
 
       {/* ─── Summary Cards ─── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+      {/* ✅ DISCOUNT: changed grid to xl:grid-cols-9 to fit 9th card */}
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-9 gap-4">
         <div className="card p-4 border-l-4 border-blue-500">
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Receipt className="w-3.5 h-3.5" /> Bills</div>
           <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalBills}</p>
@@ -378,6 +402,11 @@ export default function Reports() {
         <div className="card p-4 border-l-4 border-emerald-500">
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><TrendingUp className="w-3.5 h-3.5" /> Total Sales</div>
           <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">₹{summary.totalSales.toLocaleString()}</p>
+        </div>
+        {/* ✅ DISCOUNT: new summary card */}
+        <div className="card p-4 border-l-4 border-rose-400">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Tag className="w-3.5 h-3.5" /> Discount</div>
+          <p className="text-lg font-bold text-rose-500 dark:text-rose-400">₹{summary.totalDiscount.toLocaleString()}</p>
         </div>
         <div className="card p-4 border-l-4 border-green-500">
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Smartphone className="w-3.5 h-3.5" /> UPI</div>
@@ -402,6 +431,7 @@ export default function Reports() {
         <div className="flex items-center gap-2 mb-3 text-gray-700 dark:text-gray-300 font-medium text-sm">
           <Filter className="w-4 h-4 text-blue-500" /> Report Filters & Grouping
         </div>
+        {/* ✅ DISCOUNT: grid stays 6 cols, now perfectly fits 6 filters */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Date From</label>
@@ -432,6 +462,15 @@ export default function Reports() {
               <option value="CASH">Cash</option>
               <option value="UPI">UPI</option>
               <option value="CARD">Card</option>
+            </select>
+          </div>
+          {/* ✅ DISCOUNT: new filter dropdown */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Discount</label>
+            <select value={discountFilter} onChange={e => setDiscountFilter(e.target.value)} className="input-field text-xs">
+              <option value="ALL">All Bills</option>
+              <option value="WITH_DISCOUNT">With Discount</option>
+              <option value="WITHOUT_DISCOUNT">Without Discount</option>
             </select>
           </div>
         </div>
@@ -483,6 +522,8 @@ export default function Reports() {
                       <th className="p-3 text-left font-semibold text-gray-500">Customer</th>
                       <th className="p-3 text-center font-semibold text-gray-500">Payment</th>
                       <th className="p-3 text-center font-semibold text-gray-500">Items</th>
+                      {/* ✅ DISCOUNT: new column in bill-wise header */}
+                      <th className="p-3 text-right font-semibold text-gray-500">Disc. ₹</th>
                       <th className="p-3 text-right font-semibold text-gray-500">Amount ₹</th>
                     </>
                   ) : (
@@ -492,6 +533,8 @@ export default function Reports() {
                       {!['item', 'brand', 'category', 'size'].includes(groupBy) && (
                         <>
                           <th className="p-3 text-center font-semibold text-gray-500">Cust.</th>
+                          {/* ✅ DISCOUNT: new column in non-bill header */}
+                          <th className="p-3 text-right font-semibold text-gray-500">Disc. ₹</th>
                           <th className="p-3 text-right font-semibold text-gray-500">UPI ₹</th>
                           <th className="p-3 text-right font-semibold text-gray-500">Cash ₹</th>
                           <th className="p-3 text-right font-semibold text-gray-500">Card ₹</th>
@@ -499,7 +542,11 @@ export default function Reports() {
                         </>
                       )}
                       {['item', 'brand', 'category', 'size'].includes(groupBy) && (
-                        <th className="p-3 text-center font-semibold text-gray-500">Qty</th>
+                        <>
+                          <th className="p-3 text-center font-semibold text-gray-500">Qty</th>
+                          {/* ✅ DISCOUNT: new column in item-wise header */}
+                          <th className="p-3 text-right font-semibold text-gray-500">Disc. ₹</th>
+                        </>
                       )}
                       <th className="p-3 text-right font-semibold text-gray-700">Net Amt ₹</th>
                     </>
@@ -508,14 +555,14 @@ export default function Reports() {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {loading ? (
-                  <tr><td colSpan={9} className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-blue-500 mx-auto" /></td></tr>
+                  <tr><td colSpan={10} className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-blue-500 mx-auto" /></td></tr>
                 ) : tableData.length === 0 ? (
-                  <tr><td colSpan={9} className="text-center py-10 text-gray-400">No data found for selected filters</td></tr>
+                  <tr><td colSpan={10} className="text-center py-10 text-gray-400">No data found for selected filters</td></tr>
                 ) : tableData.map((row, i) => (
                   <Fragment key={i}>
                     {groupBy === 'bill' ? (
                       <>
-                        <tr 
+                        <tr
                           onClick={() => setExpandedBill(expandedBill === row.group ? null : row.group)}
                           className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors cursor-pointer"
                         >
@@ -525,28 +572,32 @@ export default function Reports() {
                           </td>
                           <td className="p-3 text-gray-600 dark:text-gray-400">{row.customerId || 'Walk-in'}</td>
                           <td className="p-3 text-center">
-                            <span className={clsx("text-[10px] font-semibold px-2 py-0.5 rounded-full", 
-                              row.paymentMode === 'UPI' ? "bg-green-50 text-green-700" : 
+                            <span className={clsx("text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                              row.paymentMode === 'UPI' ? "bg-green-50 text-green-700" :
                               row.paymentMode === 'CARD' ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"
                             )}>
                               {row.paymentMode}
                             </span>
                           </td>
                           <td className="p-3 text-center text-gray-500">
-                            {row.billItems?.length || 0} 
+                            {row.billItems?.length || 0}
                             <span className="ml-1 text-gray-400">
                               {expandedBill === row.group ? '▲' : '▼'}
                             </span>
+                          </td>
+                          {/* ✅ DISCOUNT: bill-wise row cell */}
+                          <td className={clsx("p-3 text-right font-medium", row.discount > 0 ? "text-rose-500 dark:text-rose-400" : "text-gray-400 dark:text-gray-600")}>
+                            {row.discount > 0 ? `-₹${row.discount.toLocaleString()}` : '-'}
                           </td>
                           <td className={clsx("p-3 text-right font-bold", row.amount >= 0 ? "text-emerald-600" : "text-red-500")}>
                             ₹{Math.abs(row.amount).toLocaleString()}
                           </td>
                         </tr>
-                        
+
                         {/* Expandable Items List */}
                         {expandedBill === row.group && row.billItems && (
                           <tr className="bg-gray-50 dark:bg-gray-800/30">
-                            <td colSpan="6" className="p-0">
+                            <td colSpan="7" className="p-0">
                               <div className="px-6 py-3 border-l-4 border-blue-400 ml-4">
                                 <table className="w-full text-xs">
                                   <thead>
@@ -554,6 +605,8 @@ export default function Reports() {
                                       <th className="text-left py-1 font-medium w-8">#</th>
                                       <th className="text-left py-1 font-medium">Product</th>
                                       <th className="text-center py-1 font-medium">Qty</th>
+                                      {/* ✅ DISCOUNT: item-level discount in expanded view */}
+                                      <th className="text-right py-1 font-medium">Disc. ₹</th>
                                       <th className="text-right py-1 font-medium">Price</th>
                                       <th className="text-right py-1 font-medium">Total</th>
                                     </tr>
@@ -564,10 +617,22 @@ export default function Reports() {
                                         <td className="py-1.5 text-gray-400">{idx + 1}</td>
                                         <td className="py-1.5 text-gray-800 dark:text-gray-200">{item.name}</td>
                                         <td className="text-center py-1.5">{item.qty}</td>
+                                        {/* ✅ DISCOUNT: item-level discount cell */}
+                                        <td className={clsx("text-right py-1.5", item.discount > 0 ? "text-rose-500" : "text-gray-400")}>
+                                          {item.discount > 0 ? `-₹${item.discount.toFixed(2)}` : '-'}
+                                        </td>
                                         <td className="text-right py-1.5">₹{(item.amount / (item.qty || 1)).toFixed(2)}</td>
                                         <td className="text-right py-1.5 font-medium">₹{item.amount.toFixed(2)}</td>
                                       </tr>
                                     ))}
+                                    {/* ✅ DISCOUNT: bill-level discount total row in expanded view */}
+                                    {row.discount > 0 && (
+                                      <tr className="bg-rose-50/50 dark:bg-rose-900/10">
+                                        <td colSpan="3" className="text-right py-1.5 font-semibold text-rose-600 dark:text-rose-400 pr-3">Bill Discount</td>
+                                        <td className="text-right py-1.5 font-bold text-rose-600 dark:text-rose-400">-₹{row.discount.toFixed(2)}</td>
+                                        <td colSpan="2"></td>
+                                      </tr>
+                                    )}
                                   </tbody>
                                 </table>
                               </div>
@@ -576,13 +641,17 @@ export default function Reports() {
                         )}
                       </>
                     ) : (
-                      /* Original Row Rendering for non-bill groupings */
+                      /* Non-bill groupings */
                       <tr className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
                         <td className="p-3 font-medium text-gray-800 dark:text-gray-200">{row.group}</td>
                         <td className="p-3 text-center text-gray-600 dark:text-gray-400">{row.bills}</td>
                         {!['item', 'brand', 'category', 'size'].includes(groupBy) && (
                           <>
                             <td className="p-3 text-center text-gray-600 dark:text-gray-400">{row.customers}</td>
+                            {/* ✅ DISCOUNT: non-bill row cell */}
+                            <td className={clsx("p-3 text-right", row.discount > 0 ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-600")}>
+                              {row.discount > 0 ? `-₹${row.discount.toLocaleString()}` : '-'}
+                            </td>
                             <td className="p-3 text-right text-green-600 dark:text-green-400">₹{row.upi.toLocaleString()}</td>
                             <td className="p-3 text-right text-amber-600 dark:text-amber-400">₹{row.cash.toLocaleString()}</td>
                             <td className="p-3 text-right text-blue-500 dark:text-blue-400">₹{row.card.toLocaleString()}</td>
@@ -590,7 +659,13 @@ export default function Reports() {
                           </>
                         )}
                         {['item', 'brand', 'category', 'size'].includes(groupBy) && (
-                          <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">{row.qty}</td>
+                          <>
+                            <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">{row.qty}</td>
+                            {/* ✅ DISCOUNT: item-wise row cell */}
+                            <td className={clsx("p-3 text-right", row.discount > 0 ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-600")}>
+                              {row.discount > 0 ? `-₹${row.discount.toLocaleString()}` : '-'}
+                            </td>
+                          </>
                         )}
                         <td className={clsx("p-3 text-right font-bold", row.amount >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400")}>
                           ₹{Math.abs(row.amount).toLocaleString()} {row.amount < 0 ? '(Dr)' : ''}
@@ -608,6 +683,10 @@ export default function Reports() {
                     {!['item', 'brand', 'category', 'size'].includes(groupBy) && (
                       <>
                         <td className="p-3 text-center text-gray-700 dark:text-gray-300">{tableData.reduce((s, r) => s + r.customers, 0)}</td>
+                        {/* ✅ DISCOUNT: footer total */}
+                        <td className="p-3 text-right text-rose-500 dark:text-rose-400">
+                          -₹{tableData.reduce((s, r) => s + r.discount, 0).toLocaleString()}
+                        </td>
                         <td className="p-3 text-right text-green-600 dark:text-green-400">₹{tableData.reduce((s, r) => s + r.upi, 0).toLocaleString()}</td>
                         <td className="p-3 text-right text-amber-600 dark:text-amber-400">₹{tableData.reduce((s, r) => s + r.cash, 0).toLocaleString()}</td>
                         <td className="p-3 text-right text-blue-500 dark:text-blue-400">₹{tableData.reduce((s, r) => s + r.card, 0).toLocaleString()}</td>
@@ -615,7 +694,13 @@ export default function Reports() {
                       </>
                     )}
                     {['item', 'brand', 'category', 'size'].includes(groupBy) && (
-                      <td className="p-3 text-center text-blue-600 dark:text-blue-400">{tableData.reduce((s, r) => s + r.qty, 0)}</td>
+                      <>
+                        <td className="p-3 text-center text-blue-600 dark:text-blue-400">{tableData.reduce((s, r) => s + r.qty, 0)}</td>
+                        {/* ✅ DISCOUNT: item-wise footer total */}
+                        <td className="p-3 text-right text-rose-500 dark:text-rose-400">
+                          -₹{tableData.reduce((s, r) => s + r.discount, 0).toLocaleString()}
+                        </td>
+                      </>
                     )}
                     <td className={clsx("p-3 text-right", tableData.reduce((s, r) => s + r.amount, 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400")}>
                       ₹{Math.abs(tableData.reduce((s, r) => s + r.amount, 0)).toLocaleString()}

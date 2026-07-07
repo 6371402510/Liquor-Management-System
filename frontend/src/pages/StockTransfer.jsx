@@ -63,26 +63,49 @@ const qtyInputRef = useRef(null)
     }
   }
 
-  const handleSearchChange = async (val) => {
-    setSearchQuery(val)
-    setSelectedProduct(null)
-    if (val.length > 1) {
-      setIsSearching(true)
-      try {
-        const results = await searchProducts(val, companyId)
-        const availableResults = results.filter(p => (p.godown_stock || 0) > 0)
-        setSearchResults(availableResults)
+ const handleSearchChange = async (val) => {
+  setSearchQuery(val)
+  setSelectedProduct(null)
+
+  if (val.length > 1) {
+    setIsSearching(true)
+
+    try {
+      const results = await searchProducts(val, companyId)
+      const availableResults = results.filter(
+        p => (p.godown_stock || 0) > 0
+      )
+
+      setSearchResults(availableResults)
+
+      // Barcode scan -> only one product found
+      if (availableResults.length === 1) {
+        const product = availableResults[0]
+
+        setSelectedProduct(product)
+        setSearchQuery(`${product.name} (${product.barcode || product.item_code})`)
+        setShowDropdown(false)
+        setTransferQty(1)
+
+        // Move cursor to Qty
+        setTimeout(() => {
+          qtyInputRef.current?.focus()
+          qtyInputRef.current?.select()
+        }, 50)
+      } else {
+        // Manual search
         setShowDropdown(availableResults.length > 0)
-      } catch (err) {
-        console.error(err)
-      } finally {
-        setIsSearching(false)
       }
-    } else {
-      setSearchResults([])
-      setShowDropdown(false)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setIsSearching(false)
     }
+  } else {
+    setSearchResults([])
+    setShowDropdown(false)
   }
+}
 
   const selectProduct = (product) => {
     setSelectedProduct(product)
@@ -199,11 +222,13 @@ const qtyInputRef = useRef(null)
                   placeholder="Type barcode or product name..." 
                   value={searchQuery} 
                   onChange={e => handleSearchChange(e.target.value)} 
-                  onKeyDown={(e) => {
-  if(e.key === "Enter" && selectedProduct){
-    qtyInputRef.current?.focus()
-  }
-}}
+                   onKeyDown={(e) => {
+    if (e.key === "Enter" && selectedProduct) {
+      e.preventDefault()
+      qtyInputRef.current?.focus()
+      qtyInputRef.current?.select()
+    }
+  }}
                   className="input-field pl-8" 
                 />
                 {isSearching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />}

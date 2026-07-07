@@ -61,6 +61,7 @@ class PurchaseItem(Base):
     total_bottles = Column(Integer, default=0)
     qty_bulk_liters = Column(Float, default=0.0)
     qty_lp_liters = Column(Float, default=0.0)
+    mger_value = Column(Float, default=0.0) 
 
     opening_stock = Column(Integer, default=0)
     min_stock = Column(Integer, default=0)

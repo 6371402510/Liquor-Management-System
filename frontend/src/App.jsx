@@ -31,6 +31,9 @@ import StaffManagement from './pages/StaffManagement.jsx'
 import CashDeposit from './pages/CashDeposit.jsx' 
 import Payslips from './pages/Payslips.jsx'
 import ExciseSizeWiseReport from './pages/ExciseReport.jsx'
+import Damage from './pages/Damage.jsx'
+import CounterToGodownTransfer from './pages/CounterToGodownTransfer.jsx'
+import CounterToGodownReport  from './pages/CounterToGodownTransferReport.jsx'
 // ══════════════════════════════════════════════════
 // 👇 NEW: Component to wait for FastAPI to start
 // ══════════════════════════════════════════════════
@@ -120,7 +123,9 @@ function AppRoutes() {
         <Route path="/cash-deposit" element={<CashDeposit />} />
         <Route path="/Payslips" element={<Payslips />} />
         <Route path="/exciseSizeWiseReport" element={<ExciseSizeWiseReport />} />
-
+        <Route path="/damage" element={<Damage />} />
+        <Route path="/counter-to-godown-transfer" element={<CounterToGodownTransfer />} />
+        <Route path="/counter-to-godown-report" element={<CounterToGodownReport />} />
         {/* ─── ADMIN ROUTES ─── */}
       </Route>
 

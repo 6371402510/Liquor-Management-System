@@ -94,7 +94,7 @@ export default function POS() {
   const [printCustomerName, setPrintCustomerName] = useState('');
   const [printCustomerPhone, setPrintCustomerPhone] = useState('');
   const [printing, setPrinting] = useState(false);
-const isTauri = () => '__TAURI_INTERNALS__' in window
+  const isTauri = () => '__TAURI_INTERNALS__' in window
   // ─── PERSISTENCE: Save to localStorage on change ───
   useEffect(() => { localStorage.setItem('pos_cart', JSON.stringify(cart)); }, [cart]);
   useEffect(() => { localStorage.setItem('pos_paymentMode', JSON.stringify(paymentMode)); }, [paymentMode]);
@@ -163,28 +163,66 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
     };
   }, [recentlyScanned, cart]);
 
-  const addToCart = useCallback((product) => {
-    setCart(prev => {
-      const existingCount = prev.filter(i => i.productId === product.id).length;
-      if (existingCount >= (product.counter_stock || 0)) {
-        alert(`Only ${product.counter_stock} items available in counter stock!`);
-        return prev;
-      }
-      return [...prev, {
-        ...product,
-        scanId: generateScanId(product.id),
-        productId: product.id,
-        quantity: 1,
-        discount: 0,
-        paymentMode: paymentMode,
-      }];
-    });
 
-    setRecentlyScanned(prev => {
-      const filtered = prev.filter(p => p.id !== product.id);
-      return [{ ...product, scanTime: Date.now() }, ...filtered].slice(0, 15);
-    });
-  }, [paymentMode]);
+
+ const updateQuantity = (scanId, qty) => {
+  const newQty = Math.max(1, Number(qty) || 1);
+
+  setCart(prev => {
+    const currentItem = prev.find(i => i.scanId === scanId);
+    if (!currentItem) return prev;
+
+    // Find the product to get available counter stock
+    const product = products.find(p => p.id === currentItem.productId);
+    if (product) {
+      // Calculate quantity of same product in other cart items
+      const otherItemsQty = prev
+        .filter(i => i.productId === currentItem.productId && i.scanId !== scanId)
+        .reduce((sum, i) => sum + (i.quantity || 1), 0);
+
+      // Max quantity allowed for this item
+      const maxAllowed = (product.counter_stock || 0) - otherItemsQty;
+
+      if (newQty > maxAllowed) {
+        alert(`Only ${maxAllowed} ${product.name} available in counter stock!`);
+        return prev; // Don't update if exceeding stock
+      }
+    }
+
+    return prev.map(item =>
+      item.scanId === scanId
+        ? { ...item, quantity: newQty }
+        : item
+    );
+  });
+};
+ const addToCart = useCallback((product) => {
+  setCart(prev => {
+    // Calculate total quantity already in cart for this product
+    const existingTotalQty = prev
+      .filter(i => i.productId === product.id)
+      .reduce((sum, i) => sum + (i.quantity || 1), 0);
+
+    if (existingTotalQty >= (product.counter_stock || 0)) {
+      alert(`Only ${product.counter_stock} ${product.name} available in counter stock!`);
+      return prev;
+    }
+
+    return [...prev, {
+      ...product,
+      scanId: generateScanId(product.id),
+      productId: product.id,
+      quantity: 1,
+      discount: 0,
+      paymentMode: paymentMode,
+    }];
+  });
+
+  setRecentlyScanned(prev => {
+    const filtered = prev.filter(p => p.id !== product.id);
+    return [{ ...product, scanTime: Date.now() }, ...filtered].slice(0, 15);
+  });
+}, [paymentMode, products]);
 
   const updateItemPaymentMode = (scanId, mode) => {
     setCart(prev => prev.map(i => i.scanId === scanId ? { ...i, paymentMode: mode } : i));
@@ -198,14 +236,33 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
     setCart(prev => prev.filter(i => i.scanId !== scanId));
   };
 
-  const subtotal = cart.reduce((s, i) => s + i.sale_price * i.quantity, 0);
-  const totalItemDiscount = cart.reduce((s, i) => s + (i.discount || 0) * i.quantity, 0);
+const subtotal = cart.reduce(
+  (s, i) => s + (i.sale_price * (i.quantity || 1)),
+  0
+);
+ const totalItemDiscount = cart.reduce(
+  (s, i) => s + ((i.discount || 0) * (i.quantity || 1)), 
+  0
+);
   const globalDiscountAmount = Number(discount) || 0;
   const grandTotal = Math.max(0, subtotal - totalItemDiscount - globalDiscountAmount);
+  const cashTotal = cart
+  .filter(item => item.paymentMode === "CASH")
+  .reduce((sum, item) => sum + ((item.sale_price - (item.discount || 0)) * (item.quantity || 1)), 0);
+
+const upiTotal = cart
+  .filter(item => item.paymentMode === "UPI")
+  .reduce((sum, item) => sum + ((item.sale_price - (item.discount || 0)) * (item.quantity || 1)), 0);
+
+const cardTotal = cart
+  .filter(item => item.paymentMode === "CARD")
+  .reduce((sum, item) => sum + ((item.sale_price - (item.discount || 0)) * (item.quantity || 1)), 0);
 
   const getProductCartCount = (productId) => {
-    return cart.filter(i => i.productId === productId).length;
-  };
+  return cart
+    .filter(i => i.productId === productId)
+    .reduce((sum, i) => sum + (i.quantity || 1), 0);
+};
 
   const handleBarcodeInput = async () => {
     const barcode = barcodeValue.trim();
@@ -239,58 +296,78 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
   };
 
   // ─── Process EACH item in cart as a SEPARATE BILL ───
-  const handleCheckout = async () => {
-    if (!cart.length) return;
-    setCheckingOut(true);
-    setError('');
+ const handleCheckout = async () => {
+  if (!cart.length) return;
+  setCheckingOut(true);
+  setError('');
 
-    try {
-      for (const item of cart) {
-        const payload = {
-          invoice_number: generateInvoiceNumber(companyId),
-          company_id: Number(companyId),
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          total_amount: item.sale_price - (item.discount || 0),
-          payment_mode: item.paymentMode || 'CASH',
-          items: [{
-            product_id: item.productId,
-            product_name: item.name,
-            quantity: 1,
-            unit_price: item.sale_price,
-            discount: item.discount || 0,
-            total_price: item.sale_price - (item.discount || 0),
-            company_id: Number(companyId)
-          }],
+  try {
+    // Group items by productId to consolidate quantities
+    const groupedItems = {};
+    cart.forEach(item => {
+      const key = `${item.productId}_${item.paymentMode}`;
+      if (!groupedItems[key]) {
+        groupedItems[key] = {
+          productId: item.productId,
+          name: item.name,
+          sale_price: item.sale_price,
+          paymentMode: item.paymentMode || 'CASH',
+          totalQuantity: 0,
+          totalDiscount: 0,
         };
-        await processCheckout(payload);
       }
+      groupedItems[key].totalQuantity += (item.quantity || 1);
+      groupedItems[key].totalDiscount += ((item.discount || 0) * (item.quantity || 1));
+    });
 
-      setCompletedSale({
-        invoice_number: `${cart.length} Bills Generated`,
+    for (const group of Object.values(groupedItems)) {
+      const itemTotal = (group.sale_price * group.totalQuantity) - group.totalDiscount;
+      
+      const payload = {
+        invoice_number: generateInvoiceNumber(companyId),
+        company_id: Number(companyId),
         customer_name: customerName,
-        created_at: new Date().toISOString(),
-        total_amount: grandTotal,
-        items: cart.map(item => ({
-          product_name: item.name,
-          quantity: 1,
-          unit_price: item.sale_price,
-          discount: item.discount || 0,
-          total_price: item.sale_price - (item.discount || 0),
-        }))
-      });
-
-      setShowInvoice(true);
-      setRecentlyScanned([]);
-      setSelectedItems([]);
-      clearPersistedSale();
-      fetchProducts();
-    } catch (err) {
-      setError(err.message || 'Checkout failed. Check counter stock.');
-    } finally {
-      setCheckingOut(false);
+        customer_phone: customerPhone,
+        total_amount: itemTotal,
+        payment_mode: group.paymentMode,
+        items: [{
+          product_id: group.productId,
+          product_name: group.name,
+          quantity: group.totalQuantity,  // ✅ Use actual quantity
+          unit_price: group.sale_price,
+          discount: group.totalDiscount,
+          total_price: itemTotal,
+          company_id: Number(companyId)
+        }],
+      };
+      await processCheckout(payload);
     }
-  };
+
+    setCompletedSale({
+      invoice_number: `${Object.keys(groupedItems).length} Bills Generated`,
+      customer_name: customerName,
+      created_at: new Date().toISOString(),
+      total_amount: grandTotal,
+      items: Object.values(groupedItems).map(g => ({
+        product_name: g.name,
+        quantity: g.totalQuantity,
+        unit_price: g.sale_price,
+        discount: g.totalDiscount,
+        total_price: (g.sale_price * g.totalQuantity) - g.totalDiscount,
+      }))
+    });
+
+    setShowInvoice(true);
+    setRecentlyScanned([]);
+    setSelectedItems([]);
+    clearPersistedSale();
+    fetchProducts();
+  } catch (err) {
+    setError(err.message || 'Checkout failed. Check counter stock.');
+  } finally {
+    setCheckingOut(false);
+  }
+};
 
   const toggleSelectItem = (scanId) => {
     setSelectedItems(prev => prev.includes(scanId) ? prev.filter(id => id !== scanId) : [...prev, scanId]);
@@ -337,10 +414,10 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
           items: [{
             product_id: item.productId,
             product_name: item.name,
-            quantity: 1,
+            quantity: item.quantity,
             unit_price: item.sale_price,
             discount: item.discount || 0,
-            total_price: item.sale_price - (item.discount || 0),
+            total_price: (item.sale_price - (item.discount || 0)) * item.quantity,
             company_id: Number(companyId)
           }],
         };
@@ -525,7 +602,7 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
     let waPhone = (customerPhone || '').replace(/\D/g, '');
     if (waPhone.length === 10) waPhone = '91' + waPhone;
 
-    const url = waPhone 
+    const url = waPhone
       ? `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`
       : `https://wa.me/?text=${encodeURIComponent(msg)}`;
 
@@ -882,10 +959,58 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700">
-              <span className="text-xs font-semibold text-gray-600 dark:text-gray-400">Grand Total:</span>
-              <span className="text-sm font-bold text-primary-600 dark:text-primary-400">₹{grandTotal.toFixed(2)}</span>
-            </div>
+           
+              {/* Payment Summary */}
+              <div className="flex items-center gap-2">
+
+                <div className="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-200">
+                  <div className="text-[12px] text-emerald-600 font-bold">
+                    CASH
+                  </div>
+                  <div className="text-sm font-bold text-emerald-700">
+                    ₹{cashTotal.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200">
+                  <div className="text-[12px] text-blue-600 font-bold">
+                    UPI
+                  </div>
+                  <div className="text-sm font-bold text-blue-700">
+                    ₹{upiTotal.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="px-3 py-1 rounded-lg bg-purple-50 border border-purple-200">
+                  <div className="text-[12px] text-purple-600 font-bold">
+                    CARD
+                  </div>
+                  <div className="text-sm font-bold text-purple-700">
+                    ₹{cardTotal.toFixed(2)}
+                  </div>
+                </div>
+
+              </div>
+               <div className="px-3 py-1 rounded-lg bg-purple-50 border border-purple-200">
+                  <div className="text-[12px] text-purple-600 font-bold">
+                   Grand Total:
+                  </div>
+                  <div className="text-sm font-bold text-purple-700">
+                     ₹{grandTotal.toFixed(2)}
+                  </div>
+                </div>
+
+              {/* Grand Total */}
+              {/* <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700">
+                <span className="text-xs font-semibold text-gray-600 dark:text-gray-400">
+                  Grand Total:
+                </span>
+                <span className="text-sm font-bold text-primary-600 dark:text-primary-400">
+                  ₹{grandTotal.toFixed(2)}
+                </span>
+              </div> */}
+
+            
 
             <button onClick={handleSavePDF} disabled={cart.length === 0} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-600 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Download className="w-3.5 h-3.5" /> Save PDF
@@ -929,7 +1054,9 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {[...cart].reverse().map((item) => {
                   const itemDiscount = item.discount || 0;
-                  const lineTotal = item.sale_price - itemDiscount;
+                 const lineTotal =
+  (item.sale_price * item.quantity) -
+  ((item.discount || 0) * item.quantity);
                   const isSelected = selectedItems.includes(item.scanId);
                   const currentPayMode = item.paymentMode || 'CASH';
 
@@ -947,9 +1074,17 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
                         <p className="text-[12px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
                         <p className="text-[10px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
                       </td>
-                      <td className="py-1.5 pr-2 text-center">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-primary-100 dark:bg-primary-900/30 text-[15px] font-bold text-primary-700 dark:text-primary-400">1</span>
-                      </td>
+                     <td className="py-1.5 pr-2 text-center">
+  <input
+    type="number"
+    min="1"
+    value={item.quantity}
+    onChange={(e) =>
+      updateQuantity(item.scanId, e.target.value)
+    }
+    className="w-10 text-center text-[10px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800" 
+  />
+</td>
                       <td className="py-1.5 pr-2 text-right">
                         <span className="text-[12px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
                       </td>
