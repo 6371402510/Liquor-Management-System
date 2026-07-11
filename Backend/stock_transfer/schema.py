@@ -6,6 +6,8 @@ class TransferItemBase(BaseModel):
     product_id: int
     product_name: str
     quantity: int
+    cases: int = 0              # ─── ADDED
+    bottles_per_case: int = 0  
     company_id: Optional[int] = None
 
 class TransferItemCreate(TransferItemBase):

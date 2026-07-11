@@ -3,11 +3,11 @@ import {
   Search, Barcode, Plus, Minus, Trash2, ShoppingCart,
   Printer, CheckCircle, X, Loader2, CreditCard, Banknote,
   Smartphone, Send, Package, Tag, Hash, Calendar, Layers, Download,
-  AlertCircle, ChevronDown, Store
+  AlertCircle, ChevronDown, Store, Pencil
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { getGodownProducts, processGodownCheckout } from '../apiservices/godown-counter';
+import { getGodownProducts, processGodownCheckout, updateGodownSale } from '../apiservices/godown-counter';
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 function generateInvoiceNumber(companyId) {
@@ -72,6 +72,8 @@ export default function POSGodown() {
   const qtyInputRefs = useRef({});
   const discInputRefs = useRef({});
   const [focusRequest, setFocusRequest] = useState(null);
+   const [editingSale, setEditingSale] = useState(null)
+  const [updating, setUpdating] = useState(false)
 
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
@@ -97,6 +99,31 @@ export default function POSGodown() {
   useEffect(() => { localStorage.setItem('godown_discount', JSON.stringify(discount)); }, [discount]);
 
   useEffect(() => { if (companyId) fetchProducts(); }, [companyId]);
+
+    // ═══════════════════════════════════════════════════════════════
+  // NEW: Load edit data from sessionStorage on mount
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('editing_sale_data')
+      if (raw) {
+        const data = JSON.parse(raw)
+        setEditingSale(data)
+        setCart(data.cartItems || [])
+        setCustomerName(data.customerName || 'Walk-in Customer')
+        setCustomerPhone(data.customerPhone || '')
+      }
+    } catch (err) {
+      console.error('Failed to load edit data:', err)
+      sessionStorage.removeItem('editing_sale_data')
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      sessionStorage.removeItem('editing_sale_data')
+    }
+  }, [])
 
   // ─── Auto-Focus Logic ───
   useEffect(() => {
@@ -346,6 +373,12 @@ export default function POSGodown() {
     setPaymentSplits([]);
   };
 
+    const cancelEdit = () => {
+    sessionStorage.removeItem('editing_sale_data')
+    setEditingSale(null)
+    clearPersistedSale()
+  }
+
   const openPayModal = () => {
     if (!cart.length) return;
     try {
@@ -524,7 +557,7 @@ export default function POSGodown() {
     }, 500);
   };
 
-  const handleCheckout = async () => {
+   const handleCheckout = async () => {
     if (!isPaymentValid) {
       alert(`Payment incomplete. Remaining: ₹${remaining.toFixed(2)}`);
       return;
@@ -552,43 +585,95 @@ export default function POSGodown() {
       aggregated[key].discount += (item.discount || 0) * qty;
       aggregated[key].total_price += (item.sale_price - (item.discount || 0)) * qty;
     });
+
     const isSplit = paymentSplits.length > 1;
     const paymentMode = isSplit ? 'SPLIT' : paymentSplits[0].mode;
 
-    const payload = {
-      invoice_number: generateInvoiceNumber(companyId),
-      company_id: Number(companyId),
-      customer_name: customerName,
-      customer_phone: customerPhone,
-      total_amount: grandTotal,
-      payment_mode: paymentMode,
-      payment_details: paymentSplits,
-      items: Object.values(aggregated).map(item => ({
-        ...item,
-        company_id: Number(companyId)
-      })),
-    };
+    if (editingSale) {
+      // ═══════════════════════════════════════════════════════
+      // EDIT MODE: Update existing godown sale
+      // ═══════════════════════════════════════════════════════
+      setUpdating(true);
 
-    try {
-      const result = await processGodownCheckout(payload);
+      const payload = {
+        invoice_number: editingSale.invoiceNumber,  // Keep original
+        company_id: Number(companyId),
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        total_amount: grandTotal,
+        payment_mode: paymentMode,
+        payment_details: paymentSplits,
+        items: Object.values(aggregated).map(item => ({
+          ...item,
+          company_id: Number(companyId),
+        })),
+      };
 
-      // ─── AUTO PRINT THERMAL RECEIPT ───
-      printThermalReceipt(payload, aggregated);
+      try {
+        await updateGodownSale(editingSale.dbId, payload);
 
-      setCompletedSale({ ...payload, created_at: result.created_at || new Date().toISOString() });
-      setShowInvoice(true);
-      setRecentlyScanned([]);
-      setSelectedItems([]);
-      setIsPayModalOpen(false);
-      setPaymentSplits([]);
-      clearPersistedSale();
-      fetchProducts();
-    } catch (err) {
-      setError(err.message || 'Checkout failed. Check godown stock.');
-    } finally {
-      setCheckingOut(false);
+        // Print updated receipt
+        printThermalReceipt(payload, aggregated);
+
+        setCompletedSale({
+          ...payload,
+          created_at: new Date().toISOString(),
+          isEdit: true,
+        });
+        setShowInvoice(true);
+        setRecentlyScanned([]);
+        setSelectedItems([]);
+        setIsPayModalOpen(false);
+        setPaymentSplits([]);
+        sessionStorage.removeItem('editing_sale_data');
+        setEditingSale(null);
+        clearPersistedSale();
+        fetchProducts();
+      } catch (err) {
+        setError(err.message || 'Failed to update godown sale.');
+      } finally {
+        setCheckingOut(false);
+        setUpdating(false);
+      }
+
+    } else {
+      // ═══════════════════════════════════════════════════════
+      // NORMAL MODE: Original create logic
+      // ═══════════════════════════════════════════════════════
+      const payload = {
+        invoice_number: generateInvoiceNumber(companyId),
+        company_id: Number(companyId),
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        total_amount: grandTotal,
+        payment_mode: paymentMode,
+        payment_details: paymentSplits,
+        items: Object.values(aggregated).map(item => ({
+          ...item,
+          company_id: Number(companyId),
+        })),
+      };
+
+      try {
+        const result = await processGodownCheckout(payload);
+        printThermalReceipt(payload, aggregated);
+
+        setCompletedSale({ ...payload, created_at: result.created_at || new Date().toISOString() });
+        setShowInvoice(true);
+        setRecentlyScanned([]);
+        setSelectedItems([]);
+        setIsPayModalOpen(false);
+        setPaymentSplits([]);
+        clearPersistedSale();
+        fetchProducts();
+      } catch (err) {
+        setError(err.message || 'Checkout failed. Check godown stock.');
+      } finally {
+        setCheckingOut(false);
+      }
     }
   };
+
 
   const toggleSelectItem = (scanId) => {
     setSelectedItems(prev => prev.includes(scanId) ? prev.filter(id => id !== scanId) : [...prev, scanId]);
@@ -995,10 +1080,10 @@ export default function POSGodown() {
     return (
       <div className="p-6 flex-1 overflow-y-auto">
         <div className="p-8 bg-white dark:bg-gray-900 rounded-xl max-w-lg mx-auto shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-6 justify-center text-emerald-600">
-            <CheckCircle className="w-8 h-8" />
-            <h2 className="text-2xl font-bold">Godown Sale Complete</h2>
-          </div>
+         <div className={clsx("flex items-center gap-3 mb-6 justify-center", completedSale.isEdit ? "text-amber-600" : "text-emerald-600")}>
+  <CheckCircle className="w-8 h-8" />
+  <h2 className="text-2xl font-bold">{completedSale.isEdit ? 'Godown Sale Updated' : 'Godown Sale Complete'}</h2>
+</div>
           <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300 mb-6">
             <p><strong>Invoice:</strong> {completedSale.invoice_number}</p>
             <p><strong>Customer:</strong> {completedSale.customer_name}</p>
@@ -1027,9 +1112,17 @@ export default function POSGodown() {
           <div className="mt-4 text-right">
             <p className="text-xl font-bold text-primary-600 dark:text-primary-400">Total: ₹{completedSale.total_amount.toFixed(2)}</p>
           </div>
-          <button onClick={() => { setShowInvoice(false); setDiscount(0); }} className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors">
-            New Sale
-          </button>
+         <button
+  onClick={() => {
+    setShowInvoice(false);
+    setDiscount(0);
+    setEditingSale(null);
+    sessionStorage.removeItem('editing_sale_data');
+  }}
+  className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors"
+>
+  {completedSale.isEdit ? 'Back to Godown POS' : 'New Sale'}
+</button>
         </div>
       </div>
     );
@@ -1047,7 +1140,26 @@ export default function POSGodown() {
 
   return (
     <div className="flex flex-1 min-h-0 bg-gray-50 dark:bg-gray-950 overflow-hidden relative">
-
+      {/* ═══ EDIT MODE BANNER ═══ */}
+      {editingSale && (
+        <div className="absolute top-0 left-0 right-0 z-40 bg-amber-500 text-white px-4 py-2 flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <Pencil className="w-4 h-4" />
+            <span className="text-sm font-bold">
+              Editing Godown Invoice: {editingSale.invoiceNumber}
+            </span>
+            <span className="text-xs bg-amber-600 px-2 py-0.5 rounded-full">
+              {editingSale.cartItems?.length || 0} items loaded
+            </span>
+          </div>
+          <button
+            onClick={cancelEdit}
+            className="flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-semibold transition-colors"
+          >
+            <X className="w-4 h-4" /> Cancel Edit
+          </button>
+        </div>
+      )}
       {/* PAYMENT MODAL */}
       {isPayModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -1154,7 +1266,7 @@ export default function POSGodown() {
               )}
             >
               {checkingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-              {checkingOut ? 'Processing...' : 'Confirm & Pay'}
+{checkingOut ? (editingSale ? 'Updating...' : 'Processing...') : (editingSale ? 'Update & Pay' : 'Confirm & Pay')}
             </button>
           </div>
         </div>
@@ -1288,10 +1400,10 @@ export default function POSGodown() {
                   <button key={p.id} onClick={() => addToCart(p)} className="w-full flex items-center gap-2 p-1.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <div className="w-7 h-7 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[7px] font-bold text-gray-500">{p.category?.slice(0, 2)}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
-                      <p className="text-[11px] dark:text-white text-blue-700 ">Stock: {p.godown_stock} {cartCount > 0 && `· ${cartCount} in bill`}</p>
+                      <p className="text-[15px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
+                      <p className="text-[13px] dark:text-white text-blue-700 ">Stock: {p.godown_stock} {cartCount > 0 && `· ${cartCount} in bill`}</p>
                     </div>
-                    <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300">₹{p.sale_price}</p>
+                    <p className="text-[13px] font-bold text-gray-600 dark:text-gray-300">₹{p.sale_price}</p>
                   </button>
                 );
               })
@@ -1381,8 +1493,8 @@ export default function POSGodown() {
                         </div>
                       </td>
                       <td className="py-1.5 pr-2">
-                        <p className="text-[12px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
-                        <p className="text-[10px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
+                        <p className="text-[15px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
+                        <p className="text-[12px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
                       </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex items-center justify-center gap-1">
@@ -1394,13 +1506,13 @@ export default function POSGodown() {
                             onChange={(e) => handleManualQuantityChange(item.scanId, e.target.value)}
                             onBlur={() => handleQuantityBlur(item.scanId)}
                             onKeyDown={(e) => handleQtyKeyDown(e, item.scanId)}
-                            className="w-9 text-center text-[11px] border border-gray-200 dark:border-gray-700 rounded px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800"
+                            className="w-20 text-center text-[15px] border border-gray-200 dark:border-gray-700 rounded px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800"
                           />
                           <button onClick={() => updateQuantity(item.scanId, 1)} className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 text-xs font-bold">+</button>
                         </div>
                       </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[12px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
+                        <span className="text-[15px] font-bold text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
                       </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex justify-center">
@@ -1410,12 +1522,12 @@ export default function POSGodown() {
                             value={itemDiscount}
                             onChange={(e) => updateItemDiscount(item.scanId, e.target.value)}
                             onKeyDown={handleDiscKeyDown}
-                            className="w-12 text-center text-[10px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800"
+                            className="w-14 text-center text-[15px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800"
                           />
                         </div>
                       </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[12px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
+                        <span className="text-[15px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
                       </td>
                       <td className="py-1.5 pr-2 text-center">
                         <button onClick={() => removeFromCart(item.scanId)} className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Remove this item">

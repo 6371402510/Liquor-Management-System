@@ -11,6 +11,13 @@ function generateTransferNumber() {
   return `ST-${d}-${Math.floor(1000 + Math.random() * 9000)}`
 }
 
+// ─── Bottle per case map (fallback if product doesn't have it) ───
+const SIZE_BOTTLES_MAP = {
+  '90ml': 96, '180ml': 48, '200ml': 24, '250ml': 36, '275ml': 24, '300ml': 30,
+  '330ml': 30, '375ml': 24, '500ml': 24, '650ml': 12, '750ml': 12,
+  '1000ml': 9, '2000ml': 6,
+}
+
 export default function StockTransfer() {
   // ─── COMPANY ID FROM LOCAL STORAGE ───
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
@@ -29,10 +36,13 @@ export default function StockTransfer() {
   const [isSearching, setIsSearching] = useState(false)
   const dropdownRef = useRef(null)
   const productInputRef = useRef(null)
-const qtyInputRef = useRef(null)
+  const casesInputRef = useRef(null)
+  const qtyInputRef = useRef(null)
 
   const [selectedProduct, setSelectedProduct] = useState(null)
-  const [transferQty, setTransferQty] = useState(1)
+  const [transferCases, setTransferCases] = useState(0)
+  const [transferQty, setTransferQty] = useState(0)
+  const [bottlesPerCase, setBottlesPerCase] = useState(0)
   const [items, setItems] = useState([])
   const [notes, setNotes] = useState('')
 
@@ -53,7 +63,6 @@ const qtyInputRef = useRef(null)
   const fetchTransfers = async () => {
     setLoading(true)
     try {
-      // ─── PASS COMPANY ID ───
       const data = await getStockTransfers(Number(companyId))
       setTransfers(data || [])
     } catch (err) {
@@ -63,55 +72,71 @@ const qtyInputRef = useRef(null)
     }
   }
 
- const handleSearchChange = async (val) => {
-  setSearchQuery(val)
-  setSelectedProduct(null)
+  const handleSearchChange = async (val) => {
+    setSearchQuery(val)
+    setSelectedProduct(null)
 
-  if (val.length > 1) {
-    setIsSearching(true)
+    if (val.length > 1) {
+      setIsSearching(true)
 
-    try {
-      const results = await searchProducts(val, companyId)
-      const availableResults = results.filter(
-        p => (p.godown_stock || 0) > 0
-      )
+      try {
+        const results = await searchProducts(val, companyId)
+        const availableResults = results.filter(
+          p => (p.godown_stock || 0) > 0
+        )
 
-      setSearchResults(availableResults)
+        setSearchResults(availableResults)
 
-      // Barcode scan -> only one product found
-      if (availableResults.length === 1) {
-        const product = availableResults[0]
-
-        setSelectedProduct(product)
-        setSearchQuery(`${product.name} (${product.barcode || product.item_code})`)
-        setShowDropdown(false)
-        setTransferQty(1)
-
-        // Move cursor to Qty
-        setTimeout(() => {
-          qtyInputRef.current?.focus()
-          qtyInputRef.current?.select()
-        }, 50)
-      } else {
-        // Manual search
-        setShowDropdown(availableResults.length > 0)
+        // Barcode scan -> only one product found
+        if (availableResults.length === 1) {
+          const product = availableResults[0]
+          selectProduct(product)
+        } else {
+          setShowDropdown(availableResults.length > 0)
+        }
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setIsSearching(false)
       }
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setIsSearching(false)
+    } else {
+      setSearchResults([])
+      setShowDropdown(false)
     }
-  } else {
-    setSearchResults([])
-    setShowDropdown(false)
   }
-}
 
   const selectProduct = (product) => {
+    const bpc = product.bottles_per_case || SIZE_BOTTLES_MAP[product.bottle_size] || 0
+
     setSelectedProduct(product)
     setSearchQuery(`${product.name} (${product.barcode || product.item_code})`)
     setShowDropdown(false)
-    setTransferQty(1)
+    setBottlesPerCase(bpc)
+    setTransferCases(0)
+    setTransferQty(0)
+
+    // Move cursor to Cases input
+    setTimeout(() => {
+      casesInputRef.current?.focus()
+      casesInputRef.current?.select()
+    }, 50)
+  }
+
+  // ─── When CASES change — auto-calculate bottles ───
+  const handleCasesChange = (val) => {
+    const cases = Number(val) || 0
+    setTransferCases(cases)
+
+    if (cases > 0 && bottlesPerCase > 0) {
+      setTransferQty(cases * bottlesPerCase)
+    } else {
+      setTransferQty(0)
+    }
+  }
+
+  // ─── When QTY (bottles) change — keep cases as is (user can type directly) ───
+  const handleQtyChange = (val) => {
+    setTransferQty(Number(val) || 0)
   }
 
   const addToTransferList = () => {
@@ -125,13 +150,18 @@ const qtyInputRef = useRef(null)
     setItems(prev => [...prev, {
       product_id: selectedProduct.id,
       product_name: selectedProduct.name,
+      bottle_size: selectedProduct.bottle_size || '',
+      bottles_per_case: bottlesPerCase,
+      cases: transferCases,
       quantity: Number(transferQty),
       available: selectedProduct.godown_stock
     }])
 
     setSelectedProduct(null)
     setSearchQuery('')
-    setTransferQty(1)
+    setTransferCases(0)
+    setTransferQty(0)
+    setBottlesPerCase(0)
   }
 
   const removeItem = (index) => {
@@ -147,13 +177,15 @@ const qtyInputRef = useRef(null)
 
     const payload = {
       transfer_number: generateTransferNumber(),
-      company_id: Number(companyId), // ─── INJECT COMPANY ID ───
+      company_id: Number(companyId),
       notes,
       items: items.map(item => ({
         product_id: item.product_id,
         product_name: item.product_name,
         quantity: item.quantity,
-        company_id: Number(companyId) // ─── INJECT COMPANY ID ───
+        cases: item.cases,
+        bottles_per_case: item.bottles_per_case,
+        company_id: Number(companyId)
       }))
     }
 
@@ -172,6 +204,7 @@ const qtyInputRef = useRef(null)
   }
 
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0)
+  const totalCases = items.reduce((sum, item) => sum + (item.cases || 0), 0)
 
   // ─── GUARD: NO COMPANY SELECTED ───
   if (!companyId) {
@@ -210,40 +243,43 @@ const qtyInputRef = useRef(null)
       {showForm && (
         <div className="card p-6 border dark:border-slate-700 shadow-sm space-y-6">
           <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">Create Transfer Slip</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-            <div className="relative md:col-span-2" ref={dropdownRef}>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            {/* Search Product - takes 5 cols */}
+            <div className="relative md:col-span-5" ref={dropdownRef}>
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Search Godown Product</label>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input 
+                <input
                   ref={productInputRef}
-                  type="text" 
-                  placeholder="Type barcode or product name..." 
-                  value={searchQuery} 
-                  onChange={e => handleSearchChange(e.target.value)} 
-                   onKeyDown={(e) => {
-    if (e.key === "Enter" && selectedProduct) {
-      e.preventDefault()
-      qtyInputRef.current?.focus()
-      qtyInputRef.current?.select()
-    }
-  }}
-                  className="input-field pl-8" 
+                  type="text"
+                  placeholder="Type barcode or product name..."
+                  value={searchQuery}
+                  onChange={e => handleSearchChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && selectedProduct) {
+                      e.preventDefault()
+                      casesInputRef.current?.focus()
+                      casesInputRef.current?.select()
+                    }
+                  }}
+                  className="input-field pl-8"
                 />
                 {isSearching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />}
               </div>
-              
+
               {showDropdown && (
                 <div className="absolute z-30 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                   {searchResults.map(p => (
-                    <button 
-                      key={p.id} 
-                      type="button" 
+                    <button
+                      key={p.id}
+                      type="button"
                       onMouseDown={() => selectProduct(p)}
                       className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-xs flex justify-between items-center"
                     >
-                      <span className="font-medium text-gray-900 dark:text-gray-100">{p.name} ({p.barcode || p.item_code})</span>
+                      <span className="font-medium text-gray-900 dark:text-gray-100">
+                        {p.name} ({p.barcode || p.item_code}) <span className="text-gray-400 ml-1">{p.bottle_size || ''}</span>
+                      </span>
                       <span className="text-amber-600 dark:text-amber-400 font-semibold">Godown: {p.godown_stock}</span>
                     </button>
                   ))}
@@ -251,27 +287,62 @@ const qtyInputRef = useRef(null)
               )}
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Qty to Transfer</label>
-              <div className="flex gap-2">
-                <input 
-                 ref={qtyInputRef}
-                  type="number" 
-                  min="1" 
-                  max={selectedProduct?.godown_stock || 1}
-                  value={transferQty} 
-                  onChange={e => setTransferQty(e.target.value)} 
-                  onKeyDown={(e)=>{
-    if(e.key==="Enter"){
-      addToTransferList()
+            {/* Cases Input - takes 2 cols */}
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Cases</label>
+              <input
+                ref={casesInputRef}
+                type="number"
+                min="0"
+                value={transferCases || ''}
+                onChange={e => handleCasesChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    qtyInputRef.current?.focus()
+                    qtyInputRef.current?.select()
+                  }
+                }}
+                className="input-field text-center"
+                disabled={!selectedProduct}
+                placeholder="0"
+              />
+            </div>
 
-      setTimeout(()=>{
-        productInputRef.current?.focus()
-      },100)
-    }
-  }}
-                  className="input-field" 
+            {/* Bottles Per Case (read-only) - takes 2 cols */}
+            <div className="md:col-span-1">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">BPC</label>
+              <input
+                type="text"
+                value={bottlesPerCase || '-'}
+                className="input-field text-center bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-not-allowed"
+                disabled
+                readOnly
+              />
+            </div>
+
+            {/* Quantity (Bottles) - takes 2 cols */}
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Total Bottles</label>
+              <div className="flex gap-2">
+                <input
+                  ref={qtyInputRef}
+                  type="number"
+                  min="0"
+                  max={selectedProduct?.godown_stock || 1}
+                  value={transferQty || ''}
+                  onChange={e => handleQtyChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      addToTransferList()
+                      setTimeout(() => {
+                        productInputRef.current?.focus()
+                      }, 100)
+                    }
+                  }}
+                  className="input-field text-center flex-1"
                   disabled={!selectedProduct}
+                  placeholder="0"
                 />
                 <button type="button" onClick={addToTransferList} className="btn-primary px-4" disabled={!selectedProduct}>
                   <Plus className="w-4 h-4" />
@@ -280,14 +351,31 @@ const qtyInputRef = useRef(null)
             </div>
           </div>
 
+          {/* ─── Selected Product Info Bar ─── */}
+          {selectedProduct && (
+            <div className="flex items-center gap-4 p-3 bg-amber-50 dark:bg-amber-900/10 rounded-lg border border-amber-100 dark:border-amber-800/30 text-xs">
+              <div className="flex-1">
+                <p className="font-semibold text-gray-800 dark:text-gray-200">{selectedProduct.name}</p>
+                <p className="text-gray-500 dark:text-gray-400">Code: {selectedProduct.barcode || selectedProduct.item_code} · Size: {selectedProduct.bottle_size || '-'}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-gray-500 dark:text-gray-400">Available in Godown</p>
+                <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{selectedProduct.godown_stock}</p>
+              </div>
+            </div>
+          )}
+
           {items.length > 0 && (
             <div className="overflow-x-auto border dark:border-slate-700 rounded-lg">
               <table className="w-full text-sm">
                 <thead className="bg-slate-100 dark:bg-slate-800">
                   <tr>
                     <th className="p-2 text-left font-semibold">Product</th>
+                    <th className="p-2 text-left font-semibold">Size</th>
+                    <th className="p-2 text-center font-semibold">BPC</th>
+                    <th className="p-2 text-center font-semibold">Cases</th>
+                    <th className="p-2 text-center font-semibold">Bottles</th>
                     <th className="p-2 text-center font-semibold">Available (Godown)</th>
-                    <th className="p-2 text-center font-semibold">Transfer Qty</th>
                     <th className="p-2 text-center font-semibold">Action</th>
                   </tr>
                 </thead>
@@ -295,8 +383,15 @@ const qtyInputRef = useRef(null)
                   {items.map((item, i) => (
                     <tr key={i}>
                       <td className="p-2 font-medium">{item.product_name}</td>
-                      <td className="p-2 text-center text-gray-500">{item.available}</td>
+                      <td className="p-2 text-gray-500 text-xs">{item.bottle_size || '-'}</td>
+                      <td className="p-2 text-center text-gray-500">{item.bottles_per_case || '-'}</td>
+                      <td className="p-2 text-center">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-semibold">
+                          {item.cases || 0}
+                        </span>
+                      </td>
                       <td className="p-2 text-center font-bold text-amber-600">{item.quantity}</td>
+                      <td className="p-2 text-center text-gray-500">{item.available}</td>
                       <td className="p-2 text-center">
                         <button type="button" onClick={() => removeItem(i)} className="text-red-500 hover:text-red-700">
                           <Trash2 className="w-4 h-4" />
@@ -305,6 +400,14 @@ const qtyInputRef = useRef(null)
                     </tr>
                   ))}
                 </tbody>
+                <tfoot className="bg-slate-50 dark:bg-slate-800/50 font-semibold text-xs">
+                  <tr>
+                    <td colSpan={3} className="p-2 text-right text-gray-600 dark:text-gray-300">Total</td>
+                    <td className="p-2 text-center text-blue-700 dark:text-blue-300">{totalCases}</td>
+                    <td className="p-2 text-center text-amber-700 dark:text-amber-300">{totalItems}</td>
+                    <td colSpan={2}></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}
@@ -314,18 +417,18 @@ const qtyInputRef = useRef(null)
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes (Optional)</label>
               <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Restocking for weekend" className="input-field resize-none" rows="1" />
             </div>
-            
-            <button 
-              type="button" 
-              onClick={handleSubmit} 
-              disabled={saving || items.length === 0} 
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={saving || items.length === 0}
               className={clsx(
                 "w-full sm:w-72 flex justify-center items-center gap-2 py-2.5 rounded-lg text-white font-semibold transition-all",
                 saving || items.length === 0 ? "bg-gray-300 dark:bg-gray-700 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 active:scale-95 shadow-md"
               )}
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Warehouse className="w-4 h-4" />}
-              {saving ? "Transferring..." : `Confirm Transfer (${totalItems} Items)`}
+              {saving ? "Transferring..." : `Confirm Transfer (${totalCases} Cases / ${totalItems} Bottles)`}
             </button>
           </div>
         </div>

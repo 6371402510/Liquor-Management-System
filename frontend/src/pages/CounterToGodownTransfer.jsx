@@ -11,6 +11,13 @@ function generateTransferNumber() {
   return `CTG-${d}-${Math.floor(1000 + Math.random() * 9000)}`
 }
 
+// ─── Bottle per case map (fallback if product doesn't have it) ───
+const SIZE_BOTTLES_MAP = {
+  '90ml': 96, '180ml': 48, '200ml': 24, '250ml': 36, '275ml': 24, '300ml': 30,
+  '330ml': 30, '375ml': 24, '500ml': 24, '650ml': 12, '750ml': 12,
+  '1000ml': 9, '2000ml': 6,
+}
+
 export default function CounterToGodownTransfer() {
   // ─── COMPANY ID FROM LOCAL STORAGE ───
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
@@ -29,10 +36,13 @@ export default function CounterToGodownTransfer() {
   const [isSearching, setIsSearching] = useState(false)
   const dropdownRef = useRef(null)
   const productInputRef = useRef(null)
+  const casesInputRef = useRef(null)
   const qtyInputRef = useRef(null)
 
   const [selectedProduct, setSelectedProduct] = useState(null)
-  const [transferQty, setTransferQty] = useState(1)
+  const [transferCases, setTransferCases] = useState(0)
+  const [transferQty, setTransferQty] = useState(0)
+  const [bottlesPerCase, setBottlesPerCase] = useState(0)
   const [items, setItems] = useState([])
   const [notes, setNotes] = useState('')
 
@@ -62,66 +72,78 @@ export default function CounterToGodownTransfer() {
     }
   }
 
- const handleSearchChange = async (val) => {
-  setSearchQuery(val)
-
-  if (val.length < 2) {
-    setSearchResults([])
-    setShowDropdown(false)
+  const handleSearchChange = async (val) => {
+    setSearchQuery(val)
     setSelectedProduct(null)
-    return
-  }
 
-  setIsSearching(true)
-
-  try {
-    const results = await searchProducts(val, companyId)
-    const availableResults = results.filter(
-      p => (p.godown_stock || 0) > 0
-    )
-
-    setSearchResults(availableResults)
-
-    // Barcode scanned -> Auto Select
-    if (availableResults.length === 1) {
-      const product = availableResults[0]
-
-      setSelectedProduct(product)
-      setSearchQuery(`${product.name} (${product.barcode || product.item_code})`)
-      setTransferQty(1)
+    if (val.length < 2) {
+      setSearchResults([])
       setShowDropdown(false)
-
-      setTimeout(() => {
-        qtyInputRef.current?.focus()
-        qtyInputRef.current?.select()
-      }, 50)
-    } else {
-      // Manual search by name
-      setSelectedProduct(null)
-      setShowDropdown(availableResults.length > 0)
+      return
     }
-  } catch (err) {
-    console.error(err)
-  } finally {
-    setIsSearching(false)
-  }
-}
-  const selectProduct = (product) => {
-  setSelectedProduct(product)
-  setSearchQuery(`${product.name} (${product.barcode || product.item_code})`)
-  setTransferQty(1)
-  setShowDropdown(false)
 
-  setTimeout(() => {
-    qtyInputRef.current?.focus()
-    qtyInputRef.current?.select()
-  }, 50)
-}
+    setIsSearching(true)
+
+    try {
+      const results = await searchProducts(val, companyId)
+      // ─── FILTER: Only products with counter stock ───
+      const availableResults = results.filter(
+        p => (p.counter_stock || 0) > 0
+      )
+
+      setSearchResults(availableResults)
+
+      // Barcode scan -> auto select
+      if (availableResults.length === 1) {
+        selectProduct(availableResults[0])
+      } else {
+        setShowDropdown(availableResults.length > 0)
+      }
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const selectProduct = (product) => {
+    const bpc = product.bottles_per_case || SIZE_BOTTLES_MAP[product.bottle_size] || 0
+
+    setSelectedProduct(product)
+    setSearchQuery(`${product.name} (${product.barcode || product.item_code})`)
+    setShowDropdown(false)
+    setBottlesPerCase(bpc)
+    setTransferCases(0)
+    setTransferQty(0)
+
+    // Move cursor to Cases input
+    setTimeout(() => {
+      casesInputRef.current?.focus()
+      casesInputRef.current?.select()
+    }, 50)
+  }
+
+  // ─── When CASES change — auto-calculate bottles ───
+  const handleCasesChange = (val) => {
+    const cases = Number(val) || 0
+    setTransferCases(cases)
+
+    if (cases > 0 && bottlesPerCase > 0) {
+      setTransferQty(cases * bottlesPerCase)
+    } else {
+      setTransferQty(0)
+    }
+  }
+
+  // ─── When QTY (bottles) change — keep cases as is ───
+  const handleQtyChange = (val) => {
+    setTransferQty(Number(val) || 0)
+  }
 
   const addToTransferList = () => {
     if (!selectedProduct) return alert('Please select a product')
     if (transferQty <= 0) return alert('Quantity must be greater than 0')
-    
+
     // ─── CHECK COUNTER STOCK ───
     if (transferQty > selectedProduct.counter_stock) {
       return alert(`Only ${selectedProduct.counter_stock} available in counter`)
@@ -133,20 +155,25 @@ export default function CounterToGodownTransfer() {
     setItems(prev => [...prev, {
       product_id: selectedProduct.id,
       product_name: selectedProduct.name,
+      bottle_size: selectedProduct.bottle_size || '',
+      bottles_per_case: bottlesPerCase,
+      cases: transferCases,
       quantity: Number(transferQty),
-      available: selectedProduct.counter_stock // ─── Show counter stock
+      available: selectedProduct.counter_stock
     }])
 
     setSelectedProduct(null)
-setSearchQuery("")
-setSearchResults([])
-setShowDropdown(false)
-setTransferQty(1)
+    setSearchQuery('')
+    setSearchResults([])
+    setShowDropdown(false)
+    setTransferCases(0)
+    setTransferQty(0)
+    setBottlesPerCase(0)
 
-setTimeout(() => {
-  productInputRef.current?.focus()
-  productInputRef.current?.select()
-}, 100)
+    setTimeout(() => {
+      productInputRef.current?.focus()
+      productInputRef.current?.select()
+    }, 100)
   }
 
   const removeItem = (index) => {
@@ -168,6 +195,8 @@ setTimeout(() => {
         product_id: item.product_id,
         product_name: item.product_name,
         quantity: item.quantity,
+        cases: item.cases,
+        bottles_per_case: item.bottles_per_case,
         company_id: Number(companyId)
       }))
     }
@@ -187,6 +216,7 @@ setTimeout(() => {
   }
 
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0)
+  const totalCases = items.reduce((sum, item) => sum + (item.cases || 0), 0)
 
   // ─── GUARD: NO COMPANY SELECTED ───
   if (!companyId) {
@@ -211,12 +241,12 @@ setTimeout(() => {
             <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">{companyName}</span>
           </div>
         </div>
-        <button 
-          onClick={() => setShowForm(s => !s)} 
+        <button
+          onClick={() => setShowForm(s => !s)}
           className={clsx(
             "flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all",
-            showForm 
-              ? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600" 
+            showForm
+              ? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
               : "bg-blue-600 text-white hover:bg-blue-700 active:scale-95 shadow-md"
           )}
         >
@@ -265,44 +295,47 @@ setTimeout(() => {
               <p className="text-xs text-gray-500 dark:text-gray-400">Select products to return from counter to godown</p>
             </div>
           </div>
-          
-          {/* Search & Quantity Row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-800/30">
-            <div className="relative md:col-span-2" ref={dropdownRef}>
+
+          {/* Search, Cases, BPC, Bottles Row */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-800/30">
+            {/* Search Product - 5 cols */}
+            <div className="relative md:col-span-5" ref={dropdownRef}>
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                 Search Counter Product
               </label>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input 
+                <input
                   ref={productInputRef}
-                  type="text" 
-                  placeholder="Type barcode or product name..." 
-                  value={searchQuery} 
-                  onChange={e => handleSearchChange(e.target.value)} 
+                  type="text"
+                  placeholder="Type barcode or product name..."
+                  value={searchQuery}
+                  onChange={e => handleSearchChange(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && selectedProduct) {
-                      qtyInputRef.current?.focus()
+                      e.preventDefault()
+                      casesInputRef.current?.focus()
+                      casesInputRef.current?.select()
                     }
                   }}
-                  className="input-field pl-8" 
+                  className="input-field pl-8"
                 />
                 {isSearching && (
                   <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
                 )}
               </div>
-              
+
               {showDropdown && (
                 <div className="absolute z-30 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                   {searchResults.map(p => (
-                    <button 
-                      key={p.id} 
-                      type="button" 
+                    <button
+                      key={p.id}
+                      type="button"
                       onMouseDown={() => selectProduct(p)}
                       className="w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-xs flex justify-between items-center transition-colors"
                     >
                       <span className="font-medium text-gray-900 dark:text-gray-100">
-                        {p.name} ({p.barcode || p.item_code})
+                        {p.name} ({p.barcode || p.item_code}) <span className="text-gray-400 ml-1">{p.bottle_size || ''}</span>
                       </span>
                       <span className="text-blue-600 dark:text-blue-400 font-semibold">
                         Counter: {p.counter_stock}
@@ -313,37 +346,68 @@ setTimeout(() => {
               )}
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                Qty to Return
-              </label>
+            {/* Cases Input - 2 cols */}
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Cases</label>
+              <input
+                ref={casesInputRef}
+                type="number"
+                min="0"
+                value={transferCases || ''}
+                onChange={e => handleCasesChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    qtyInputRef.current?.focus()
+                    qtyInputRef.current?.select()
+                  }
+                }}
+                className="input-field text-center"
+                disabled={!selectedProduct}
+                placeholder="0"
+              />
+            </div>
+
+            {/* BPC (read-only) - 1 col */}
+            <div className="md:col-span-1">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">BPC</label>
+              <input
+                type="text"
+                value={bottlesPerCase || '-'}
+                className="input-field text-center bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-not-allowed"
+                disabled
+                readOnly
+              />
+            </div>
+
+            {/* Total Bottles - 2 cols */}
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Total Bottles</label>
               <div className="flex gap-2">
                 <input
-  ref={qtyInputRef}
-  type="number"
-  min="1"
-  max={selectedProduct?.godown_stock || 1}
-  value={transferQty}
-  onChange={(e) => setTransferQty(e.target.value)}
-  onKeyDown={(e) => {
-    if (e.key === "Enter") {
-      e.preventDefault()
-
-      addToTransferList()
-
-      setTimeout(() => {
-        productInputRef.current?.focus()
-        productInputRef.current?.select()
-      }, 100)
-    }
-  }}
-  className="input-field"
-  disabled={!selectedProduct}
-/>
-                <button 
-                  type="button" 
-                  onClick={addToTransferList} 
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+                  ref={qtyInputRef}
+                  type="number"
+                  min="0"
+                  max={selectedProduct?.counter_stock || 1}
+                  value={transferQty || ''}
+                  onChange={e => handleQtyChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      addToTransferList()
+                      setTimeout(() => {
+                        productInputRef.current?.focus()
+                      }, 100)
+                    }
+                  }}
+                  className="input-field text-center flex-1"
+                  disabled={!selectedProduct}
+                  placeholder="0"
+                />
+                <button
+                  type="button"
+                  onClick={addToTransferList}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={!selectedProduct}
                 >
                   <Plus className="w-4 h-4" />
@@ -354,10 +418,10 @@ setTimeout(() => {
 
           {/* Selected Product Info */}
           {selectedProduct && (
-            <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800/30">
+            <div className="flex items-center gap-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800/30">
               <div className="flex-1">
                 <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{selectedProduct.name}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Code: {selectedProduct.barcode || selectedProduct.item_code}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Code: {selectedProduct.barcode || selectedProduct.item_code} · Size: {selectedProduct.bottle_size || '-'}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-500 dark:text-gray-400">Available in Counter</p>
@@ -372,26 +436,32 @@ setTimeout(() => {
               <table className="w-full text-sm">
                 <thead className="bg-blue-50 dark:bg-blue-900/20">
                   <tr>
-                    <th className="p-3 text-left font-semibold text-blue-800 dark:text-blue-300">Product</th>
-                    <th className="p-3 text-center font-semibold text-blue-800 dark:text-blue-300">Counter Stock</th>
-                    <th className="p-3 text-center font-semibold text-blue-800 dark:text-blue-300">Return Qty</th>
-                    <th className="p-3 text-center font-semibold text-blue-800 dark:text-blue-300">Action</th>
+                    <th className="p-2 text-left font-semibold text-blue-800 dark:text-blue-300">Product</th>
+                    <th className="p-2 text-left font-semibold text-blue-800 dark:text-blue-300">Size</th>
+                    <th className="p-2 text-center font-semibold text-blue-800 dark:text-blue-300">BPC</th>
+                    <th className="p-2 text-center font-semibold text-blue-800 dark:text-blue-300">Cases</th>
+                    <th className="p-2 text-center font-semibold text-blue-800 dark:text-blue-300">Bottles</th>
+                    <th className="p-2 text-center font-semibold text-blue-800 dark:text-blue-300">Counter Stock</th>
+                    <th className="p-2 text-center font-semibold text-blue-800 dark:text-blue-300">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {items.map((item, i) => (
                     <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                      <td className="p-3 font-medium">{item.product_name}</td>
-                      <td className="p-3 text-center text-gray-500">{item.available}</td>
-                      <td className="p-3 text-center">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-                          {item.quantity}
+                      <td className="p-2 font-medium">{item.product_name}</td>
+                      <td className="p-2 text-gray-500 text-xs">{item.bottle_size || '-'}</td>
+                      <td className="p-2 text-center text-gray-500">{item.bottles_per_case || '-'}</td>
+                      <td className="p-2 text-center">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 text-xs font-semibold">
+                          {item.cases || 0}
                         </span>
                       </td>
-                      <td className="p-3 text-center">
-                        <button 
-                          type="button" 
-                          onClick={() => removeItem(i)} 
+                      <td className="p-2 text-center font-bold text-blue-600">{item.quantity}</td>
+                      <td className="p-2 text-center text-gray-500">{item.available}</td>
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => removeItem(i)}
                           className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 p-1.5 rounded-lg transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -400,17 +470,12 @@ setTimeout(() => {
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-gray-50 dark:bg-gray-800/50">
+                <tfoot className="bg-gray-50 dark:bg-gray-800/50 font-semibold text-xs">
                   <tr>
-                    <td colSpan={2} className="p-3 text-right font-semibold text-gray-700 dark:text-gray-300">
-                      Total Items to Return:
-                    </td>
-                    <td className="p-3 text-center">
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-bold bg-blue-600 text-white">
-                        {totalItems}
-                      </span>
-                    </td>
-                    <td></td>
+                    <td colSpan={3} className="p-2 text-right text-gray-600 dark:text-gray-300">Total</td>
+                    <td className="p-2 text-center text-purple-700 dark:text-purple-300">{totalCases}</td>
+                    <td className="p-2 text-center text-blue-700 dark:text-blue-300">{totalItems}</td>
+                    <td colSpan={2}></td>
                   </tr>
                 </tfoot>
               </table>
@@ -423,28 +488,28 @@ setTimeout(() => {
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                 Reason / Notes (Optional)
               </label>
-              <textarea 
-                value={notes} 
-                onChange={e => setNotes(e.target.value)} 
-                placeholder="e.g. Closing excess stock, damaged items, end of day return..." 
-                className="input-field resize-none" 
-                rows="2" 
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="e.g. Closing excess stock, damaged items, end of day return..."
+                className="input-field resize-none"
+                rows="2"
               />
             </div>
-            
-            <button 
-              type="button" 
-              onClick={handleSubmit} 
-              disabled={saving || items.length === 0} 
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={saving || items.length === 0}
               className={clsx(
                 "w-full sm:w-80 flex justify-center items-center gap-2 py-3 rounded-xl text-white font-semibold transition-all",
-                saving || items.length === 0 
-                  ? "bg-gray-300 dark:bg-gray-700 cursor-not-allowed" 
+                saving || items.length === 0
+                  ? "bg-gray-300 dark:bg-gray-700 cursor-not-allowed"
                   : "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg shadow-blue-500/25"
               )}
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpCircle className="w-4 h-4" />}
-              {saving ? "Processing..." : `Return ${totalItems} Items to Godown`}
+              {saving ? "Processing..." : `Return ${totalCases} Cases / ${totalItems} Bottles`}
             </button>
           </div>
         </div>

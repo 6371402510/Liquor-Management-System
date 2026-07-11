@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useLocation, Outlet } from 'react-router-dom' // <-- Import Outlet here
+import { useLocation, useNavigate, Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
 
 const pageTitles = {
   '/companies': 'Company Management',
   '/pos': 'POS Billing',
+  '/godown-pos': 'Godown POS',
   '/inventory': 'Inventory',
   '/purchases': 'Purchase Entry',
   '/suppliers': 'Supplier Management',
@@ -15,9 +16,10 @@ const pageTitles = {
   '/excise-register': 'Excise Register',
 }
 
-export default function Layout() { // Removed { children } prop
+export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()  // ← ADD THIS
 
   // Handle dynamic dashboard route title
   let title = pageTitles[location.pathname]
@@ -31,6 +33,24 @@ export default function Layout() { // Removed { children } prop
     setSidebarOpen(false)
   }, [location.pathname])
 
+  // ═══════════════════════════════════════════════════════════
+  // ADD THIS: Listen for Edit button click from Reports
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    const handleEditNavigation = (event) => {
+      const saleType = event.detail.type  // 'counter' or 'godown'
+
+      if (saleType === 'counter') {
+        navigate('/pos')
+      } else if (saleType === 'godown') {
+        navigate('/godown-pos')
+      }
+    }
+
+    window.addEventListener('open-pos-edit', handleEditNavigation)
+    return () => window.removeEventListener('open-pos-edit', handleEditNavigation)
+  }, [navigate])
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -41,8 +61,7 @@ export default function Layout() { // Removed { children } prop
           title={title}
         />
         <main className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 lg:p-6">
-          {/* Replace {children} with <Outlet /> */}
-          <Outlet /> 
+          <Outlet />
         </main>
       </div>
     </div>

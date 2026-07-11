@@ -286,16 +286,24 @@ export default function Companies() {
                     </label>
 
                     <select
-                      value={currentCompany.exciseZone}
-                      onChange={e => handleChange('exciseZone', e.target.value)}
-                      className="input-field"
-                    >
-                      <option value="">Select Excise Division</option>
-                      <option value="Bhubaneswar">Northern Division (Sambalpur)</option>
-                      <option value="Bhubaneswar">Central Division (Cuttack)</option>
-                      <option value="Bhubaneswar">Southern Division (Berhampur)</option>
+  value={currentCompany.exciseZone}
+  onChange={e => handleChange('exciseZone', e.target.value)}
+  className="input-field"
+>
+  <option value="">Select Excise Division</option>
 
-                    </select>
+  <option value="Northern Division (Sambalpur)">
+    Northern Division (Sambalpur)
+  </option>
+
+  <option value="Central Division (Cuttack)">
+    Central Division (Cuttack)
+  </option>
+
+  <option value="Southern Division (Berhampur)">
+    Southern Division (Berhampur)
+  </option>
+</select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">PAN Number</label>

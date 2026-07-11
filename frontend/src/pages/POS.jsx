@@ -4,11 +4,11 @@ import {
   Search, Barcode, Plus, Minus, Trash2, ShoppingCart,
   Printer, CheckCircle, X, Loader2, CreditCard, Banknote,
   Smartphone, Send, Package, Tag, Hash, Calendar, Layers, Download,
-  AlertCircle, Store
+  AlertCircle, Store, Pencil 
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { getPosProducts, processCheckout } from '../apiservices/sales-counter';
+import { getPosProducts, processCheckout, updateSale } from '../apiservices/sales-counter';
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 function generateInvoiceNumber(companyId) {
@@ -85,6 +85,9 @@ export default function POS() {
   const [completedSale, setCompletedSale] = useState(null);
   const barcodeRef = useRef(null);
 
+   const [editingSale, setEditingSale] = useState(null)  // { dbId, invoiceNumber, type, ... }
+  const [updating, setUpdating] = useState(false)
+
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const [error, setError] = useState('');
@@ -103,6 +106,32 @@ export default function POS() {
   useEffect(() => { localStorage.setItem('pos_discount', JSON.stringify(discount)); }, [discount]);
 
   useEffect(() => { if (companyId) fetchProducts(); }, [companyId]);
+    // ═══════════════════════════════════════════════════════════════
+  // NEW: Load edit data from sessionStorage on mount
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('editing_sale_data')
+      if (raw) {
+        const data = JSON.parse(raw)
+        setEditingSale(data)
+        setCart(data.cartItems || [])
+        setCustomerName(data.customerName || 'Walk-in Customer')
+        setCustomerPhone(data.customerPhone || '')
+        // Don't clear sessionStorage yet — clear on save/cancel/unmount
+      }
+    } catch (err) {
+      console.error('Failed to load edit data:', err)
+      sessionStorage.removeItem('editing_sale_data')
+    }
+  }, [])
+
+  // Cleanup: clear edit data when component unmounts
+  useEffect(() => {
+    return () => {
+      sessionStorage.removeItem('editing_sale_data')
+    }
+  }, [])
 
   const fetchProducts = async (searchTerm = '') => {
     setLoadingProducts(true);
@@ -295,80 +324,160 @@ const cardTotal = cart
     setPaymentMode('CASH');
   };
 
-  // ─── Process EACH item in cart as a SEPARATE BILL ───
- const handleCheckout = async () => {
-  if (!cart.length) return;
-  setCheckingOut(true);
-  setError('');
-
-  try {
-    // Group items by productId to consolidate quantities
-    const groupedItems = {};
-    cart.forEach(item => {
-      const key = `${item.productId}_${item.paymentMode}`;
-      if (!groupedItems[key]) {
-        groupedItems[key] = {
-          productId: item.productId,
-          name: item.name,
-          sale_price: item.sale_price,
-          paymentMode: item.paymentMode || 'CASH',
-          totalQuantity: 0,
-          totalDiscount: 0,
-        };
-      }
-      groupedItems[key].totalQuantity += (item.quantity || 1);
-      groupedItems[key].totalDiscount += ((item.discount || 0) * (item.quantity || 1));
-    });
-
-    for (const group of Object.values(groupedItems)) {
-      const itemTotal = (group.sale_price * group.totalQuantity) - group.totalDiscount;
-      
-      const payload = {
-        invoice_number: generateInvoiceNumber(companyId),
-        company_id: Number(companyId),
-        customer_name: customerName,
-        customer_phone: customerPhone,
-        total_amount: itemTotal,
-        payment_mode: group.paymentMode,
-        items: [{
-          product_id: group.productId,
-          product_name: group.name,
-          quantity: group.totalQuantity,  // ✅ Use actual quantity
-          unit_price: group.sale_price,
-          discount: group.totalDiscount,
-          total_price: itemTotal,
-          company_id: Number(companyId)
-        }],
-      };
-      await processCheckout(payload);
-    }
-
-    setCompletedSale({
-      invoice_number: `${Object.keys(groupedItems).length} Bills Generated`,
-      customer_name: customerName,
-      created_at: new Date().toISOString(),
-      total_amount: grandTotal,
-      items: Object.values(groupedItems).map(g => ({
-        product_name: g.name,
-        quantity: g.totalQuantity,
-        unit_price: g.sale_price,
-        discount: g.totalDiscount,
-        total_price: (g.sale_price * g.totalQuantity) - g.totalDiscount,
-      }))
-    });
-
-    setShowInvoice(true);
-    setRecentlyScanned([]);
-    setSelectedItems([]);
-    clearPersistedSale();
-    fetchProducts();
-  } catch (err) {
-    setError(err.message || 'Checkout failed. Check counter stock.');
-  } finally {
-    setCheckingOut(false);
+   const cancelEdit = () => {
+    sessionStorage.removeItem('editing_sale_data')
+    setEditingSale(null)
+    clearPersistedSale()
   }
-};
 
+  // ─── Process EACH item in cart as a SEPARATE BILL ───
+  const handleCheckout = async () => {
+    if (!cart.length) return;
+    setCheckingOut(true);
+    setError('');
+
+    try {
+      if (editingSale) {
+        // ═══════════════════════════════════════════════════════
+        // EDIT MODE: Update existing sale, single invoice
+        // ═══════════════════════════════════════════════════════
+        setUpdating(true);
+
+        // Aggregate cart items by productId (same product may appear multiple times)
+        const aggregated = {};
+        cart.forEach(item => {
+          const key = item.productId;
+          if (!aggregated[key]) {
+            aggregated[key] = {
+              product_id: item.productId,
+              product_name: item.name,
+              quantity: 0,
+              unit_price: item.sale_price,
+              discount: 0,
+              total_price: 0,
+            };
+          }
+          aggregated[key].quantity += (item.quantity || 1);
+          aggregated[key].discount += ((item.discount || 0) * (item.quantity || 1));
+        });
+
+        // Recalculate total_price for each aggregated item
+        Object.values(aggregated).forEach(item => {
+          item.total_price = (item.unit_price * item.quantity) - item.discount;
+        });
+
+        // Determine payment mode from cart items
+        const modes = [...new Set(cart.map(i => i.paymentMode || 'CASH'))];
+        const paymentMode = modes.length > 1 ? 'MIXED' : modes[0];
+
+        const payload = {
+          invoice_number: editingSale.invoiceNumber,  // Keep original
+          company_id: Number(companyId),
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          total_amount: grandTotal,
+          payment_mode: paymentMode,
+          items: Object.values(aggregated).map(item => ({
+            ...item,
+            company_id: Number(companyId),
+          })),
+        };
+
+        await updateSale(editingSale.dbId, payload);
+
+        setCompletedSale({
+          invoice_number: editingSale.invoiceNumber,
+          customer_name: customerName,
+          created_at: new Date().toISOString(),
+          total_amount: grandTotal,
+          items: Object.values(aggregated).map(g => ({
+            product_name: g.product_name,
+            quantity: g.quantity,
+            unit_price: g.unit_price,
+            discount: g.discount,
+            total_price: g.total_price,
+          })),
+          isEdit: true,  // Flag to show "Updated" instead of "Complete"
+        });
+
+        setShowInvoice(true);
+        setRecentlyScanned([]);
+        setSelectedItems([]);
+        sessionStorage.removeItem('editing_sale_data');
+        setEditingSale(null);
+        clearPersistedSale();
+        fetchProducts();
+
+      } else {
+        // ═══════════════════════════════════════════════════════
+        // NORMAL MODE: Original create logic (unchanged)
+        // ═══════════════════════════════════════════════════════
+        const groupedItems = {};
+        cart.forEach(item => {
+          const key = `${item.productId}_${item.paymentMode}`;
+          if (!groupedItems[key]) {
+            groupedItems[key] = {
+              productId: item.productId,
+              name: item.name,
+              sale_price: item.sale_price,
+              paymentMode: item.paymentMode || 'CASH',
+              totalQuantity: 0,
+              totalDiscount: 0,
+            };
+          }
+          groupedItems[key].totalQuantity += (item.quantity || 1);
+          groupedItems[key].totalDiscount += ((item.discount || 0) * (item.quantity || 1));
+        });
+
+        for (const group of Object.values(groupedItems)) {
+          const itemTotal = (group.sale_price * group.totalQuantity) - group.totalDiscount;
+          const payload = {
+            invoice_number: generateInvoiceNumber(companyId),
+            company_id: Number(companyId),
+            customer_name: customerName,
+            customer_phone: customerPhone,
+            total_amount: itemTotal,
+            payment_mode: group.paymentMode,
+            items: [{
+              product_id: group.productId,
+              product_name: group.name,
+              quantity: group.totalQuantity,
+              unit_price: group.sale_price,
+              discount: group.totalDiscount,
+              total_price: itemTotal,
+              company_id: Number(companyId)
+            }],
+          };
+          await processCheckout(payload);
+        }
+
+        setCompletedSale({
+          invoice_number: `${Object.keys(groupedItems).length} Bills Generated`,
+          customer_name: customerName,
+          created_at: new Date().toISOString(),
+          total_amount: grandTotal,
+          items: Object.values(groupedItems).map(g => ({
+            product_name: g.name,
+            quantity: g.totalQuantity,
+            unit_price: g.sale_price,
+            discount: g.totalDiscount,
+            total_price: (g.sale_price * g.totalQuantity) - g.totalDiscount,
+          }))
+        });
+
+        setShowInvoice(true);
+        setRecentlyScanned([]);
+        setSelectedItems([]);
+        clearPersistedSale();
+        fetchProducts();
+      }
+    } catch (err) {
+      setError(err.message || (editingSale ? 'Update failed.' : 'Checkout failed. Check counter stock.'));
+    } finally {
+      setCheckingOut(false);
+      setUpdating(false);
+    }
+  };
   const toggleSelectItem = (scanId) => {
     setSelectedItems(prev => prev.includes(scanId) ? prev.filter(id => id !== scanId) : [...prev, scanId]);
   };
@@ -743,16 +852,16 @@ const cardTotal = cart
     }, 500);
   }; // ← FIXED: properly closed handleSavePDF
 
-  if (showInvoice && completedSale) {
+ if (showInvoice && completedSale) {
     return (
       <div className="p-6 flex-1 overflow-y-auto">
         <div className="p-8 bg-white dark:bg-gray-900 rounded-xl max-w-lg mx-auto shadow-sm border border-gray-100">
-          <div className="flex items-center gap-3 mb-6 justify-center text-emerald-600">
+          <div className={clsx("flex items-center gap-3 mb-6 justify-center", completedSale.isEdit ? "text-amber-600" : "text-emerald-600")}>
             <CheckCircle className="w-8 h-8" />
-            <h2 className="text-2xl font-bold">Sale Complete</h2>
+            <h2 className="text-2xl font-bold">{completedSale.isEdit ? 'Sale Updated' : 'Sale Complete'}</h2>
           </div>
           <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300 mb-6">
-            <p><strong>Invoices:</strong> {completedSale.invoice_number}</p>
+            <p><strong>{completedSale.isEdit ? 'Invoice Updated:' : 'Invoices:'}</strong> {completedSale.invoice_number}</p>
             <p><strong>Customer:</strong> {completedSale.customer_name}</p>
             <p><strong>Date:</strong> {format(new Date(completedSale.created_at), 'Pp')}</p>
           </div>
@@ -779,8 +888,16 @@ const cardTotal = cart
           <div className="mt-4 text-right">
             <p className="text-xl font-bold text-primary-600 dark:text-primary-400">Total: ₹{completedSale.total_amount.toFixed(2)}</p>
           </div>
-          <button onClick={() => { setShowInvoice(false); setDiscount(0); }} className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors">
-            New Sale
+                   <button
+            onClick={() => {
+              setShowInvoice(false);
+              setDiscount(0);
+              setEditingSale(null);
+              sessionStorage.removeItem('editing_sale_data');
+            }}
+            className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors"
+          >
+            {completedSale.isEdit ? 'Back to POS' : 'New Sale'}
           </button>
         </div>
       </div>
@@ -799,6 +916,26 @@ const cardTotal = cart
 
   return (
     <div className="flex flex-1 min-h-0 bg-gray-50 dark:bg-gray-950 overflow-hidden relative">
+            {/* ═══ EDIT MODE BANNER ═══ */}
+      {editingSale && (
+        <div className="absolute top-0 left-0 right-0 z-40 bg-amber-500 text-white px-4 py-2 flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <Pencil className="w-4 h-4" />
+            <span className="text-sm font-bold">
+              Editing Invoice: {editingSale.invoiceNumber}
+            </span>
+            <span className="text-xs bg-amber-600 px-2 py-0.5 rounded-full">
+              {editingSale.cartItems?.length || 0} items loaded
+            </span>
+          </div>
+          <button
+            onClick={cancelEdit}
+            className="flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-semibold transition-colors"
+          >
+            <X className="w-4 h-4" /> Cancel Edit
+          </button>
+        </div>
+      )}
 
       {/* PRINT MODAL */}
       {isPrintModalOpen && (
@@ -927,10 +1064,10 @@ const cardTotal = cart
                   <button key={p.id} onClick={() => addToCart(p)} className="w-full flex items-center gap-2 p-1.5 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <div className="w-7 h-7 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[7px] font-bold text-gray-500">{p.category?.slice(0, 2)}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
+                      <p className="text-[12px] font-semibold text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
                       <p className="text-[12px] font-semibold text-blue-700 dark:text-white ">Stock: {p.counter_stock} {cartCount > 0 && `· ${cartCount} in bill`}</p>
                     </div>
-                    <p className="text-[10px] font-bold text-gray-600 dark:text-gray-300">₹{p.sale_price}</p>
+                    <p className="text-[12px] font-bold text-gray-600 dark:text-gray-300">₹{p.sale_price}</p>
                   </button>
                 );
               })
@@ -1071,8 +1208,8 @@ const cardTotal = cart
                         </div>
                       </td>
                       <td className="py-1.5 pr-2">
-                        <p className="text-[12px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
-                        <p className="text-[10px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
+                        <p className="text-[15px] font-semibold text-gray-900 dark:text-white">{item.name}</p>
+                        <p className="text-[12px] text-gray-400">{item.bottle_size || ''} {item.traditional_name ? `· ${item.traditional_name}` : ''}</p>
                       </td>
                      <td className="py-1.5 pr-2 text-center">
   <input
@@ -1082,15 +1219,15 @@ const cardTotal = cart
     onChange={(e) =>
       updateQuantity(item.scanId, e.target.value)
     }
-    className="w-10 text-center text-[10px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800" 
+    className="w-20 text-center text-[15px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800" 
   />
 </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[12px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
+                        <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
                       </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex justify-center">
-                          <input type="number" value={itemDiscount} onChange={(e) => updateItemDiscount(item.scanId, e.target.value)} className="w-10 text-center text-[10px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800" />
+                          <input type="number" value={itemDiscount} onChange={(e) => updateItemDiscount(item.scanId, e.target.value)} className="w-14 text-center text-[15px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 dark:bg-gray-800" />
                         </div>
                       </td>
                       <td className="py-1.5 pr-2">
@@ -1116,7 +1253,7 @@ const cardTotal = cart
                         </div>
                       </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[12px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
+                        <span className="text-[15px] font-bold text-gray-900 dark:text-white">₹{lineTotal.toFixed(2)}</span>
                       </td>
                       <td className="py-1.5 pr-2 text-center">
                         <button onClick={() => removeFromCart(item.scanId)} className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Remove this item">

@@ -22,3 +22,5 @@ class StockTransferItem(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     product_name = Column(String, nullable=False)
     quantity = Column(Integer, default=0)
+    cases = Column(Integer, default=0)              # ─── ADDED
+    bottles_per_case = Column(Integer, default=0)    # ─── ADDED

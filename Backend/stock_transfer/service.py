@@ -20,13 +20,12 @@ def create_transfer(db: Session, transfer_data: StockTransferCreate):
     
     for item_data in items_data:
         item_dict = item_data.model_dump()
-        
-        # ─── ADDED: Inherit company_id from parent transfer ───
         item_dict["company_id"] = db_transfer.company_id
         
         db_item = StockTransferItem(**item_dict, transfer_id=db_transfer.id)
         db.add(db_item)
         
+        # ─── Stock deduction uses item_dict['quantity'] (total bottles) ───
         product = db.query(Product).filter(Product.id == item_dict['product_id']).first()
         if product:
             if (product.godown_stock or 0) < item_dict['quantity']:
