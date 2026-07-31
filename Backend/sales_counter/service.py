@@ -3,6 +3,7 @@ from .model import Sale, SaleItem
 from inventory.model import Product
 from .schema import SaleCreate
 from datetime import datetime, timedelta
+from sqlalchemy.exc import IntegrityError  # ← ADD this import at the top
 
 def get_pos_products(db: Session, company_id: int | None = None, search: str = None):
     query = db.query(Product).filter(Product.is_active == True, Product.counter_stock > 0)
@@ -18,10 +19,27 @@ def get_pos_products(db: Session, company_id: int | None = None, search: str = N
 
 def create_sale(db: Session, sale_data: SaleCreate):
     sale_dict = sale_data.model_dump(exclude={"items"})
-    db_sale = Sale(**sale_dict)
-    db.add(db_sale)
-    db.flush()
+    company_id = sale_dict.get("company_id")
+    
+    # ─── Try up to 5 times to avoid duplicate invoice_number ───
+    db_sale = None
+    for attempt in range(5):
+        try:
+            db_sale = Sale(**sale_dict)
+            db.add(db_sale)
+            db.flush()  # This triggers the unique constraint check
+            break  # Success — exit the loop
 
+        except IntegrityError:
+            db.rollback()
+            # Generate a guaranteed-unique invoice number using timestamp + attempt
+            sale_dict['invoice_number'] = f"INV-{datetime.now().strftime('%y%m%d%H%M%S')}-{attempt + 1}"
+            continue
+
+    if db_sale is None:
+        raise ValueError("Could not generate a unique invoice number. Please try again.")
+
+    # ─── Process items (unchanged from your original) ───
     for item_data in sale_data.items:
         item_dict = item_data.model_dump()
         item_dict["company_id"] = db_sale.company_id
@@ -39,7 +57,6 @@ def create_sale(db: Session, sale_data: SaleCreate):
     db.commit()
     db.refresh(db_sale)
     return db_sale
-
 def get_sales_report_service(db: Session, company_id: int | None = None, date_from: str = None, date_to: str = None):
     query = db.query(Sale)
     if company_id is not None:
@@ -57,15 +74,11 @@ def get_sale_by_id(db: Session, sale_id: int):
         raise ValueError(f"Sale with ID {sale_id} not found")
     return sale
 
-# ═══════════════════════════════════════════════════════════════
-# NEW: Update an existing sale (restore old stock, apply new)
-# ═══════════════════════════════════════════════════════════════
 def update_sale(db: Session, sale_id: int, sale_data: SaleCreate):
     db_sale = db.query(Sale).filter(Sale.id == sale_id).first()
     if not db_sale:
         raise ValueError(f"Sale with ID {sale_id} not found")
 
-    # 1. Restore old stock for each old item
     old_items = db.query(SaleItem).filter(SaleItem.sale_id == sale_id).all()
     for old_item in old_items:
         product = db.query(Product).filter(Product.id == old_item.product_id).first()
@@ -74,16 +87,16 @@ def update_sale(db: Session, sale_id: int, sale_data: SaleCreate):
             product.current_stock = (product.godown_stock or 0) + (product.counter_stock or 0)
             db.add(product)
 
-    # 2. Delete all old sale items
     db.query(SaleItem).filter(SaleItem.sale_id == sale_id).delete()
 
-    # 3. Update sale header fields (keep original invoice_number)
     db_sale.customer_name = sale_data.customer_name
     db_sale.customer_phone = sale_data.customer_phone
     db_sale.payment_mode = sale_data.payment_mode
     db_sale.total_amount = sale_data.total_amount
 
-    # 4. Add new items and deduct stock
+    if sale_data.created_at:
+        db_sale.created_at = sale_data.created_at
+
     for item_data in sale_data.items:
         item_dict = item_data.model_dump()
         item_dict["company_id"] = db_sale.company_id
@@ -102,3 +115,28 @@ def update_sale(db: Session, sale_id: int, sale_data: SaleCreate):
     db.commit()
     db.refresh(db_sale)
     return db_sale
+
+# ═══════════════════════════════════════════════════════════════
+# NEW: Update product MRP from POS counter
+# ═══════════════════════════════════════════════════════════════
+def update_product_mrp(db: Session, product_id: int, company_id: int, new_mrp: float):
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.company_id == company_id
+    ).first()
+    if not product:
+        raise ValueError(f"Product with ID {product_id} not found in this company")
+
+    old_mrp = product.mrp
+    product.mrp = new_mrp
+    product.sale_price = new_mrp
+    db.commit()
+    db.refresh(product)
+
+    return {
+        "id": product.id,
+        "name": product.name,
+        "old_mrp": old_mrp,
+        "new_mrp": new_mrp,
+        "sale_price": product.sale_price,
+    }

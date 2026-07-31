@@ -20,7 +20,7 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import clsx from 'clsx'
 
-export default function Sidebar({ open, onClose }) {
+export default function Sidebar({ open, onClose, desktopCollapsed }) {
   const { signOut, user } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -70,6 +70,8 @@ export default function Sidebar({ open, onClose }) {
       '/Payslips': 'hr',
       '/salary-report': 'hr',
       '/damage': 'damage',
+      '/item-wise-sell-report': 'item-wise-sell-report',
+      '/item-wise-purchase-report': 'item-wise-purchase-report',
     }
 
     for (const [route, key] of Object.entries(menuMap)) {
@@ -97,6 +99,7 @@ export default function Sidebar({ open, onClose }) {
         { to: '/pos', label: 'Counter', roles: ['ADMIN', 'MANAGER', 'SALESMAN'] },
         { to: '/pos-godown', label: 'WareHouse', roles: ['ADMIN', 'MANAGER'] },
         { to: '/reports', label: 'Sales Reports', roles: ['ADMIN', 'MANAGER'] },
+        { to: '/item-wise-sell-report', label: 'Item-wise Sell Report', roles: ['ADMIN', 'MANAGER'] },
       ],
     },
     {
@@ -107,6 +110,7 @@ export default function Sidebar({ open, onClose }) {
       children: [
         { to: '/purchases', label: 'Purchase', roles: ['ADMIN', 'MANAGER'] },
         { to: '/purchase-report', label: 'Purchase Report', roles: ['ADMIN', 'MANAGER'] },
+        { to: '/item-wise-purchase-report', label: 'Item-wise Purchase Report', roles: ['ADMIN', 'MANAGER'] },    
         { to: '/suppliers', label: 'Supplier', roles: ['ADMIN', 'MANAGER'] },
       ],
     },
@@ -131,7 +135,7 @@ export default function Sidebar({ open, onClose }) {
       roles: ['ADMIN', 'MANAGER'],
       children: [
         { to: '/damage', label: 'Damage', roles: ['ADMIN', 'MANAGER'] },
-       
+
       ],
     },
     {
@@ -214,12 +218,21 @@ export default function Sidebar({ open, onClose }) {
       {/* Sidebar */}
       <aside
         className={clsx(
-          // ✅ FIX: Changed w-40 to w-60 for proper text fitting
-          'fixed top-0 left-0 z-40 h-full w-60 flex flex-col',
-          'bg-gray-900 dark:bg-gray-950 border-r border-gray-800',
-          'transition-transform duration-300 ease-in-out',
-          'lg:translate-x-0 lg:static lg:z-auto',
-          open ? 'translate-x-0' : '-translate-x-full'
+          "fixed top-0 left-0 z-40 h-full flex flex-col",
+          "bg-gray-900 dark:bg-gray-950 border-r border-gray-800",
+          "transition-all duration-300 ease-in-out",
+
+          // Mobile
+          open ? "translate-x-0" : "-translate-x-full",
+
+          // Desktop
+          "lg:translate-x-0 lg:relative lg:flex-shrink-0",
+
+          desktopCollapsed
+            ? "lg:w-20"
+            : "lg:w-60",
+
+          "w-60"
         )}
       >
         {/* Logo */}
@@ -232,9 +245,17 @@ export default function Sidebar({ open, onClose }) {
                 alt="Vichaar Lab Logo"
               />
             </div>
-            <div>
-              <p className="text-white font-bold text-sm leading-tight">VICHAAR</p>
-              <p className="text-gray-400 text-xs leading-tight">BevTrac</p>
+            <div
+              className={clsx(
+                desktopCollapsed && "lg:hidden"
+              )}
+            >
+              <p className="text-white font-bold text-sm">
+                VICHAAR
+              </p>
+              <p className="text-gray-400 text-xs">
+                BevTrac
+              </p>
             </div>
           </div>
           <button
@@ -265,7 +286,12 @@ export default function Sidebar({ open, onClose }) {
                 {user?.email?.[0]?.toUpperCase() || 'A'}
               </span>
             </div>
-            <div className="min-w-0 flex-1">
+            <div
+              className={clsx(
+                "min-w-0 flex-1",
+                desktopCollapsed && "lg:hidden"
+              )}
+            >
               <p className="text-gray-200 text-xs font-medium truncate">
                 {user?.email || 'User'}
               </p>
@@ -288,12 +314,18 @@ export default function Sidebar({ open, onClose }) {
               return (
                 <div key={item.key}>
                   <button
-                    onClick={() =>
-                      setOpenMenus(prev => ({
-                        ...prev,
-                        [item.key]: !prev[item.key],
-                      }))
-                    }
+                     onClick={() => {
+    // If sidebar is collapsed on desktop, expand it first
+    if (desktopCollapsed) {
+      onClose(false); // We'll change this below
+      return;
+    }
+
+    setOpenMenus(prev => ({
+      ...prev,
+      [item.key]: !prev[item.key],
+    }));
+  }}
                     className={clsx(
                       'w-full group flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all duration-150',
                       isOpen
@@ -302,19 +334,25 @@ export default function Sidebar({ open, onClose }) {
                     )}
                   >
                     <Icon className="w-4 h-4 flex-shrink-0" />
-                    <span className="flex-1 text-left font-medium truncate">
-                      {item.label}
-                    </span>
-                    <ChevronDown
-                      className={clsx(
-                        'w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200',
-                        isOpen && 'rotate-180'
-                      )}
-                    />
+                    {!desktopCollapsed && (
+                      <span className="flex-1 text-left font-medium truncate">
+                        {item.label}
+                      </span>
+                    )}
+
+                    {!desktopCollapsed && (
+                      <ChevronDown
+                        className={clsx(
+                          'w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200',
+                          isOpen && 'rotate-180'
+                        )}
+
+                      />
+                    )}
                   </button>
 
                   {/* ✅ FIX: Use smooth height transition */}
-                  <div
+                 {!desktopCollapsed && ( <div
                     className={clsx(
                       'overflow-hidden transition-all duration-200',
                       isOpen ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
@@ -340,6 +378,7 @@ export default function Sidebar({ open, onClose }) {
                       ))}
                     </div>
                   </div>
+                  )}
                 </div>
               )
             }
@@ -363,7 +402,11 @@ export default function Sidebar({ open, onClose }) {
                 {({ isActive }) => (
                   <>
                     <Icon className="w-4 h-4 flex-shrink-0" />
-                    <span className="flex-1 font-medium truncate">{item.label}</span>
+                    {!desktopCollapsed && (
+    <span className="flex-1 font-medium truncate">
+        {item.label}
+    </span>
+)}
                     {isActive && <ChevronRight className="w-3.5 h-3.5 opacity-70 flex-shrink-0" />}
                   </>
                 )}
@@ -380,7 +423,11 @@ export default function Sidebar({ open, onClose }) {
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-amber-900/20 hover:text-amber-400 transition-all duration-150"
             >
               <Building2 className="w-4 h-4 flex-shrink-0" />
-              <span className="font-medium truncate">Switch Company</span>
+             {!desktopCollapsed && (
+    <span className="font-medium truncate">
+        Switch Company
+    </span>
+)}
             </button>
           )}
 
@@ -389,7 +436,7 @@ export default function Sidebar({ open, onClose }) {
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-red-900/20 hover:text-red-400 transition-all duration-150"
           >
             <LogOut className="w-4 h-4 flex-shrink-0" />
-            <span className="font-medium truncate">Sign Out</span>
+             {!desktopCollapsed && (<span className="font-medium truncate">Sign Out</span>)}
           </button>
         </div>
       </aside>

@@ -3,7 +3,8 @@ import {
   Banknote, Building2, Wallet, Plus, Trash2, TrendingUp,
   Store, Warehouse, AlertCircle, Loader as Loader2, Save,
   ChevronLeft, ChevronRight, HandCoins, CircleDollarSign,
-  PiggyBank, BookOpen, Check, RefreshCw, FileDown, Edit3, Calendar
+  PiggyBank, BookOpen, Check, RefreshCw, FileDown, Edit3, Calendar,
+  X, ZoomIn, Download  // ← ADD these imports
 } from 'lucide-react'
 import clsx from 'clsx'
 import { format, subDays, addDays } from 'date-fns'
@@ -43,7 +44,7 @@ export default function CashDeposit() {
   const [apiExpenses, setApiExpenses] = useState([])
 
   // ─── Deposit Form State ───
-  const [depositMethod, setDepositMethod] = useState('bank') // 'bank' or 'cdm'
+  const [depositMethod, setDepositMethod] = useState('bank')
   const [bankNameInput, setBankNameInput] = useState('')
   const [depositAmountInput, setDepositAmountInput] = useState('')
   const [bankSlipInput, setBankSlipInput] = useState(null)
@@ -58,6 +59,11 @@ export default function CashDeposit() {
   const [showInitBalModal, setShowInitBalModal] = useState(false)
   const [tempInitBal, setTempInitBal] = useState('')
   const [expandedRow, setExpandedRow] = useState(null)
+
+  // ═══════════════════════════════════════════════════════════════
+  // NEW: Image Lightbox State
+  // ═══════════════════════════════════════════════════════════════
+  const [imageModal, setImageModal] = useState(null) // { base64, name }
 
   // ─── Listen for company changes ───
   useEffect(() => {
@@ -81,6 +87,17 @@ export default function CashDeposit() {
     if (!companyId) return
     fetchCashData()
   }, [selectedDate, companyId])
+
+  // ─── Close image modal on Escape key ───
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && imageModal) {
+        setImageModal(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [imageModal])
 
   const fetchCashData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true)
@@ -127,7 +144,6 @@ export default function CashDeposit() {
     }
     setExpandedRow(null)
 
-    // Reset form fields when date changes
     setDepositAmountInput('')
     setBankAccountNumberInput('')
     setDepositMethod('bank')
@@ -156,7 +172,7 @@ export default function CashDeposit() {
     const file = e.target.files[0]
     if (!file) return
 
-    if (file.size > 1048576) { // 1MB limit to prevent localStorage overflow
+    if (file.size > 1048576) {
       alert("File size cannot exceed 1MB")
       e.target.value = ""
       return
@@ -170,6 +186,18 @@ export default function CashDeposit() {
       })
     }
     reader.readAsDataURL(file)
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // NEW: Download slip image
+  // ═══════════════════════════════════════════════════════════════
+  const handleDownloadSlip = (slip) => {
+    const link = document.createElement('a')
+    link.href = slip.base64
+    link.download = slip.name || 'bank-slip.png'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   // ─── Add Deposit Entry ───
@@ -196,7 +224,7 @@ export default function CashDeposit() {
       counterCash,
       godownCash,
       bankDeposits: updatedDeposits,
-      bankDeposit: totalDepositAmount, // Total sum for history table
+      bankDeposit: totalDepositAmount,
       expenses: apiExpenses,
       totalExpenses,
       openingBalance,
@@ -208,7 +236,6 @@ export default function CashDeposit() {
     setRecords(newRecords)
     saveRecordsToStorage(companyId, newRecords)
 
-    // Reset form fields
     setDepositAmountInput('')
     setBankAccountNumberInput('')
     setDepositMethod('bank')
@@ -313,8 +340,108 @@ export default function CashDeposit() {
     )
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // NEW: Bank Slip Thumbnail Component
+  // ═══════════════════════════════════════════════════════════════
+  const SlipThumbnail = ({ slip, size = 'sm' }) => {
+    if (!slip || !slip.base64) return null
+    const isPdf = slip.name?.toLowerCase().endsWith('.pdf')
+    
+    if (isPdf) {
+      return (
+        <button
+          onClick={() => setImageModal(slip)}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors group"
+        >
+          <ZoomIn className="w-3.5 h-3.5 text-blue-500 group-hover:scale-110 transition-transform" />
+          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium truncate max-w-[120px]">{slip.name}</span>
+        </button>
+      )
+    }
+
+    return (
+      <button
+        onClick={() => setImageModal(slip)}
+        className={clsx(
+          "relative rounded-lg overflow-hidden border-2 border-cyan-200 dark:border-cyan-800 hover:border-cyan-400 dark:hover:border-cyan-600 transition-all group shadow-sm hover:shadow-md cursor-pointer",
+          size === 'sm' ? 'w-12 h-12' : 'w-16 h-16'
+        )}
+        title="Click to view full size"
+      >
+        <img
+          src={slip.base64}
+          alt="Bank Slip"
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+          <ZoomIn className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+      </button>
+    )
+  }
+
   return (
     <div className="space-y-6">
+
+      {/* ═══════════════════════════════════════════════════════════════
+          NEW: Image Lightbox Modal
+          ═══════════════════════════════════════════════════════════════ */}
+      {imageModal && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
+          onClick={() => setImageModal(null)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header Bar */}
+            <div className="flex items-center justify-between mb-3 px-1">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-sm text-white/80 font-medium truncate">
+                  📎 {imageModal.name || 'Bank Slip'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => handleDownloadSlip(imageModal)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-colors border border-white/20"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
+                <button
+                  onClick={() => setImageModal(null)}
+                  className="p-1.5 rounded-lg bg-white/10 hover:bg-red-500/80 text-white transition-colors border border-white/20"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Image Container */}
+            <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10">
+              {imageModal.name?.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={imageModal.base64}
+                  className="w-full h-[80vh]"
+                  title="Bank Slip PDF"
+                />
+              ) : (
+                <img
+                  src={imageModal.base64}
+                  alt="Bank Slip Full View"
+                  className="max-w-full max-h-[80vh] object-contain"
+                />
+              )}
+            </div>
+
+            {/* Footer hint */}
+            <p className="text-center text-white/40 text-xs mt-2">
+              Press <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white/60 text-[10px] font-mono">ESC</kbd> to close • Click outside to close
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -411,7 +538,7 @@ export default function CashDeposit() {
       {/* BANK DEPOSIT & EXPENSES ENTRY */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        {/* Bank Deposit (Multiple Entries) */}
+        {/* Bank Deposits */}
         <div className="card p-5 border dark:border-slate-700 shadow-sm">
           <h3 className="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2 mb-4">
             <div className="p-1.5 rounded-lg bg-cyan-100 dark:bg-cyan-900/30"><Building2 className="w-4 h-4 text-cyan-600 dark:text-cyan-400" /></div>
@@ -425,56 +552,33 @@ export default function CashDeposit() {
               className="p-2.5 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-100 dark:border-cyan-900/40"
             >
               <div className="flex items-center justify-between gap-2">
-
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-
+                <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
                   <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300 whitespace-nowrap">
                     ₹{dep.amount.toLocaleString()}
                   </span>
-
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-200 dark:bg-cyan-800 text-cyan-800 dark:text-cyan-200 uppercase font-semibold">
                     {dep.method === 'bank' ? 'Bank' : 'CDM'}
                   </span>
-
                   {dep.bankName && (
                     <span className="text-xs text-gray-600 dark:text-gray-400 truncate">
                       {dep.bankName}
                     </span>
                   )}
-
                   {dep.bankAccountNumber && (
                     <span className="text-[11px] text-gray-500 dark:text-gray-500 font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
                       A/C: {dep.bankAccountNumber}
                     </span>
                   )}
-
-                  {dep.slip && (
-                    <a
-                      href={dep.slip.base64}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1 dark:text-blue-400"
-                    >
-                      📎 {dep.slip.name}
-                    </a>
-                  )}
-
-
+                  {/* ← UPDATED: Use SlipThumbnail component */}
+                  {dep.slip && <SlipThumbnail slip={dep.slip} size="sm" />}
                 </div>
-
-
                 <button
                   onClick={() => handleDeleteDeposit(dep.id)}
                   className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
-
               </div>
-
-
-
-
             </div>
           ))}
 
@@ -497,7 +601,6 @@ export default function CashDeposit() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">
                   {depositMethod === 'bank' ? 'Deposit Bank Name' : 'CDM Bank Name'}
@@ -510,11 +613,8 @@ export default function CashDeposit() {
                   className="input-field text-sm"
                 />
               </div>
-
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5">
-                  Bank Account Number
-                </label>
+                <label className="block text-xs text-gray-500 mb-1.5">Bank Account Number</label>
                 <input
                   type="text"
                   value={bankAccountNumberInput}
@@ -524,9 +624,7 @@ export default function CashDeposit() {
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5">
-                  Deposit Amount (₹)
-                </label>
+                <label className="block text-xs text-gray-500 mb-1.5">Deposit Amount (₹)</label>
                 <input
                   type="number"
                   value={depositAmountInput}
@@ -536,7 +634,6 @@ export default function CashDeposit() {
                   min="0"
                 />
               </div>
-
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1.5">Upload Bank Slip</label>
@@ -553,7 +650,12 @@ export default function CashDeposit() {
                   dark:file:bg-cyan-900/30 dark:file:text-cyan-400 
                   dark:hover:file:bg-cyan-900/50"
               />
-              {bankSlipInput && <p className="text-xs text-gray-400 mt-1">Selected: {bankSlipInput.name}</p>}
+              {bankSlipInput && (
+                <div className="flex items-center gap-3 mt-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                  <SlipThumbnail slip={bankSlipInput} size="sm" />
+                  <span className="text-xs text-gray-500 truncate">{bankSlipInput.name}</span>
+                </div>
+              )}
             </div>
 
             <button
@@ -566,7 +668,7 @@ export default function CashDeposit() {
           </div>
         </div>
 
-        {/* Cash Expenses (Fetched dynamically from API) */}
+        {/* Cash Expenses */}
         <div className="card p-5 border dark:border-slate-700 shadow-sm">
           <h3 className="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2 mb-4">
             <div className="p-1.5 rounded-lg bg-orange-100 dark:bg-orange-900/30"><HandCoins className="w-4 h-4 text-orange-600 dark:text-orange-400" /></div>
@@ -693,10 +795,12 @@ export default function CashDeposit() {
                                   <p className="text-[10px] uppercase font-semibold text-cyan-500 tracking-wider mb-2">Deposit Details</p>
                                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                     {row.bankDeposits.map((dep) => (
-                                      <div key={dep.id} className="flex flex-col px-2.5 py-1.5 rounded bg-white dark:bg-gray-800 border border-cyan-100 dark:border-cyan-900/30 text-xs">
+                                      <div key={dep.id} className="flex flex-col gap-1.5 px-2.5 py-2 rounded bg-white dark:bg-gray-800 border border-cyan-100 dark:border-cyan-900/30 text-xs">
                                         <span className="font-semibold text-cyan-600 dark:text-cyan-400">₹{dep.amount.toLocaleString()} <span className="text-[10px] font-normal text-gray-400">({dep.method === 'bank' ? 'Bank' : 'CDM'})</span></span>
                                         {dep.bankName && <span className="text-gray-500 dark:text-gray-400">{dep.bankName}</span>}
                                         {dep.bankAccountNumber && <span className="text-gray-500 dark:text-gray-400 font-mono text-[11px]">A/C: {dep.bankAccountNumber}</span>}
+                                        {/* ← NEW: Show slip in history too */}
+                                        {dep.slip && <SlipThumbnail slip={dep.slip} size="sm" />}
                                       </div>
                                     ))}
                                   </div>

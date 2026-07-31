@@ -6,7 +6,7 @@ import Header from './Header'
 const pageTitles = {
   '/companies': 'Company Management',
   '/pos': 'POS Billing',
-  '/godown-pos': 'Godown POS',
+   '/pos-godown': 'Godown POS',
   '/inventory': 'Inventory',
   '/purchases': 'Purchase Entry',
   '/suppliers': 'Supplier Management',
@@ -17,7 +17,9 @@ const pageTitles = {
 }
 
 export default function Layout() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+const [sidebarOpen, setSidebarOpen] = useState(
+  window.innerWidth >= 1024
+)
   const location = useLocation()
   const navigate = useNavigate()  // ← ADD THIS
 
@@ -29,9 +31,11 @@ export default function Layout() {
   if (!title) title = 'IMFL Billing'
 
   // Close sidebar on route change on mobile
-  useEffect(() => {
+useEffect(() => {
+  if (window.innerWidth < 1024) {
     setSidebarOpen(false)
-  }, [location.pathname])
+  }
+}, [location.pathname])
 
   // ═══════════════════════════════════════════════════════════
   // ADD THIS: Listen for Edit button click from Reports
@@ -43,7 +47,7 @@ export default function Layout() {
       if (saleType === 'counter') {
         navigate('/pos')
       } else if (saleType === 'godown') {
-        navigate('/godown-pos')
+        navigate('/pos-godown')
       }
     }
 
@@ -52,18 +56,28 @@ export default function Layout() {
   }, [navigate])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+  <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+  <Sidebar
+  open={sidebarOpen}
+  desktopCollapsed={!sidebarOpen}
+  onClose={() => {
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false);
+    }
+  }}
+  setOpen={setSidebarOpen}
+/>
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Header
-          onToggleSidebar={() => setSidebarOpen(o => !o)}
-          title={title}
-        />
-        <main className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 lg:p-6">
-          <Outlet />
-        </main>
-      </div>
-    </div>
+  <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+    <Header
+      onToggleSidebar={() => setSidebarOpen(prev => !prev)}
+      title={title}
+    />
+
+    <main className="flex-1 flex flex-col min-h-0 overflow-y-auto p-4 lg:p-6">
+      <Outlet />
+    </main>
+  </div>
+</div>
   )
 }

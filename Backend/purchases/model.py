@@ -2,12 +2,11 @@ from sqlalchemy import Column, Integer, String, Float, Date, Text, ForeignKey
 from sqlalchemy.sql import func
 from database import Base
 
-
 class Purchase(Base):
     __tablename__ = "purchases"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, nullable=True, index=True) # ─── ADDED
+    company_id = Column(Integer, nullable=True, index=True)
     
     invoice_number = Column(String, unique=True, index=True, nullable=False)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
@@ -16,6 +15,9 @@ class Purchase(Base):
     purchase_date = Column(Date, nullable=False)
     invoice_date = Column(Date, nullable=True)       
     billing_date = Column(Date, nullable=False)      
+
+    # ─── NEW: COUNTER or GODOWN ───
+    stock_destination = Column(String, default="GODOWN", nullable=False)
 
     subtotal = Column(Float, default=0.0)
     vat_amount = Column(Float, default=0.0)

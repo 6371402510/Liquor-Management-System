@@ -4,7 +4,7 @@ import {
   Loader as Loader2, ChevronDown, ChevronUp, Filter, RotateCcw,
   FileDown, Package, AlertCircle, Calendar, TrendingUp, ShoppingBag,
   BarChart3, Truck, Building2, Search, X, ChevronLeft, ChevronRight,
-  ArrowUpDown, ArrowUp, ArrowDown, Eye, Receipt, Store // ─── ADDED STORE
+  ArrowUpDown, ArrowUp, ArrowDown, Eye, Receipt, Store,Warehouse  // ─── ADDED STORE
 } from 'lucide-react'
 import { format } from 'date-fns'
 import clsx from 'clsx'
@@ -112,6 +112,7 @@ export default function PurchaseReport() {
   const [filterVehicle, setFilterVehicle] = useState('')
   const [filterMinAmount, setFilterMinAmount] = useState('')
   const [filterMaxAmount, setFilterMaxAmount] = useState('')
+  const [filterStockDest, setFilterStockDest] = useState('ALL')
 
   // ─── UI State ───
   const [showFilters, setShowFilters] = useState(true)
@@ -220,6 +221,7 @@ export default function PurchaseReport() {
     setFilterStatus('ALL')
     setFilterVehicle('')
     setFilterMinAmount('')
+    setFilterStockDest('ALL') // ← ADD THIS
     setFilterMaxAmount('')
     setCurrentPage(1)
   }
@@ -227,6 +229,7 @@ export default function PurchaseReport() {
   const hasActiveFilters = filterDateFrom || filterDateTo || filterSupplier ||
     filterInvoice || filterProduct || filterBrand || filterCategory ||
     filterStatus !== 'ALL' || filterVehicle || filterMinAmount || filterMaxAmount
+    filterStockDest !== 'ALL' // ← ADD THIS
 
   // ─── Filtering Logic ───
   const filteredPurchases = useMemo(() => {
@@ -241,6 +244,7 @@ export default function PurchaseReport() {
       const amt = Number(p.total_amount) || 0
       if (filterMinAmount && amt < Number(filterMinAmount)) return false
       if (filterMaxAmount && amt > Number(filterMaxAmount)) return false
+      if (filterStockDest !== 'ALL' && (p.stock_destination || 'GODOWN') !== filterStockDest) return false
 
       const hasItemFilter = filterProduct || filterBrand || filterCategory
       if (hasItemFilter) {
@@ -258,7 +262,7 @@ export default function PurchaseReport() {
     })
   }, [purchases, filterDateFrom, filterDateTo, filterSupplier, filterInvoice,
     filterProduct, filterBrand, filterCategory, filterStatus, filterVehicle,
-    filterMinAmount, filterMaxAmount, expandedItems])
+    filterMinAmount, filterMaxAmount,filterStockDest, expandedItems])
 
   // ─── Sorting ───
   const sortedPurchases = useMemo(() => {
@@ -300,29 +304,41 @@ export default function PurchaseReport() {
 
   // ─── Summary Statistics ───
   const summaryStats = useMemo(() => {
-    const totalPurchases = filteredPurchases.length
-    const totalAmount = filteredPurchases.reduce((s, p) => s + (Number(p.total_amount) || 0), 0)
-    const totalSubtotal = filteredPurchases.reduce((s, p) => s + (Number(p.subtotal) || 0), 0)
-    const totalVat = filteredPurchases.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0)
-    const totalCess = filteredPurchases.reduce((s, p) => s + (Number(p.cess_amount) || 0), 0)
-    const totalSpecial = filteredPurchases.reduce((s, p) => s + (Number(p.special_amount) || 0), 0)
-    const totalTcs = filteredPurchases.reduce((s, p) => s + (Number(p.tcs_amount) || 0), 0)
-    const uniqueSuppliers = new Set(filteredPurchases.map(p => p.supplier_id).filter(Boolean)).size
-    const receivedCount = filteredPurchases.filter(p => p.status === 'RECEIVED').length
-    const returnCount = filteredPurchases.filter(p => p.status === 'RETURN').length
+  const totalPurchases = filteredPurchases.length
+  const totalAmount = filteredPurchases.reduce((s, p) => s + (Number(p.total_amount) || 0), 0)
+  const totalSubtotal = filteredPurchases.reduce((s, p) => s + (Number(p.subtotal) || 0), 0)
+  const totalVat = filteredPurchases.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0)
+  const totalCess = filteredPurchases.reduce((s, p) => s + (Number(p.cess_amount) || 0), 0)
+  const totalSpecial = filteredPurchases.reduce((s, p) => s + (Number(p.special_amount) || 0), 0)
+  const totalTcs = filteredPurchases.reduce((s, p) => s + (Number(p.tcs_amount) || 0), 0)
+  const uniqueSuppliers = new Set(filteredPurchases.map(p => p.supplier_id).filter(Boolean)).size
+  const receivedCount = filteredPurchases.filter(p => p.status === 'RECEIVED').length
+  const returnCount = filteredPurchases.filter(p => p.status === 'RETURN').length
 
-    let totalBottles = 0, totalCases = 0, totalBulkLiters = 0, itemCostSum = 0
-    Object.values(expandedItems).forEach(items => {
-      items.forEach(item => {
-        totalBottles += item.total_bottles || 0
-        totalCases += item.qty_cases || 0
-        totalBulkLiters += item.qty_bulk_liters || 0
-        itemCostSum += item.total_cost || 0
-      })
+  // ← ADD: Counter vs Godown breakdown
+  const godownPurchases = filteredPurchases.filter(p => (p.stock_destination || 'GODOWN') === 'GODOWN')
+  const counterPurchases = filteredPurchases.filter(p => (p.stock_destination || 'GODOWN') === 'COUNTER')
+  const godownAmount = godownPurchases.reduce((s, p) => s + (Number(p.total_amount) || 0), 0)
+  const counterAmount = counterPurchases.reduce((s, p) => s + (Number(p.total_amount) || 0), 0)
+  const godownCount = godownPurchases.length
+  const counterCount = counterPurchases.length
+
+  let totalBottles = 0, totalCases = 0, totalBulkLiters = 0, itemCostSum = 0
+  Object.values(expandedItems).forEach(items => {
+    items.forEach(item => {
+      totalBottles += item.total_bottles || 0
+      totalCases += item.qty_cases || 0
+      totalBulkLiters += item.qty_bulk_liters || 0
+      itemCostSum += item.total_cost || 0
     })
+  })
 
-    return { totalPurchases, totalAmount, totalSubtotal, totalVat, totalCess, totalSpecial, totalTcs, uniqueSuppliers, receivedCount, returnCount, totalBottles, totalCases, totalBulkLiters, itemCostSum }
-  }, [filteredPurchases, expandedItems])
+  return {
+    totalPurchases, totalAmount, totalSubtotal, totalVat, totalCess, totalSpecial, totalTcs,
+    uniqueSuppliers, receivedCount, returnCount, totalBottles, totalCases, totalBulkLiters, itemCostSum,
+    godownCount, godownAmount, counterCount, counterAmount // ← ADD
+  }
+}, [filteredPurchases, expandedItems])
 
   // ─── Aggregation: By Supplier ───
   const bySupplier = useMemo(() => {
@@ -407,6 +423,7 @@ export default function PurchaseReport() {
     'Billing Date': p.billing_date || p.purchase_date || '',
     'Invoice Date': p.invoice_date || '',
     'Supplier': p.supplier_name || '',
+    'Stock To': p.stock_destination || 'GODOWN', // ← ADD THIS
     'Transport Pass': p.notes || '',
     'Vehicle Number': p.vehicle_number || '',
     'Subtotal': Number(p.subtotal) || 0,
@@ -429,6 +446,7 @@ export default function PurchaseReport() {
         'Invoice No.': p.invoice_number || '',
         'Billing Date': p.billing_date || p.purchase_date || '',
         'Supplier': p.supplier_name || '',
+        'Stock To': p.stock_destination || 'GODOWN', // ← ADD THIS
         'Product': '—',
       })
     } else {
@@ -593,32 +611,44 @@ const handleExportExcelFull = async () => {
       )}
 
       {/* ─── Summary Cards ─── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <div className="card p-3 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-1"><ShoppingBag className="w-4 h-4 text-blue-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Total Purchases</span></div>
-          <p className="text-lg font-bold text-gray-800 dark:text-gray-100">{summaryStats.totalPurchases}</p>
-        </div>
-        <div className="card p-3 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-green-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Total Amount</span></div>
-          <p className="text-lg font-bold text-green-600 dark:text-green-400">₹{summaryStats.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-        </div>
-        <div className="card p-3 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-1"><BarChart3 className="w-4 h-4 text-orange-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Subtotal</span></div>
-          <p className="text-lg font-bold text-orange-600 dark:text-orange-400">₹{summaryStats.totalSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-        </div>
-        <div className="card p-3 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-1"><Building2 className="w-4 h-4 text-purple-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Suppliers</span></div>
-          <p className="text-lg font-bold text-purple-600 dark:text-purple-400">{summaryStats.uniqueSuppliers}</p>
-        </div>
-        <div className="card p-3 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-1"><Package className="w-4 h-4 text-cyan-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Total Bottles</span></div>
-          <p className="text-lg font-bold text-cyan-600 dark:text-cyan-400">{summaryStats.totalBottles.toLocaleString()}</p>
-        </div>
-        <div className="card p-3 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-1"><Truck className="w-4 h-4 text-amber-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">VAT + TCS</span></div>
-          <p className="text-lg font-bold text-amber-600 dark:text-amber-400">₹{(summaryStats.totalVat + summaryStats.totalCess + summaryStats.totalSpecial + summaryStats.totalTcs).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-        </div>
-      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><ShoppingBag className="w-4 h-4 text-blue-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Purchases</span></div>
+    <p className="text-lg font-bold text-gray-800 dark:text-gray-100">{summaryStats.totalPurchases}</p>
+  </div>
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><TrendingUp className="w-4 h-4 text-green-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Total Amount</span></div>
+    <p className="text-lg font-bold text-green-600 dark:text-green-400">₹{summaryStats.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+  </div>
+  {/* ← ADD: Godown Card */}
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><Warehouse className="w-4 h-4 text-amber-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Godown</span></div>
+    <p className="text-base font-bold text-amber-600 dark:text-amber-400">{summaryStats.godownCount}</p>
+    <p className="text-[10px] text-gray-400">₹{summaryStats.godownAmount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+  </div>
+  {/* ← ADD: Counter Card */}
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><Store className="w-4 h-4 text-violet-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Counter</span></div>
+    <p className="text-base font-bold text-violet-600 dark:text-violet-400">{summaryStats.counterCount}</p>
+    <p className="text-[10px] text-gray-400">₹{summaryStats.counterAmount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+  </div>
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><BarChart3 className="w-4 h-4 text-orange-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Subtotal</span></div>
+    <p className="text-lg font-bold text-orange-600 dark:text-orange-400">₹{summaryStats.totalSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+  </div>
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><Building2 className="w-4 h-4 text-purple-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Suppliers</span></div>
+    <p className="text-lg font-bold text-purple-600 dark:text-purple-400">{summaryStats.uniqueSuppliers}</p>
+  </div>
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><Package className="w-4 h-4 text-cyan-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Bottles</span></div>
+    <p className="text-lg font-bold text-cyan-600 dark:text-cyan-400">{summaryStats.totalBottles.toLocaleString()}</p>
+  </div>
+  <div className="card p-3 border dark:border-slate-700">
+    <div className="flex items-center gap-2 mb-1"><Truck className="w-4 h-4 text-amber-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">VAT+TCS</span></div>
+    <p className="text-lg font-bold text-amber-600 dark:text-amber-400">₹{(summaryStats.totalVat + summaryStats.totalCess + summaryStats.totalSpecial + summaryStats.totalTcs).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+  </div>
+</div>
 
       {/* ─── Tax Breakdown Bar ─── */}
       <div className="card p-3 border dark:border-slate-700">
@@ -644,6 +674,15 @@ const handleExportExcelFull = async () => {
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Date To</label><input type="date" value={filterDateTo} onChange={e => { setFilterDateTo(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Supplier</label><select value={filterSupplier} onChange={e => { setFilterSupplier(e.target.value); setCurrentPage(1) }} className="input-field text-xs"><option value="">All Suppliers</option>{suppliers.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}</select></div>
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Invoice No.</label><input type="text" placeholder="Search invoice..." value={filterInvoice} onChange={e => { setFilterInvoice(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
+            
+            <div>
+  <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Stock To</label>
+  <select value={filterStockDest} onChange={e => { setFilterStockDest(e.target.value); setCurrentPage(1) }} className="input-field text-xs">
+    <option value="ALL">All (Counter + Godown)</option>
+    <option value="GODOWN">Godown Only</option>
+    <option value="COUNTER">Counter Only</option>
+  </select>
+</div>
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Status</label><select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setCurrentPage(1) }} className="input-field text-xs"><option value="ALL">All Status</option><option value="RECEIVED">Received</option><option value="RETURN">Return</option></select></div>
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Product Name</label><input type="text" placeholder="Filter by product..." value={filterProduct} onChange={e => { setFilterProduct(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Brand</label><input type="text" placeholder="Filter by brand..." value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
@@ -688,7 +727,22 @@ const handleExportExcelFull = async () => {
           {/* ─── Detail Tab ─── */}
           {activeTab === 'detail' && (
             <div className="space-y-3">
-              <div className="card overflow-hidden border dark:border-slate-700 shadow-sm"><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50"><th className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('invoice_number')}><div className="flex items-center gap-1">Invoice {getSortIcon(sortField === 'invoice_number' ? sortDir : '')}</div></th><th className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('billing_date')}><div className="flex items-center gap-1">Date {getSortIcon(sortField === 'billing_date' ? sortDir : '')}</div></th><th className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('supplier_name')}><div className="flex items-center gap-1">Supplier {getSortIcon(sortField === 'supplier_name' ? sortDir : '')}</div></th><th className="p-2.5 text-center font-semibold">Vehicle</th><th className="p-2.5 text-right font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('subtotal')}><div className="flex items-center justify-end gap-1">Subtotal {getSortIcon(sortField === 'subtotal' ? sortDir : '')}</div></th><th className="p-2.5 text-right font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('vat_amount')}><div className="flex items-center justify-end gap-1">VAT {getSortIcon(sortField === 'vat_amount' ? sortDir : '')}</div></th><th className="p-2.5 text-right font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('total_amount')}><div className="flex items-center justify-end gap-1">Total {getSortIcon(sortField === 'total_amount' ? sortDir : '')}</div></th><th className="p-2.5 text-center font-semibold">Status</th><th className="p-2.5 text-center font-semibold">Items</th></tr></thead>
+              <div className="card overflow-hidden border dark:border-slate-700 shadow-sm"><div className="overflow-x-auto"><table className="w-full text-xs">
+                <thead>
+  <tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50">
+    <th className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('invoice_number')}><div className="flex items-center gap-1">Invoice {getSortIcon(sortField === 'invoice_number' ? sortDir : '')}</div></th>
+    <th className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('billing_date')}><div className="flex items-center gap-1">Date {getSortIcon(sortField === 'billing_date' ? sortDir : '')}</div></th>
+    <th className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('supplier_name')}><div className="flex items-center gap-1">Supplier {getSortIcon(sortField === 'supplier_name' ? sortDir : '')}</div></th>
+    {/* ← ADD: Stock To Header */}
+    <th className="p-2.5 text-center font-semibold">Stock To</th>
+    <th className="p-2.5 text-center font-semibold">Vehicle</th>
+    <th className="p-2.5 text-right font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('subtotal')}><div className="flex items-center justify-end gap-1">Subtotal {getSortIcon(sortField === 'subtotal' ? sortDir : '')}</div></th>
+    <th className="p-2.5 text-right font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('vat_amount')}><div className="flex items-center justify-end gap-1">VAT {getSortIcon(sortField === 'vat_amount' ? sortDir : '')}</div></th>
+    <th className="p-2.5 text-right font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('total_amount')}><div className="flex items-center justify-end gap-1">Total {getSortIcon(sortField === 'total_amount' ? sortDir : '')}</div></th>
+    <th className="p-2.5 text-center font-semibold">Status</th>
+    <th className="p-2.5 text-center font-semibold">Items</th>
+  </tr>
+</thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
                   {paginatedPurchases.map(p => (
                     <Fragment key={p.id}>
@@ -696,6 +750,20 @@ const handleExportExcelFull = async () => {
                         <td className="p-2.5"><div className="font-mono font-semibold text-gray-800 dark:text-gray-200">{p.invoice_number}</div>{p.invoice_date && <div className="text-[10px] text-gray-400">Inv: {format(new Date(p.invoice_date + 'T00:00:00'), 'dd MMM yy')}</div>}</td>
                         <td className="p-2.5 text-gray-600 dark:text-gray-400">{p.billing_date ? format(new Date(p.billing_date + 'T00:00:00'), 'dd MMM yyyy') : p.purchase_date ? format(new Date(p.purchase_date + 'T00:00:00'), 'dd MMM yyyy') : '—'}</td>
                         <td className="p-2.5"><div className="font-medium text-gray-800 dark:text-gray-200">{p.supplier_name || '—'}</div>{p.notes && <div className="text-[10px] text-gray-400">Pass: {p.notes}</div>}</td>
+                        {/* ← ADD: Stock To Cell */}
+<td className="p-2.5 text-center">
+  <span className={clsx(
+    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
+    (p.stock_destination || 'GODOWN') === 'COUNTER'
+      ? "bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800"
+      : "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
+  )}>
+    {(p.stock_destination || 'GODOWN') === 'COUNTER'
+      ? <><Store className="w-3 h-3" /> Counter</>
+      : <><Warehouse className="w-3 h-3" /> Godown</>
+    }
+  </span>
+</td>
                         <td className="p-2.5 text-center text-gray-500 text-[11px]">{p.vehicle_number || '—'}</td>
                         <td className="p-2.5 text-right font-medium">₹{Number(p.subtotal).toFixed(2)}</td>
                         <td className="p-2.5 text-right text-gray-500">₹{Number(p.vat_amount).toFixed(2)}</td>
@@ -704,7 +772,7 @@ const handleExportExcelFull = async () => {
                         <td className="p-2.5 text-center"><button onClick={() => loadItems(p.id)} disabled={loadingItems} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-50">{loadingItems && expandedId !== p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : expandedId === p.id ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}</button></td>
                       </tr>
                       {expandedId === p.id && expandedItems[p.id] && (
-                        <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20"><td colSpan={9} className="px-6 py-3"><table className="w-full text-xs"><thead><tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700"><th className="text-left py-1.5 font-medium w-6">#</th><th className="text-left py-1.5 font-medium">Product</th><th className="text-center py-1.5 font-medium w-16">Size</th><th className="text-center py-1.5 font-medium w-12">MRP</th><th className="text-center py-1.5 font-medium w-14">Cases</th><th className="text-center py-1.5 font-medium w-16 font-bold text-green-500">Bottles</th><th className="text-center py-1.5 font-medium w-14">Bulk L</th><th className="text-right py-1.5 font-medium w-18 text-orange-500">Rate/Case</th><th className="text-right py-1.5 font-medium w-18 text-green-500">Rate/Unit</th><th className="text-right py-1.5 font-medium w-20">Total</th></tr></thead>
+                        <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20"><td colSpan={10} className="px-6 py-3"><table className="w-full text-xs"><thead><tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700"><th className="text-left py-1.5 font-medium w-6">#</th><th className="text-left py-1.5 font-medium">Product</th><th className="text-center py-1.5 font-medium w-16">Size</th><th className="text-center py-1.5 font-medium w-12">MRP</th><th className="text-center py-1.5 font-medium w-14">Cases</th><th className="text-center py-1.5 font-medium w-16 font-bold text-green-500">Bottles</th><th className="text-center py-1.5 font-medium w-14">Bulk L</th><th className="text-right py-1.5 font-medium w-18 text-orange-500">Rate/Case</th><th className="text-right py-1.5 font-medium w-18 text-green-500">Rate/Unit</th><th className="text-right py-1.5 font-medium w-20">Total</th></tr></thead>
                           <tbody>{expandedItems[p.id].map((item, idx) => { const cases = item.qty_cases || 0; const totalBtls = item.total_bottles || 0; const ratePerCase = item.unit_cost || 0; const ratePerUnit = item.purchase_rate_per_unit > 0 ? item.purchase_rate_per_unit : (totalBtls > 0 ? (ratePerCase * cases) / totalBtls : 0); return (<tr key={item.id} className="border-b border-gray-100 dark:border-gray-800/50 hover:bg-white/50 dark:hover:bg-gray-800/30"><td className="py-1.5 text-gray-400">{idx + 1}</td><td className="py-1.5"><span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>{item.traditional_name && <span className="text-gray-400 ml-1">· {item.traditional_name}</span>}{item.brand && <div className="text-[10px] text-gray-400">{item.brand}</div>}</td><td className="text-center py-1.5 text-gray-500">{item.bottle_size || '-'}</td><td className="text-center py-1.5">₹{item.mrp}</td><td className="text-center py-1.5 font-medium">{cases || '-'}</td><td className="text-center py-1.5 font-bold text-green-600 dark:text-green-400">{totalBtls || '-'}</td><td className="text-center py-1.5 text-gray-500">{item.qty_bulk_liters || '-'}</td><td className="text-right py-1.5 font-semibold text-orange-600 dark:text-orange-400">₹{ratePerCase.toFixed(2)}</td><td className="text-right py-1.5 font-semibold text-green-600 dark:text-green-400">₹{ratePerUnit.toFixed(2)}</td><td className="text-right py-1.5 font-medium text-blue-700 dark:text-blue-300">₹{item.total_cost.toFixed(2)}</td></tr>) })}<tr className="bg-slate-100/50 dark:bg-slate-800/50 font-semibold"><td colSpan={4} className="py-1.5 text-right text-gray-500">Item Total</td><td className="py-1.5 text-center">{expandedItems[p.id].reduce((s, i) => s + (i.qty_cases || 0), 0)}</td><td className="py-1.5 text-center text-green-600">{expandedItems[p.id].reduce((s, i) => s + (i.total_bottles || 0), 0)}</td><td className="py-1.5 text-center">{expandedItems[p.id].reduce((s, i) => s + (i.qty_bulk_liters || 0), 0).toFixed(1)}</td><td colSpan={2}></td><td className="py-1.5 text-right text-blue-700 dark:text-blue-300">₹{expandedItems[p.id].reduce((s, i) => s + (i.total_cost || 0), 0).toFixed(2)}</td></tr></tbody></table></td></tr>
                       )}
                     </Fragment>

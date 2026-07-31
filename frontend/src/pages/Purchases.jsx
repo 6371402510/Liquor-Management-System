@@ -18,10 +18,11 @@ import { fetchSuppliersSafe } from './supplierHelper'
 // 1. INVENTORY CONSTANTS & HELPERS
 // ─────────────────────────────────────────────────────────────
 
-const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY', 'OTHER']
+const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY','SCOTCH WHISKY', 'OTHER']
 
 const SUB_CATEGORIES_BY_CATEGORY = {
   'WHISKY': ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE'],
+  'SCOTCH WHISKY':['SUPREME','SUPERIOR','RESERVE','CLASSIC','ULTRA PREMIUM','EXTRA PLANTINUM','ULTRA GOLD','ULTRA PREMIUM','ORIGINAL'],
   'RUM': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE', 'DARK', 'WHITE', 'SPICED', 'GOLD'],
   'VODKA': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'FLAVOURED', 'NEUTRAL'],
   'GIN': ['PREMIUM', 'LONDON DRY', 'PLYMOUTH', 'OLD TOM', 'FLAVOURED', 'NAVY STRENGTH'],
@@ -33,17 +34,20 @@ const SUB_CATEGORIES_BY_CATEGORY = {
 
 const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE']
 
-const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE',]
+const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE','FMFL']
 
 const BOTTLE_SIZES_BY_TYPE = {
+  'FMFL':['50ml','60ml','90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '700ml','750ml', '1000ml'],
   'IMFL': ['90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
   'BEER': ['275ml', '330ml', '500ml', '650ml'],
-  'WINE': ['375ml', '500ml', '750ml', '1000ml', '2000ml'],
+  'WINE': ['180ml', '375ml', '500ml', '750ml', '1000ml', '2000ml'],
   'COUNTRY LIQUOR': ['200ml', '300ml', '500ml', '750ml'],
 }
 const DEFAULT_SIZES = BOTTLE_SIZES_BY_TYPE['IMFL']
 
 const SIZE_TRADITIONAL_MAP = {
+  '50ml': { traditionalName: 'Peg / Miniature', bottlesPerCase: 150 },
+  '60ml': { traditionalName: 'Peg / Miniature', bottlesPerCase: 150},
   '90ml': { traditionalName: 'Peg / Miniature', bottlesPerCase: 96 },
   '180ml': { traditionalName: 'Nip / Quarter', bottlesPerCase: 48 },
   '200ml': { traditionalName: 'Nip + / Quarter+', bottlesPerCase: 24 },
@@ -54,6 +58,7 @@ const SIZE_TRADITIONAL_MAP = {
   '375ml': { traditionalName: 'Pint / Half', bottlesPerCase: 24 },
   '500ml': { traditionalName: 'Medium', bottlesPerCase: 24 },
   '650ml': { traditionalName: 'Large Beer', bottlesPerCase: 12 },
+  '700ml': { traditionalName: 'Large ', bottlesPerCase: 12 },
   '750ml': { traditionalName: 'Quart / Bottle', bottlesPerCase: 12 },
   '1000ml': { traditionalName: 'Liter', bottlesPerCase: 9 },
   '2000ml': { traditionalName: 'Double Liter', bottlesPerCase: 6 },
@@ -438,6 +443,8 @@ export default function Purchases() {
 
   const [editingPurchaseId, setEditingPurchaseId] = useState(null)
   const [editingItemIndex, setEditingItemIndex] = useState(null)
+  // ─── NEW: Stock destination state ───
+const [stockDestination, setStockDestination] = useState('GODOWN')
 
   useEffect(() => {
     if (companyId) {
@@ -501,6 +508,7 @@ export default function Purchases() {
       setInvoiceDate(purchase.invoice_date || '')
       setTransportPass(purchase.notes || '')
       setVehicleNumber(purchase.vehicle_number || '')
+      setStockDestination(purchase.stock_destination || 'GODOWN')
       setPurchaseVat(purchase.subtotal > 0 ? ((purchase.vat_amount / purchase.subtotal) * 100).toFixed(1) : 35)
       setPurchaseCess(purchase.subtotal > 0 ? ((purchase.cess_amount / purchase.subtotal) * 100).toFixed(1) : 0)
       setPurchaseSpecial(purchase.subtotal > 0 ? ((purchase.special_amount / purchase.subtotal) * 100).toFixed(1) : 0)
@@ -884,6 +892,7 @@ const roundTaxAmount = () => {
       purchase_date: billingDate || format(new Date(), 'yyyy-MM-dd'),
       invoice_date: invoiceDate || null,
       billing_date: billingDate,
+      stock_destination: stockDestination,   // ← NEW
       notes: transportPass,
       vehicle_number: vehicleNumber,
       subtotal, vat_amount: vatTotal, cess_amount: cessTotal,
@@ -934,6 +943,7 @@ const roundTaxAmount = () => {
       setNotes(''); setInvoiceDate('')
       setBillingDate(format(new Date(), 'yyyy-MM-dd'))
       setTransportPass(''); setVehicleNumber('')
+      setStockDestination('GODOWN')
       fetchPurchases()
     } catch (err) { setError(err.message || 'Failed to save purchase') }
     finally { setSaving(false) }
@@ -1002,6 +1012,7 @@ const roundTaxAmount = () => {
       'Billing Date': p.billing_date || p.purchase_date || '',
       'Invoice Date': p.invoice_date || '',
       'Supplier': p.supplier_name || '',
+       'Stock To': p.stock_destination || 'GODOWN',   // ← ADD THIS
       'Transport Pass': p.notes || '',
       'Vehicle Number': p.vehicle_number || '',
       'Subtotal': Number(p.subtotal) || 0,
@@ -1088,6 +1099,7 @@ const roundTaxAmount = () => {
                 setPurchaseCess(0)
                 setPurchaseSpecial(0)
                 setPurchaseTcs(2.7)
+                setStockDestination('GODOWN') 
               } else {
                 setEditingPurchaseId(null)
                 setEditingItemIndex(null)
@@ -1097,6 +1109,7 @@ const roundTaxAmount = () => {
                 setCurrentItem(EMPTY_ITEM)
                 setSearchQuery('')
                 setShowForm(true)
+                setStockDestination('GODOWN')
               }
             }}
             className={clsx(
@@ -1130,7 +1143,7 @@ const roundTaxAmount = () => {
             {editingPurchaseId ? '✏️ Edit Purchase' : 'New Purchase Entry'}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <div>
                 <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Date</label>
                 <input type="date" value={billingDate} onChange={e => setBillingDate(e.target.value)} className="input-field bg-green-50 dark:bg-green-900/10" />
@@ -1142,6 +1155,37 @@ const roundTaxAmount = () => {
                   {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
+              <div>
+  <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Stock To *</label>
+  <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+    <button
+      type="button"
+      onClick={() => setStockDestination('GODOWN')}
+      className={clsx(
+        "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors border-r border-gray-200 dark:border-gray-700",
+        stockDestination === 'GODOWN'
+          ? "bg-blue-600 text-white"
+          : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+      )}
+    >
+      <Warehouse className="w-4 h-4" />
+      Godown
+    </button>
+    <button
+      type="button"
+      onClick={() => setStockDestination('COUNTER')}
+      className={clsx(
+        "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors",
+        stockDestination === 'COUNTER'
+          ? "bg-emerald-600 text-white"
+          : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+      )}
+    >
+      <Store className="w-4 h-4" />
+      Counter
+    </button>
+  </div>
+</div>
               <div>
                 <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice Number *</label>
                 <div className="relative">
@@ -1166,7 +1210,7 @@ const roundTaxAmount = () => {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left: Item Entry Form */}
               <div className="lg:col-span-4 border dark:border-slate-700 rounded-lg p-4 bg-white dark:bg-slate-900">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-0">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
                     <Package className="w-4 h-4 text-blue-500" />
                     {editingItemIndex !== null ? 'Edit Item' : 'Add New Item'}
@@ -1181,7 +1225,7 @@ const roundTaxAmount = () => {
                   </button>
                 </div>
 
-                <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2">
+                <div className="space-y-3 max-h-[620px] overflow-y-auto pr-2">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2 relative" ref={dropdownRef}>
                       <label className="block text-md font-semibold text-black-800 mb-1">
@@ -1205,7 +1249,7 @@ const roundTaxAmount = () => {
                       )}
                     </div>
 
-                    {currentItem.productId && (
+                    {/* {currentItem.productId && (
                       <div className="col-span-2 rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/20 px-3 py-2">
                         <div className="flex items-center justify-between">
                           <div className="text-xs">
@@ -1216,22 +1260,58 @@ const roundTaxAmount = () => {
                           <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-full">{currentItem.bottlesPerCase} btls/case</span>
                         </div>
                       </div>
-                    )}
+                    )} */}
 
                     <div className="col-span-2">
-                      <label className="block text-md font-semibold text-black-800 mb-1">Item Name *</label>
+                      <label className="block text-md font-semibold text-black-800 mb-0">Item Name *</label>
                       <input type="text" value={currentItem.name} onChange={e => handleItemChange('name', e.target.value)} placeholder="e.g. Royal Stag" className="input-field text-sm" />
                     </div>
-                    <div><label className="block text-md font-semibold text-black-800 mb-1">Brand</label><input type="text" value={currentItem.brand} onChange={e => handleItemChange('brand', e.target.value)} className="input-field text-sm" /></div>
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">Product Type</label>
-                      <select value={currentItem.productType} onChange={e => handleItemChange('productType', e.target.value)} className="input-field text-sm">
-                        {PRODUCT_TYPES.map(pt => <option key={pt} value={pt}>{pt}</option>)}
-                      </select>
+                   
+                    <div><label className="block text-md font-semibold text-black-800 mb-0">MRP (₹) *</label><input type="number" value={currentItem.mrp} onChange={e => handleItemChange('mrp', e.target.value)} className="input-field text-sm" /></div>
+ <div>
+                      <label className="block text-md font-semibold text-black-800 mb-0">
+                        Qty in Cases
+                        {currentItem.bottlesPerCase > 0 && <span className="ml-1 text-[10px] text-blue-500">×{currentItem.bottlesPerCase} btls</span>}
+                      </label>
+                      <input
+                        id="qtyCasesInput"
+                        type="number"
+                        min="0"
+                        value={currentItem.qtyCases}
+                        onChange={e => handleItemChange('qtyCases', e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addItemToTable();
+                          }
+                        }}
+                        className="input-field text-sm"
+                        placeholder="0"
+                      />
                     </div>
-                    <div><label className="block text-md font-semibold text-black-800 mb-1">Category</label><input type="text" value={currentItem.category} onChange={e => handleItemChange('category', e.target.value)} className="input-field text-sm" /></div>
-                    <div><label className="block text-md font-semibold text-black-800 mb-1">MRP (₹) *</label><input type="number" value={currentItem.mrp} onChange={e => handleItemChange('mrp', e.target.value)} className="input-field text-sm" /></div>
-
+                    <div>
+                      <label className="block text-md font-semibold text-black-800 mb-0">Total Qty (Bottles) {isTotalQtyAuto ? <span className="ml-1 text-[10px] text-blue-500">auto</span> : ''}</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={currentItem.totalQty}
+                        onChange={e => handleItemChange('totalQty', e.target.value)}
+                        className={clsx("input-field text-sm", isTotalQtyAuto && "bg-gray-50 dark:bg-gray-800")}
+                        readOnly={isTotalQtyAuto}
+                      />
+                    </div>
+                     <div>
+                      <label className="block text-md font-semibold text-black-800 mb-1">MGER Value</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={currentItem.mgerValue || ''}
+                        onChange={e => handleItemChange('mgerValue', e.target.value)}
+                        className="input-field text-sm font-semibold"
+                        placeholder="Enter MGER"
+                      />
+                    </div>
                     <div>
                       <label className="block text-md font-semibold text-black-800 mb-1">
                         Purchase Rate / Case (₹) *
@@ -1264,38 +1344,7 @@ const roundTaxAmount = () => {
                     </div>
                     <div><label className="block text-md font-semibold text-black-800 mb-1">Selling Rate (₹) *</label><input type="number" min="0" step="0.01" value={currentItem.sellingRate} onChange={e => handleItemChange('sellingRate', e.target.value)} className="input-field text-sm" /></div>
 
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">
-                        Qty in Cases
-                        {currentItem.bottlesPerCase > 0 && <span className="ml-1 text-[10px] text-blue-500">×{currentItem.bottlesPerCase} btls</span>}
-                      </label>
-                      <input
-                        id="qtyCasesInput"
-                        type="number"
-                        min="0"
-                        value={currentItem.qtyCases}
-                        onChange={e => handleItemChange('qtyCases', e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            addItemToTable();
-                          }
-                        }}
-                        className="input-field text-sm"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">Total Qty (Bottles) {isTotalQtyAuto ? <span className="ml-1 text-[10px] text-blue-500">auto</span> : ''}</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={currentItem.totalQty}
-                        onChange={e => handleItemChange('totalQty', e.target.value)}
-                        className={clsx("input-field text-sm", isTotalQtyAuto && "bg-gray-50 dark:bg-gray-800")}
-                        readOnly={isTotalQtyAuto}
-                      />
-                    </div>
+                   
 
                     {/* ─── RESTORED OPENING, MIN, BL, LPL FIELDS ─── */}
                     <div>
@@ -1306,7 +1355,7 @@ const roundTaxAmount = () => {
                       <label className="block text-md font-semibold text-black-800 mb-1">Min Stock</label>
                       <input type="number" min="0" value={currentItem.minStock} onChange={e => handleItemChange('minStock', e.target.value)} className="input-field text-sm" />
                     </div>
-                    <div>
+                    {/* <div>
                       <label className="block text-md font-semibold text-black-800 mb-1">Bulk Liters (BL) <span className="ml-1 text-[10px] text-cyan-500 font-medium">auto</span></label>
                       <input type="text" value={currentItem.qtyBulkLiters > 0 ? currentItem.qtyBulkLiters.toFixed(3) : '—'} readOnly className="input-field text-sm font-semibold bg-cyan-50 dark:bg-cyan-900/20 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 cursor-not-allowed" />
                     </div>
@@ -1318,19 +1367,15 @@ const roundTaxAmount = () => {
                         readOnly
                         className="input-field text-sm font-semibold bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 cursor-not-allowed"
                       />
-                    </div>
+                    </div> */}
+                     <div><label className="block text-md font-semibold text-black-800 mb-1">Brand</label><input type="text" value={currentItem.brand} onChange={e => handleItemChange('brand', e.target.value)} className="input-field text-sm" /></div>
                     <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">MGER Value</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={currentItem.mgerValue || ''}
-                        onChange={e => handleItemChange('mgerValue', e.target.value)}
-                        className="input-field text-sm font-semibold"
-                        placeholder="Enter MGER"
-                      />
+                      <label className="block text-md font-semibold text-black-800 mb-1">Product Type</label>
+                      <select value={currentItem.productType} onChange={e => handleItemChange('productType', e.target.value)} className="input-field text-sm">
+                        {PRODUCT_TYPES.map(pt => <option key={pt} value={pt}>{pt}</option>)}
+                      </select>
                     </div>
+                    <div><label className="block text-md font-semibold text-black-800 mb-1">Category</label><input type="text" value={currentItem.category} onChange={e => handleItemChange('category', e.target.value)} className="input-field text-sm" /></div> 
                   </div>
                 </div>
 
@@ -1547,6 +1592,7 @@ const roundTaxAmount = () => {
                 <th className="table-header text-left">Invoice No.</th>
                 <th className="table-header text-left">Date</th>
                 <th className="table-header text-left">Supplier</th>
+                <th className="table-header text-left">Stock To</th>
                 <th className="table-header text-right">VAT</th>
                 <th className="table-header text-right">TCS</th> {/* ADDED TCS HEADER */}
                 <th className="table-header text-right">Total</th>
@@ -1572,6 +1618,20 @@ const roundTaxAmount = () => {
                       }
                     </td>
                     <td className="table-cell text-gray-600 dark:text-gray-400">{p.supplier_name || '—'}</td>
+                    <td className="px-3 py-3">
+  <span className={clsx(
+    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold",
+    (p.stock_destination || 'GODOWN') === 'COUNTER'
+      ? "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800"
+      : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+  )}>
+    {(p.stock_destination || 'GODOWN') === 'COUNTER' ? (
+      <><Store className="w-3 h-3" /> Counter</>
+    ) : (
+      <><Warehouse className="w-3 h-3" /> Godown</>
+    )}
+  </span>
+</td>
                     <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
                     <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
                     <td className="table-cell text-right font-semibold">₹{Number(p.total_amount).toFixed(2)}</td>

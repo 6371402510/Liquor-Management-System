@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { AlertTriangle, Search, Package, Plus, Loader2, Store, X, Save, Camera } from 'lucide-react';
 import { format } from 'date-fns';
-import { searchProducts, updateProduct } from '../apiservices/inventoryapi';
+// ❌ REMOVED: updateProduct — backend handles stock now
+import { searchProducts } from '../apiservices/inventoryapi';
 import { createDamageRecord, getDamages } from '../apiservices/damageapi';
 
 const SIZE_ML_MAP = {
@@ -12,7 +13,7 @@ const SIZE_ML_MAP = {
 };
 
 const DAMAGE_REASONS = [
-  'Broken Bottle', 'Leakage', 'Expired', 'Spoilage', 
+  'Broken Bottle', 'Leakage', 'Expired', 'Spoilage',
   'Theft/Loss', 'Transport Damage', 'Other'
 ];
 
@@ -20,25 +21,27 @@ export default function Damage() {
   const { user } = useAuth();
   const [companyId] = useState(() => localStorage.getItem('selectedCompanyId') || null);
   const companyName = localStorage.getItem('selectedCompanyName') || 'Unknown Company';
-  
+
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const fileInputRef = useRef(null);
-  
+
+  const [selectedImage, setSelectedImage] = useState(null);
+
   // Form State
   const [damageDate, setDamageDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [reason, setReason] = useState('');
   const [quantity, setQuantity] = useState('');
   const [notes, setNotes] = useState('');
-  const [damageSource, setDamageSource] = useState('COUNTER'); // NEW STATE
-  
+  const [damageSource, setDamageSource] = useState('COUNTER');
+
   // Product Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  
+
   // UI & Data State
   const [damages, setDamages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +69,7 @@ export default function Damage() {
   const fetchDamages = async () => {
     setLoading(true);
     try {
-      const data = await getDamages(companyId); 
+      const data = await getDamages(companyId);
       setDamages(data || []);
     } catch (err) {
       setError('Failed to load damage records');
@@ -113,7 +116,7 @@ export default function Damage() {
     setSearchQuery(product.name);
     setShowDropdown(false);
     setQuantity('');
-    setDamageSource('COUNTER'); // Reset to counter when new product selected
+    setDamageSource('COUNTER');
   };
 
   const resetForm = () => {
@@ -137,9 +140,8 @@ export default function Damage() {
     const qty = Number(quantity);
     if (!qty || qty <= 0) return alert('Please enter a valid quantity.');
 
-    // Check stock based on selected source
-    const availableStock = damageSource === 'COUNTER' 
-      ? (Number(selectedProduct.counter_stock) || 0) 
+    const availableStock = damageSource === 'COUNTER'
+      ? (Number(selectedProduct.counter_stock) || 0)
       : (Number(selectedProduct.godown_stock) || 0);
 
     if (qty > availableStock) {
@@ -149,7 +151,12 @@ export default function Damage() {
     setSaving(true);
 
     try {
-      // 1. Create Damage Record in Backend
+      // ────────────────────────────────────────────────
+      // ✅ ONLY THIS CALL — backend handles ALL stock:
+      //   - deducts counter_stock OR godown_stock
+      //   - increments damage_stock
+      //   - recalculates current_stock
+      // ────────────────────────────────────────────────
       const damagePayload = {
         company_id: Number(companyId),
         product_id: selectedProduct.id,
@@ -161,27 +168,19 @@ export default function Damage() {
         reason,
         notes,
         damage_date: damageDate,
-        damage_source: damageSource, // NEW FIELD
+        damage_source: damageSource,
         recorded_by: user?.id || null,
       };
       await createDamageRecord(damagePayload, selectedFile);
 
-      // 2. Deduct Stock from Inventory
-      const currentTotalStock = Number(selectedProduct.current_stock) || 0;
-      const stockUpdatePayload = {
-        current_stock: currentTotalStock - qty, // Always deduct from total
-      };
+      // ❌ REMOVED: No updateProduct call here!
+      // ❌ REMOVED: No manual stock deduction here!
+      // Backend already did it inside create_damage()
 
-      // Deduct from specific location
-      if (damageSource === 'COUNTER') {
-        stockUpdatePayload.counter_stock = availableStock - qty;
-      } else {
-        stockUpdatePayload.godown_stock = availableStock - qty;
-      }
-
-      await updateProduct(selectedProduct.id, stockUpdatePayload);
-
-      setSuccess(`Successfully recorded ${qty} damaged units from ${damageSource} for ${selectedProduct.name}.`);
+      setSuccess(
+        `Recorded ${qty} damaged ${qty === 1 ? 'unit' : 'units'} from ${damageSource} for ${selectedProduct.name}. ` +
+        `Product damage_stock is now ${(selectedProduct.damage_stock || 0) + qty}.`
+      );
       resetForm();
       fetchDamages();
     } catch (err) {
@@ -195,9 +194,8 @@ export default function Damage() {
   const sizeInMl = SIZE_ML_MAP[selectedProduct?.bottle_size] || 0;
   const damagedBL = (Number(quantity) || 0) * sizeInMl / 1000;
   const damagedLPL = selectedProduct?.category === 'BEER' ? 0 : damagedBL * 0.75;
-  
-  // Dynamic available stock based on source
-  const availableStock = selectedProduct 
+
+  const availableStock = selectedProduct
     ? (damageSource === 'COUNTER' ? (selectedProduct.counter_stock || 0) : (selectedProduct.godown_stock || 0))
     : 0;
 
@@ -245,7 +243,7 @@ export default function Damage() {
         <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-6 flex items-center gap-2">
           <Plus className="w-5 h-5" /> Record New Damage
         </h3>
-        
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
@@ -280,7 +278,13 @@ export default function Damage() {
                     {searchResults.map(p => (
                       <button key={p.id} type="button" onClick={() => selectProduct(p)} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-b border-gray-100 dark:border-gray-700 text-sm transition-colors">
                         <span className="font-medium text-gray-800 dark:text-gray-100">{p.name}</span>
-                        <span className="ml-2 text-xs text-gray-500">C:{p.counter_stock || 0} | G:{p.godown_stock || 0}</span>
+                        <span className="ml-2 text-xs text-gray-500">
+                          C:{p.counter_stock || 0} | G:{p.godown_stock || 0}
+                          {/* ★ Show existing damage in dropdown */}
+                          {(p.damage_stock || 0) > 0 && (
+                            <span className="ml-1 text-red-500 font-semibold">D:{p.damage_stock}</span>
+                          )}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -289,7 +293,7 @@ export default function Damage() {
             </div>
           </div>
 
-          {/* Selected Product Details & Quantity Input */}
+          {/* Selected Product Details */}
           {selectedProduct && (
             <div className="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg">
               <div className="flex justify-between items-start mb-3">
@@ -297,18 +301,17 @@ export default function Damage() {
                   <h4 className="text-sm font-bold text-gray-800 dark:text-gray-100">{selectedProduct.name}</h4>
                   <p className="text-xs text-gray-500">{selectedProduct.brand} • {selectedProduct.category} • {selectedProduct.bottle_size}</p>
                 </div>
-             <button type="button" onClick={() => { setSelectedProduct(null); setSearchQuery(''); }} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500">
+                <button type="button" onClick={() => { setSelectedProduct(null); setSearchQuery(''); }} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500">
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 items-end">
-                {/* NEW: Damage Source Selector */}
+
+              <div className="grid grid-cols-2 md:grid-cols-7 gap-4 items-end">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Source *</label>
-                  <select 
-                    value={damageSource} 
-                    onChange={e => { setDamageSource(e.target.value); setQuantity(''); }} 
+                  <select
+                    value={damageSource}
+                    onChange={e => { setDamageSource(e.target.value); setQuantity(''); }}
                     className="input-field text-xs font-bold"
                   >
                     <option value="COUNTER">Counter</option>
@@ -316,7 +319,6 @@ export default function Damage() {
                   </select>
                 </div>
 
-                {/* NEW: Dynamic Available Stock */}
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Available ({damageSource})</label>
                   <p className={`text-lg font-bold ${availableStock <= 0 ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
@@ -326,31 +328,44 @@ export default function Damage() {
 
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Damage Qty *</label>
-                  <input 
-                    type="number" 
-                    min="1" 
-                    max={availableStock} 
-                    value={quantity} 
-                    onChange={e => setQuantity(e.target.value)} 
-                    className="input-field text-red-600 font-bold" 
-                    required 
+                  <input
+                    type="number"
+                    min="1"
+                    max={availableStock}
+                    value={quantity}
+                    onChange={e => setQuantity(e.target.value)}
+                    className="input-field text-red-600 font-bold"
+                    required
                   />
                 </div>
+
+                {/* ★ Show current damage_stock from DB */}
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Total Damage (DB)</label>
+                  <p className="text-lg font-bold text-red-500">
+                    {selectedProduct.damage_stock || 0}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">After This</label>
+                  <p className="text-lg font-bold text-red-700 dark:text-red-300">
+                    {(selectedProduct.damage_stock || 0) + (Number(quantity) || 0)}
+                  </p>
+                </div>
+
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Bulk Liters (BL)</label>
                   <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{damagedBL.toFixed(3)}</p>
                 </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">LP Liters (LPL)</label>
-                  <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{damagedLPL.toFixed(3)}</p>
-                </div>
+
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Notes</label>
                   <input type="text" value={notes} onChange={e => setNotes(e.target.value)} className="input-field text-xs" placeholder="Optional..." />
                 </div>
               </div>
 
-              {/* Image Upload Section (Correctly outside the grid) */}
+              {/* Image Upload */}
               <div className="mt-4 pt-3 border-t border-amber-200 dark:border-amber-700">
                 <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Damage Photo (Optional)</label>
                 <div className="flex items-center gap-4">
@@ -369,7 +384,7 @@ export default function Damage() {
                     <Camera className="w-5 h-5" />
                     <span className="text-xs font-medium">{selectedFile ? 'Change Photo' : 'Upload Photo'}</span>
                   </button>
-                  
+
                   {previewUrl && (
                     <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm">
                       <img src={previewUrl} alt="Damage Preview" className="w-full h-full object-cover" />
@@ -389,7 +404,7 @@ export default function Damage() {
 
           <div className="flex justify-end">
             <button type="submit" disabled={saving || !selectedProduct} className="btn-primary flex items-center gap-2 px-6">
-              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Deducting Stock...</> : <><AlertTriangle className="w-4 h-4" /> Save Damage Record</>}
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : <><AlertTriangle className="w-4 h-4" /> Save Damage Record</>}
             </button>
           </div>
         </form>
@@ -398,9 +413,9 @@ export default function Damage() {
       {/* Damage History Table */}
       <div className="card border dark:border-slate-700 shadow-sm">
         <div className="p-4 border-b border-gray-100 dark:border-gray-800">
-          <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200">Damage History</h3>
+          <h3 className="text-sm font-bold text-gray-700 dark:text-gray-200">Damage History ({damages.length} records)</h3>
         </div>
-        
+
         {loading ? (
           <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-500" /></div>
         ) : damages.length === 0 ? (
@@ -427,13 +442,13 @@ export default function Damage() {
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{d.damage_date || '-'}</td>
                     <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-100">{d.product_name}</td>
                     <td className="px-4 py-3">
-                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                         d.damage_source === 'GODOWN' 
-                           ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' 
-                           : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600'
-                       }`}>
-                         {d.damage_source || 'COUNTER'}
-                       </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        d.damage_source === 'GODOWN'
+                          ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600'
+                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600'
+                      }`}>
+                        {d.damage_source || 'COUNTER'}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-right font-bold text-red-600">-{d.quantity}</td>
                     <td className="px-4 py-3">
@@ -441,24 +456,52 @@ export default function Damage() {
                         {d.reason}
                       </span>
                     </td>
-<td className="px-4 py-3">
-  {d.image_url ? (
-    <img 
-      src={`${import.meta.env.VITE_API_BASE}${d.image_url}`} 
-      alt="Damage" 
-      className="w-12 h-12 object-cover rounded-md border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80 transition"
-      onClick={() => window.open(`${import.meta.env.VITE_API_BASE}${d.image_url}`, '_blank')}
-    />
-  ) : (
-    <span className="text-xs text-gray-400">No photo</span>
-  )}
-</td>           </tr>
+                    <td className="px-4 py-3">
+                      {d.image_url ? (
+                        <img
+                          src={`${import.meta.env.VITE_API_BASE}${d.image_url}`}
+                          alt="Damage"
+                          className="w-12 h-12 object-cover rounded-md border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80 transition"
+onClick={() =>
+  setSelectedImage(`${import.meta.env.VITE_API_BASE}${d.image_url}`)
+}
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-400">No photo</span>
+                      )}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {selectedImage && (
+  <div
+    className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4"
+    onClick={() => setSelectedImage(null)}
+  >
+    <div
+      className="relative max-w-6xl max-h-[90vh]"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={() => setSelectedImage(null)}
+        className="absolute -top-4 -right-4 bg-red-500 hover:bg-red-600 text-white rounded-full p-2 shadow-lg"
+      >
+        <X className="w-5 h-5" />
+      </button>
+
+      <img
+        src={selectedImage}
+        alt="Damage"
+        className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain"
+      />
+    </div>
+  </div>
+)}
     </div>
   );
 }

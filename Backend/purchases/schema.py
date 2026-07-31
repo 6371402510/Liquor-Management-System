@@ -47,13 +47,16 @@ class PurchaseBase(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     invoice_number: str
-    company_id: Optional[int] = None # ─── ADDED
+    company_id: Optional[int] = None
     supplier_id: Optional[int] = None
     supplier_name: Optional[str] = None
 
     purchase_date: Optional[date] = None
     invoice_date: Optional[date] = None       
     billing_date: Optional[date] = None       
+
+    # ─── NEW ───
+    stock_destination: str = "GODOWN"
 
     subtotal: float = 0.0
     vat_amount: float = 0.0
@@ -64,7 +67,6 @@ class PurchaseBase(BaseModel):
     notes: Optional[str] = None
     vehicle_number: Optional[str] = None      
     status: str = "RECEIVED"
-
 
 class PurchaseCreate(PurchaseBase):
     items: List[PurchaseItemCreate]

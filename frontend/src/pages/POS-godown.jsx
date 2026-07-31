@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { getGodownProducts, processGodownCheckout, updateGodownSale } from '../apiservices/godown-counter';
+import { getGodownProducts, processGodownCheckout, updateGodownSale, updateProductMrp } from '../apiservices/godown-counter';
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 function generateInvoiceNumber(companyId) {
@@ -71,13 +71,23 @@ export default function POSGodown() {
   const barcodeRef = useRef(null);
   const qtyInputRefs = useRef({});
   const discInputRefs = useRef({});
+  const mrpInputRefs = useRef({});   
+
+  const priceInputRefs = useRef({});
   const [focusRequest, setFocusRequest] = useState(null);
-   const [editingSale, setEditingSale] = useState(null)
+  const [editingSale, setEditingSale] = useState(null)
   const [updating, setUpdating] = useState(false)
 
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const [error, setError] = useState('');
+
+  const [saleDate, setSaleDate] = useState(() => {
+    return format(new Date(), 'yyyy-MM-dd');
+  });
+  const [saleTime, setSaleTime] = useState(() => {
+    return format(new Date(), 'HH:mm');
+  });
 
   const [selectedItems, setSelectedItems] = useState([]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -100,7 +110,7 @@ export default function POSGodown() {
 
   useEffect(() => { if (companyId) fetchProducts(); }, [companyId]);
 
-    // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
   // NEW: Load edit data from sessionStorage on mount
   // ═══════════════════════════════════════════════════════════════
   useEffect(() => {
@@ -112,6 +122,11 @@ export default function POSGodown() {
         setCart(data.cartItems || [])
         setCustomerName(data.customerName || 'Walk-in Customer')
         setCustomerPhone(data.customerPhone || '')
+        if (data.saleDate) {
+          const saleDateTime = new Date(data.saleDate)
+          setSaleDate(format(saleDateTime, 'yyyy-MM-dd'))
+          setSaleTime(format(saleDateTime, 'HH:mm'))
+        }
       }
     } catch (err) {
       console.error('Failed to load edit data:', err)
@@ -155,27 +170,27 @@ export default function POSGodown() {
     }
   };
 
- useEffect(() => {
-  const availableProducts = products.filter(
-    p => Number(p.godown_stock) > 0
-  );
-
-  if (search.trim()) {
-    const q = search.toLowerCase();
-
-    setFilteredProducts(
-      availableProducts.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        (p.barcode || '').includes(q) ||
-        (p.brand || '').toLowerCase().includes(q) ||
-        (p.item_code || '').toLowerCase().includes(q) ||
-        (p.traditional_name || '').toLowerCase().includes(q)
-      )
+  useEffect(() => {
+    const availableProducts = products.filter(
+      p => Number(p.godown_stock) > 0
     );
-  } else {
-    setFilteredProducts(availableProducts);
-  }
-}, [products, search]);
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+
+      setFilteredProducts(
+        availableProducts.filter(p =>
+          p.name.toLowerCase().includes(q) ||
+          (p.barcode || '').includes(q) ||
+          (p.brand || '').toLowerCase().includes(q) ||
+          (p.item_code || '').toLowerCase().includes(q) ||
+          (p.traditional_name || '').toLowerCase().includes(q)
+        )
+      );
+    } else {
+      setFilteredProducts(availableProducts);
+    }
+  }, [products, search]);
 
   useEffect(() => {
     setSelectedItems(prev => prev.filter(scanId => cart.some(item => item.scanId === scanId)));
@@ -211,9 +226,9 @@ export default function POSGodown() {
         return prev.map(item =>
           item.scanId === existingItem.scanId
             ? {
-                ...item,
-                quantity: (Number(item.quantity) || 0) + 1
-              }
+              ...item,
+              quantity: (Number(item.quantity) || 0) + 1
+            }
             : item
         );
       }
@@ -319,6 +334,111 @@ export default function POSGodown() {
     setCart(prev => prev.map(i => i.scanId === scanId ? { ...i, discount: Math.max(0, Number(value)) } : i));
   };
 
+  const updateItemSalePrice = (scanId, value) => {
+    const newPrice = Math.max(0, Number(value) || 0);
+    setCart(prev => prev.map(i =>
+      i.scanId === scanId
+        ? { ...i, sale_price: newPrice }
+        : i
+    ));
+  };
+
+  // const handlePriceKeyDown = (e, scanId) => {
+  //   if (e.key === 'Enter') {
+  //     e.preventDefault();
+  //     if (mrpInputRefs.current[scanId]) {
+  //       mrpInputRefs.current[scanId].focus();
+  //       mrpInputRefs.current[scanId].select();
+  //     } else if (qtyInputRefs.current[scanId]) {
+  //       qtyInputRefs.current[scanId].focus();
+  //       qtyInputRefs.current[scanId].select();
+  //     }
+  //   }
+  // };
+
+const handleMrpKeyDown = (e, scanId) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (qtyInputRefs.current[scanId]) {
+      qtyInputRefs.current[scanId].focus();
+      qtyInputRefs.current[scanId].select();
+    }
+  }
+};
+
+// const updateItemMrp = (scanId, value) => {
+//   const newPrice = Math.max(0, Number(value) || 0);
+//   setCart(prev => prev.map(i =>
+//     i.scanId === scanId
+//       ? { ...i, mrp: newPrice, sale_price: newPrice }
+//       : i
+//   ));
+// };
+
+const isPriceModified = (item) => {
+  return item.originalPrice && item.originalPrice !== item.sale_price;
+};
+
+const updateItemMrp = async (scanId, newPrice) => {
+  const price = Math.max(0, Number(newPrice) || 0);
+  if (price <= 0) return;
+
+  const item = cart.find(i => i.scanId === scanId);
+  if (!item) return;
+
+  if (item.sale_price === price) return;
+
+  // Save original price on first change
+  const originalPrice = item.originalPrice || item.sale_price;
+
+  // Optimistic update: update ALL cart items with same product
+  setCart(prev => prev.map(i =>
+    i.productId === item.productId
+      ? { ...i, mrp: price, sale_price: price, originalPrice: originalPrice }
+      : i
+  ));
+
+  // Update products list for future scans
+  setProducts(prev => prev.map(p =>
+    p.id === item.productId
+      ? { ...p, mrp: price, sale_price: price }
+      : p
+  ));
+  setFilteredProducts(prev => prev.map(p =>
+    p.id === item.productId
+      ? { ...p, mrp: price, sale_price: price }
+      : p
+  ));
+  setRecentlyScanned(prev => prev.map(p =>
+    p.id === item.productId
+      ? { ...p, mrp: price, sale_price: price }
+      : p
+  ));
+
+  // Persist to inventory via backend
+  try {
+    await updateProductMrp(item.productId, Number(companyId), price);
+  } catch (err) {
+    // Revert on failure
+    setCart(prev => prev.map(i =>
+      i.productId === item.productId
+        ? { ...i, mrp: originalPrice, sale_price: originalPrice, originalPrice: undefined }
+        : i
+    ));
+    setProducts(prev => prev.map(p =>
+      p.id === item.productId
+        ? { ...p, mrp: originalPrice, sale_price: originalPrice }
+        : p
+    ));
+    setFilteredProducts(prev => prev.map(p =>
+      p.id === item.productId
+        ? { ...p, mrp: originalPrice, sale_price: originalPrice }
+        : p
+    ));
+    alert(`MRP update failed: ${err.message}`);
+  }
+};
+
   const handleQtyKeyDown = (e, scanId) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -329,6 +449,7 @@ export default function POSGodown() {
       }
     }
   };
+
 
   const handleDiscKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -371,9 +492,11 @@ export default function POSGodown() {
     setCustomerPhone('');
     setDiscount(0);
     setPaymentSplits([]);
+    setSaleDate(format(new Date(), 'yyyy-MM-dd'));
+    setSaleTime(format(new Date(), 'HH:mm'));
   };
 
-    const cancelEdit = () => {
+  const cancelEdit = () => {
     sessionStorage.removeItem('editing_sale_data')
     setEditingSale(null)
     clearPersistedSale()
@@ -443,22 +566,23 @@ export default function POSGodown() {
 
     let itemsHtml = '';
 
-    Object.values(printGroups).forEach(g => {
-      const discountHtml = g.totalDiscount > 0
-        ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
-        : '';
+   Object.values(printGroups).forEach(g => {
+  const discountHtml = g.totalDiscount > 0
+    ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
+    : '';
 
-      itemsHtml += `
-        <div style="margin-bottom:6px;">
-          <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.name} ${g.bottle_size ? `(${g.bottle_size})` : ''}</div>
-          <div style="display:flex; justify-content:space-between; font-size:11px;">
-            <span>₹${g.sale_price.toFixed(2)} x ${g.qty}</span>
-            <span>₹${(g.sale_price * g.qty).toFixed(2)}</span>
-          </div>
-          ${discountHtml}
-        </div>
-      `;
-    });
+  // ✅ No MRP line - sale_price IS the MRP
+  itemsHtml += `
+    <div style="margin-bottom:6px;">
+      <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.name} ${g.bottle_size ? `(${g.bottle_size})` : ''}</div>
+      <div style="display:flex; justify-content:space-between; font-size:11px;">
+        <span>₹${g.sale_price.toFixed(2)} x ${g.qty}</span>
+        <span>₹${(g.sale_price * g.qty).toFixed(2)}</span>
+      </div>
+      ${discountHtml}
+    </div>
+  `;
+});
 
     let paymentHtml = '';
     if (payload.payment_details && payload.payment_details.length > 0) {
@@ -472,7 +596,9 @@ export default function POSGodown() {
     }
 
     const invoiceNumber = payload.invoice_number;
-    const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
+    const receiptDate = payload.created_at ? new Date(payload.created_at) : new Date();
+    const printDate = format(receiptDate, 'dd/MM/yyyy hh:mm a');
+    // const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
     const cName = payload.customer_name || 'Walk-in Customer';
     const cPhone = payload.customer_phone || 'N/A';
 
@@ -557,7 +683,7 @@ export default function POSGodown() {
     }, 500);
   };
 
-   const handleCheckout = async () => {
+  const handleCheckout = async () => {
     if (!isPaymentValid) {
       alert(`Payment incomplete. Remaining: ₹${remaining.toFixed(2)}`);
       return;
@@ -569,31 +695,39 @@ export default function POSGodown() {
     const aggregated = {};
     cart.forEach(item => {
       const qty = Number(item.quantity) || 0;
-      const key = item.productId;
+      const pid = item.productId || item.id || null;
+
+      // ─── Use a safe key — fall back to scanId if no productId ───
+      const key = pid != null ? `pid-${pid}` : `scan-${item.scanId}`;
+
       if (!aggregated[key]) {
-        aggregated[key] = {
-          product_id: item.productId,
-          product_name: item.name,
-          bottle_size: item.bottle_size,
-          quantity: 0,
-          unit_price: item.sale_price,
-          discount: 0,
-          total_price: 0,
-        };
+       aggregated[key] = {
+  product_id: pid,
+  product_name: item.name || 'Unknown',
+  bottle_size: item.bottle_size || '',
+  quantity: 0,
+  unit_price: item.sale_price || 0,  // ✅ This IS the MRP
+  discount: 0,
+  total_price: 0,
+};
       }
       aggregated[key].quantity += qty;
       aggregated[key].discount += (item.discount || 0) * qty;
       aggregated[key].total_price += (item.sale_price - (item.discount || 0)) * qty;
     });
 
+
     const isSplit = paymentSplits.length > 1;
     const paymentMode = isSplit ? 'SPLIT' : paymentSplits[0].mode;
 
     if (editingSale) {
       // ═══════════════════════════════════════════════════════
-      // EDIT MODE: Update existing godown sale
+      // EDIT MODE: Update existing godown sale with date
       // ═══════════════════════════════════════════════════════
       setUpdating(true);
+
+      // ─── ADDED: Combine date and time for created_at ───
+      const newSaleDate = `${saleDate}T${saleTime || '00:00'}:00`;
 
       const payload = {
         invoice_number: editingSale.invoiceNumber,  // Keep original
@@ -602,6 +736,7 @@ export default function POSGodown() {
         customer_phone: customerPhone,
         total_amount: grandTotal,
         payment_mode: paymentMode,
+        created_at: newSaleDate,  // ─── ADDED: Include modified date
         payment_details: paymentSplits,
         items: Object.values(aggregated).map(item => ({
           ...item,
@@ -612,12 +747,12 @@ export default function POSGodown() {
       try {
         await updateGodownSale(editingSale.dbId, payload);
 
-        // Print updated receipt
-        printThermalReceipt(payload, aggregated);
+        // Print updated receipt with new date
+        printThermalReceipt({ ...payload, created_at: newSaleDate }, aggregated);
 
         setCompletedSale({
           ...payload,
-          created_at: new Date().toISOString(),
+          created_at: newSaleDate,  // ─── ADDED: Show updated date
           isEdit: true,
         });
         setShowInvoice(true);
@@ -638,8 +773,10 @@ export default function POSGodown() {
 
     } else {
       // ═══════════════════════════════════════════════════════
-      // NORMAL MODE: Original create logic
+      // NORMAL MODE: Original create logic (unchanged)
       // ═══════════════════════════════════════════════════════
+
+      const customSaleDate = `${saleDate}T${saleTime || '00:00'}:00`;
       const payload = {
         invoice_number: generateInvoiceNumber(companyId),
         company_id: Number(companyId),
@@ -647,6 +784,7 @@ export default function POSGodown() {
         customer_phone: customerPhone,
         total_amount: grandTotal,
         payment_mode: paymentMode,
+        created_at: customSaleDate,
         payment_details: paymentSplits,
         items: Object.values(aggregated).map(item => ({
           ...item,
@@ -656,9 +794,11 @@ export default function POSGodown() {
 
       try {
         const result = await processGodownCheckout(payload);
-        printThermalReceipt(payload, aggregated);
 
-        setCompletedSale({ ...payload, created_at: result.created_at || new Date().toISOString() });
+        // ─── FIXED: Use custom date for receipt instead of current date ───
+        printThermalReceipt({ ...payload, created_at: customSaleDate }, aggregated);
+
+        setCompletedSale({ ...payload, created_at: customSaleDate || new Date().toISOString() });
         setShowInvoice(true);
         setRecentlyScanned([]);
         setSelectedItems([]);
@@ -673,7 +813,6 @@ export default function POSGodown() {
       }
     }
   };
-
 
   const toggleSelectItem = (scanId) => {
     setSelectedItems(prev => prev.includes(scanId) ? prev.filter(id => id !== scanId) : [...prev, scanId]);
@@ -902,7 +1041,7 @@ export default function POSGodown() {
     }
   };
 
-    const handleBulkWhatsApp = async () => {
+  const handleBulkWhatsApp = async () => {
     if (selectedItems.length === 0) return alert('Please select items to send.');
     const itemsToSend = cart.filter(i => selectedItems.includes(i.scanId));
 
@@ -935,7 +1074,7 @@ export default function POSGodown() {
     let waPhone = (customerPhone || '').replace(/\D/g, '');
     if (waPhone.length === 10) waPhone = '91' + waPhone;
 
-    const url = waPhone 
+    const url = waPhone
       ? `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`
       : `https://wa.me/?text=${encodeURIComponent(msg)}`;
 
@@ -1080,10 +1219,10 @@ export default function POSGodown() {
     return (
       <div className="p-6 flex-1 overflow-y-auto">
         <div className="p-8 bg-white dark:bg-gray-900 rounded-xl max-w-lg mx-auto shadow-sm border border-gray-100">
-         <div className={clsx("flex items-center gap-3 mb-6 justify-center", completedSale.isEdit ? "text-amber-600" : "text-emerald-600")}>
-  <CheckCircle className="w-8 h-8" />
-  <h2 className="text-2xl font-bold">{completedSale.isEdit ? 'Godown Sale Updated' : 'Godown Sale Complete'}</h2>
-</div>
+          <div className={clsx("flex items-center gap-3 mb-6 justify-center", completedSale.isEdit ? "text-amber-600" : "text-emerald-600")}>
+            <CheckCircle className="w-8 h-8" />
+            <h2 className="text-2xl font-bold">{completedSale.isEdit ? 'Godown Sale Updated' : 'Godown Sale Complete'}</h2>
+          </div>
           <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300 mb-6">
             <p><strong>Invoice:</strong> {completedSale.invoice_number}</p>
             <p><strong>Customer:</strong> {completedSale.customer_name}</p>
@@ -1112,17 +1251,17 @@ export default function POSGodown() {
           <div className="mt-4 text-right">
             <p className="text-xl font-bold text-primary-600 dark:text-primary-400">Total: ₹{completedSale.total_amount.toFixed(2)}</p>
           </div>
-         <button
-  onClick={() => {
-    setShowInvoice(false);
-    setDiscount(0);
-    setEditingSale(null);
-    sessionStorage.removeItem('editing_sale_data');
-  }}
-  className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors"
->
-  {completedSale.isEdit ? 'Back to Godown POS' : 'New Sale'}
-</button>
+          <button
+            onClick={() => {
+              setShowInvoice(false);
+              setDiscount(0);
+              setEditingSale(null);
+              sessionStorage.removeItem('editing_sale_data');
+            }}
+            className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors"
+          >
+            {completedSale.isEdit ? 'Back to Godown POS' : 'New Sale'}
+          </button>
         </div>
       </div>
     );
@@ -1163,7 +1302,7 @@ export default function POSGodown() {
       {/* PAYMENT MODAL */}
       {isPayModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 space-y-5 relative max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6 space-y-5 relative max-h-[93vh] overflow-y-auto">
             <button onClick={() => setIsPayModalOpen(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
               <X className="w-5 h-5" />
             </button>
@@ -1185,6 +1324,66 @@ export default function POSGodown() {
                 <input type="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white" placeholder="Enter mobile number" />
               </div>
             </div>
+
+            {/* Inside isPayModalOpen modal, after the Mobile Number input */}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">
+                  <Calendar className="w-3 h-3 inline mr-1" />
+                  Sale Date
+                </label>
+                <input
+                  type="date"
+                  value={saleDate}
+                  onChange={(e) => setSaleDate(e.target.value)}
+                  className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">
+                  <Hash className="w-3 h-3 inline mr-1" />
+                  Sale Time
+                </label>
+                <input
+                  type="time"
+                  value={saleTime}
+                  onChange={(e) => setSaleTime(e.target.value)}
+                  className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {/* Quick date shortcuts */}
+            {/* <div className="flex gap-2 flex-wrap">
+  <button 
+    type="button"
+    onClick={() => {
+      setSaleDate(format(new Date(), 'yyyy-MM-dd'));
+      setSaleTime(format(new Date(), 'HH:mm'));
+    }}
+    className={clsx(
+      "text-xs px-2 py-1 rounded border transition-all",
+      saleDate === format(new Date(), 'yyyy-MM-dd') 
+        ? "bg-primary-100 border-primary-500 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400" 
+        : "border-gray-200 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400"
+    )}
+  >
+    Today
+  </button>
+  <button 
+    type="button"
+    onClick={() => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      setSaleDate(format(yesterday, 'yyyy-MM-dd'));
+      setSaleTime('12:00');
+    }}
+    className="text-xs px-2 py-1 rounded border border-gray-200 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 transition-all"
+  >
+    Yesterday
+  </button>
+</div> */}
 
             <div className="grid grid-cols-3 gap-2">
               <button onClick={() => setQuickPay('CASH')} className={clsx("text-xs font-bold py-2 rounded border-2 transition-all", totalPaid === grandTotal && paymentSplits[0]?.mode === 'CASH' ? "border-primary-600 bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-400" : "border-gray-200 hover:border-primary-300 dark:border-gray-700 dark:text-gray-300")}>
@@ -1266,7 +1465,7 @@ export default function POSGodown() {
               )}
             >
               {checkingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-{checkingOut ? (editingSale ? 'Updating...' : 'Processing...') : (editingSale ? 'Update & Pay' : 'Confirm & Pay')}
+              {checkingOut ? (editingSale ? 'Updating...' : 'Processing...') : (editingSale ? 'Update & Pay' : 'Confirm & Pay')}
             </button>
           </div>
         </div>
@@ -1421,6 +1620,38 @@ export default function POSGodown() {
           </div>
         )}
 
+        {/* ─── EDIT MODE: Date/Time Picker ─── */}
+        {editingSale && (
+          <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+            <div className="flex items-center gap-2 mb-2">
+              <Calendar className="w-4 h-4 text-amber-600" />
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                Modify Sale Date & Time
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <label className="text-[10px] font-medium text-gray-500 dark:text-gray-400 block mb-1">Date</label>
+                <input
+                  type="date"
+                  value={saleDate}
+                  onChange={(e) => setSaleDate(e.target.value)}
+                  className="w-full border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-[10px] font-medium text-gray-500 dark:text-gray-400 block mb-1">Time</label>
+                <input
+                  type="time"
+                  value={saleTime}
+                  onChange={(e) => setSaleTime(e.target.value)}
+                  className="w-full border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Table Header */}
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900">
           <div className="flex items-center gap-3">
@@ -1511,9 +1742,29 @@ export default function POSGodown() {
                           <button onClick={() => updateQuantity(item.scanId, 1)} className="w-5 h-5 flex items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 text-xs font-bold">+</button>
                         </div>
                       </td>
-                      <td className="py-1.5 pr-2 text-right">
+                      {/* <td className="py-1.5 pr-2 text-right">
                         <span className="text-[15px] font-bold text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
-                      </td>
+                      </td> */}
+
+                      <td className="p-2">
+        <input
+          ref={(el) => { mrpInputRefs.current[item.scanId] = el; }}
+          type="number"
+          min="0"
+          step="0.01"
+          value={item.sale_price || ''}
+          onChange={(e) => updateItemMrp(item.scanId, e.target.value)}
+          onKeyDown={(e) => handleMrpKeyDown(e, item.scanId)}
+          className={clsx(
+            "w-full text-center text-xs font-semibold rounded-md px-1.5 py-1.5",
+            "focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500",
+            "dark:bg-black dark:text-white",
+            editingSale
+              ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20"
+              : "border-gray-200 dark:border-gray-700"
+          )}
+        />
+      </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex justify-center">
                           <input

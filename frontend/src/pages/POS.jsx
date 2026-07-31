@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { getPosProducts, processCheckout, updateSale } from '../apiservices/sales-counter';
+import { getPosProducts, processCheckout, updateSale,updateProductMrp, getCounterSales} from '../apiservices/sales-counter';
 import { openUrl } from '@tauri-apps/plugin-opener'
 
 function generateInvoiceNumber(companyId) {
@@ -87,10 +87,28 @@ export default function POS() {
 
    const [editingSale, setEditingSale] = useState(null)  // { dbId, invoiceNumber, type, ... }
   const [updating, setUpdating] = useState(false)
+  const [todayCounterSale, setTodayCounterSale] = useState(0);
 
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const [error, setError] = useState('');
+  const [saleDate, setSaleDate] = useState(() => {
+  try {
+    const saved = localStorage.getItem('pos_saleDate');
+    return saved || format(new Date(), 'yyyy-MM-dd');
+  } catch { 
+    return format(new Date(), 'yyyy-MM-dd'); 
+  }
+});
+const [saleTime, setSaleTime] = useState(() => {
+  try {
+    const saved = localStorage.getItem('pos_saleTime');
+    return saved || format(new Date(), 'HH:mm');
+  } catch { 
+    return format(new Date(), 'HH:mm'); 
+  }
+});
+
 
   const [selectedItems, setSelectedItems] = useState([]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -109,29 +127,79 @@ export default function POS() {
     // ═══════════════════════════════════════════════════════════════
   // NEW: Load edit data from sessionStorage on mount
   // ═══════════════════════════════════════════════════════════════
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem('editing_sale_data')
-      if (raw) {
-        const data = JSON.parse(raw)
-        setEditingSale(data)
-        setCart(data.cartItems || [])
-        setCustomerName(data.customerName || 'Walk-in Customer')
-        setCustomerPhone(data.customerPhone || '')
-        // Don't clear sessionStorage yet — clear on save/cancel/unmount
+  // ═══════════════════════════════════════════════════════════════
+// NEW: Load edit data from sessionStorage on mount
+// ═══════════════════════════════════════════════════════════════
+useEffect(() => {
+  try {
+    const raw = sessionStorage.getItem('editing_sale_data')
+    if (raw) {
+      const data = JSON.parse(raw)
+      
+      // ─── ADDED: Backup current cart before overwriting ───
+      const currentCart = JSON.parse(localStorage.getItem('pos_cart') || '[]')
+      if (currentCart.length > 0) {
+        localStorage.setItem('pos_cart_backup', JSON.stringify(currentCart))
+        // Also backup other fields
+        localStorage.setItem('pos_customerName_backup', localStorage.getItem('pos_customerName') || '"Walk-in Customer"')
+        localStorage.setItem('pos_customerPhone_backup', localStorage.getItem('pos_customerPhone') || '""')
+        localStorage.setItem('pos_discount_backup', localStorage.getItem('pos_discount') || '0')
+        localStorage.setItem('pos_paymentMode_backup', localStorage.getItem('pos_paymentMode') || '"CASH"')
       }
-    } catch (err) {
-      console.error('Failed to load edit data:', err)
-      sessionStorage.removeItem('editing_sale_data')
-    }
-  }, [])
 
-  // Cleanup: clear edit data when component unmounts
-  useEffect(() => {
-    return () => {
-      sessionStorage.removeItem('editing_sale_data')
+      setEditingSale(data)
+      setCart(data.cartItems || [])
+      setCustomerName(data.customerName || 'Walk-in Customer')
+      setCustomerPhone(data.customerPhone || '')
+      
+      // Load sale date/time for editing
+      if (data.saleDate) {
+        const saleDateTime = new Date(data.saleDate)
+        setSaleDate(format(saleDateTime, 'yyyy-MM-dd'))
+        setSaleTime(format(saleDateTime, 'HH:mm'))
+      }
     }
-  }, [])
+  } catch (err) {
+    console.error('Failed to load edit data:', err)
+    sessionStorage.removeItem('editing_sale_data')
+  }
+}, [])
+  // Cleanup: clear edit data when component unmounts
+  // useEffect(() => {
+  //   return () => {
+  //     sessionStorage.removeItem('editing_sale_data')
+  //   }
+  // }, [])
+
+
+  const fetchTodayCounterSale = async () => {
+  if (!companyId) return;
+
+  try {
+    const today = format(new Date(), "yyyy-MM-dd");
+
+    const sales = await getCounterSales(
+      Number(companyId),
+      today,
+      today
+    );
+
+    const total = (sales || []).reduce(
+      (sum, sale) => sum + (Number(sale.total_amount) || 0),
+      0
+    );
+
+    setTodayCounterSale(total);
+  } catch (err) {
+    console.error("Failed to load today's sales", err);
+  }
+};
+
+useEffect(() => {
+  if (companyId) {
+    fetchTodayCounterSale();
+  }
+}, [companyId]);
 
   const fetchProducts = async (searchTerm = '') => {
     setLoadingProducts(true);
@@ -261,6 +329,70 @@ export default function POS() {
     setCart(prev => prev.map(i => i.scanId === scanId ? { ...i, discount: Math.max(0, Number(value)) } : i));
   };
 
+  const isPriceModified = (item) => {
+  return item.originalPrice && item.originalPrice !== item.sale_price;
+};
+
+const updateItemPrice = async (scanId, newPrice) => {
+  const price = Math.max(0, Number(newPrice) || 0);
+  if (price <= 0) return;
+
+  const item = cart.find(i => i.scanId === scanId);
+  if (!item) return;
+
+  if (item.sale_price === price) return;
+
+  // Save original price on first change
+  const originalPrice = item.originalPrice || item.sale_price;
+
+  // Optimistic update: update ALL cart items with same product
+  setCart(prev => prev.map(i =>
+    i.productId === item.productId
+      ? { ...i, sale_price: price, originalPrice: originalPrice }
+      : i
+  ));
+
+  // Update products list for future scans
+  setProducts(prev => prev.map(p =>
+    p.id === item.productId
+      ? { ...p, mrp: price, sale_price: price }
+      : p
+  ));
+  setFilteredProducts(prev => prev.map(p =>
+    p.id === item.productId
+      ? { ...p, mrp: price, sale_price: price }
+      : p
+  ));
+  setRecentlyScanned(prev => prev.map(p =>
+    p.id === item.productId
+      ? { ...p, mrp: price, sale_price: price }
+      : p
+  ));
+
+  // Persist to inventory via backend
+  try {
+    await updateProductMrp(item.productId, Number(companyId), price);
+  } catch (err) {
+    // Revert on failure
+    setCart(prev => prev.map(i =>
+      i.productId === item.productId
+        ? { ...i, sale_price: originalPrice, originalPrice: undefined }
+        : i
+    ));
+    setProducts(prev => prev.map(p =>
+      p.id === item.productId
+        ? { ...p, mrp: originalPrice, sale_price: originalPrice }
+        : p
+    ));
+    setFilteredProducts(prev => prev.map(p =>
+      p.id === item.productId
+        ? { ...p, mrp: originalPrice, sale_price: originalPrice }
+        : p
+    ));
+    alert(`MRP update failed: ${err.message}`);
+  }
+};
+
   const removeFromCart = (scanId) => {
     setCart(prev => prev.filter(i => i.scanId !== scanId));
   };
@@ -293,6 +425,10 @@ const cardTotal = cart
     .reduce((sum, i) => sum + (i.quantity || 1), 0);
 };
 
+const selectedTotal = cart
+  .filter(item => selectedItems.includes(item.scanId))
+  .reduce((sum, item) => sum + ((item.sale_price - (item.discount || 0)) * (item.quantity || 1)), 0);
+
   const handleBarcodeInput = async () => {
     const barcode = barcodeValue.trim();
     if (!barcode) return;
@@ -317,167 +453,190 @@ const cardTotal = cart
   };
 
   const clearPersistedSale = () => {
-    setCart([]);
-    setCustomerName('Walk-in Customer');
-    setCustomerPhone('');
-    setDiscount(0);
-    setPaymentMode('CASH');
-  };
-
-   const cancelEdit = () => {
-    sessionStorage.removeItem('editing_sale_data')
-    setEditingSale(null)
-    clearPersistedSale()
+  // ─── ADDED: Check if we need to restore backup ───
+  const backupCart = localStorage.getItem('pos_cart_backup')
+  if (backupCart) {
+    try {
+      const parsed = JSON.parse(backupCart)
+      if (parsed.length > 0) {
+        // Restore backed up cart
+        setCart(parsed)
+        localStorage.setItem('pos_cart', backupCart)
+        
+        // Restore other fields
+        setCustomerName(JSON.parse(localStorage.getItem('pos_customerName_backup') || '"Walk-in Customer"'))
+        setCustomerPhone(JSON.parse(localStorage.getItem('pos_customerPhone_backup') || '""'))
+        setDiscount(Number(JSON.parse(localStorage.getItem('pos_discount_backup') || '0')))
+        setPaymentMode(JSON.parse(localStorage.getItem('pos_paymentMode_backup') || '"CASH"'))
+        
+        // Clear backups
+        localStorage.removeItem('pos_cart_backup')
+        localStorage.removeItem('pos_customerName_backup')
+        localStorage.removeItem('pos_customerPhone_backup')
+        localStorage.removeItem('pos_discount_backup')
+        localStorage.removeItem('pos_paymentMode_backup')
+        
+        // Clear edit state
+        setEditingSale(null)
+        sessionStorage.removeItem('editing_sale_data')
+        setSaleDate(format(new Date(), 'yyyy-MM-dd'))
+        setSaleTime(format(new Date(), 'HH:mm'))
+        return  // Don't clear the cart!
+      }
+    } catch (err) {
+      console.error('Failed to restore backup:', err)
+      localStorage.removeItem('pos_cart_backup')
+    }
   }
+
+  // No backup exists, clear everything
+  setCart([]);
+  setCustomerName('Walk-in Customer');
+  setCustomerPhone('');
+  setDiscount(0);
+  setPaymentMode('CASH');
+  setSaleDate(format(new Date(), 'yyyy-MM-dd'));
+  setSaleTime(format(new Date(), 'HH:mm'));
+  setEditingSale(null);
+  sessionStorage.removeItem('editing_sale_data');
+};  
+   const cancelEdit = () => {
+  // clearPersistedSale already handles backup restoration now
+  clearPersistedSale()
+}
 
   // ─── Process EACH item in cart as a SEPARATE BILL ───
   const handleCheckout = async () => {
-    if (!cart.length) return;
-    setCheckingOut(true);
-    setError('');
+  if (!cart.length) return;
+  setCheckingOut(true);
+  setError('');
 
-    try {
-      if (editingSale) {
-        // ═══════════════════════════════════════════════════════
-        // EDIT MODE: Update existing sale, single invoice
-        // ═══════════════════════════════════════════════════════
-        setUpdating(true);
-
-        // Aggregate cart items by productId (same product may appear multiple times)
-        const aggregated = {};
-        cart.forEach(item => {
-          const key = item.productId;
-          if (!aggregated[key]) {
-            aggregated[key] = {
-              product_id: item.productId,
-              product_name: item.name,
-              quantity: 0,
-              unit_price: item.sale_price,
-              discount: 0,
-              total_price: 0,
-            };
-          }
-          aggregated[key].quantity += (item.quantity || 1);
-          aggregated[key].discount += ((item.discount || 0) * (item.quantity || 1));
-        });
-
-        // Recalculate total_price for each aggregated item
-        Object.values(aggregated).forEach(item => {
-          item.total_price = (item.unit_price * item.quantity) - item.discount;
-        });
-
-        // Determine payment mode from cart items
-        const modes = [...new Set(cart.map(i => i.paymentMode || 'CASH'))];
-        const paymentMode = modes.length > 1 ? 'MIXED' : modes[0];
-
-        const payload = {
-          invoice_number: editingSale.invoiceNumber,  // Keep original
-          company_id: Number(companyId),
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          total_amount: grandTotal,
-          payment_mode: paymentMode,
-          items: Object.values(aggregated).map(item => ({
-            ...item,
-            company_id: Number(companyId),
-          })),
+  try {
+    // ═══════════════════════════════════════════════════════
+    // AGGREGATE ALL ITEMS BY PRODUCT ID (single bill)
+    // ═══════════════════════════════════════════════════════
+    const aggregated = {};
+    cart.forEach(item => {
+      const key = item.productId;
+      if (!aggregated[key]) {
+        aggregated[key] = {
+          product_id: item.productId,
+          product_name: item.name,
+          quantity: 0,
+          unit_price: item.sale_price,
+          discount: 0,
+          total_price: 0,
         };
-
-        await updateSale(editingSale.dbId, payload);
-
-        setCompletedSale({
-          invoice_number: editingSale.invoiceNumber,
-          customer_name: customerName,
-          created_at: new Date().toISOString(),
-          total_amount: grandTotal,
-          items: Object.values(aggregated).map(g => ({
-            product_name: g.product_name,
-            quantity: g.quantity,
-            unit_price: g.unit_price,
-            discount: g.discount,
-            total_price: g.total_price,
-          })),
-          isEdit: true,  // Flag to show "Updated" instead of "Complete"
-        });
-
-        setShowInvoice(true);
-        setRecentlyScanned([]);
-        setSelectedItems([]);
-        sessionStorage.removeItem('editing_sale_data');
-        setEditingSale(null);
-        clearPersistedSale();
-        fetchProducts();
-
-      } else {
-        // ═══════════════════════════════════════════════════════
-        // NORMAL MODE: Original create logic (unchanged)
-        // ═══════════════════════════════════════════════════════
-        const groupedItems = {};
-        cart.forEach(item => {
-          const key = `${item.productId}_${item.paymentMode}`;
-          if (!groupedItems[key]) {
-            groupedItems[key] = {
-              productId: item.productId,
-              name: item.name,
-              sale_price: item.sale_price,
-              paymentMode: item.paymentMode || 'CASH',
-              totalQuantity: 0,
-              totalDiscount: 0,
-            };
-          }
-          groupedItems[key].totalQuantity += (item.quantity || 1);
-          groupedItems[key].totalDiscount += ((item.discount || 0) * (item.quantity || 1));
-        });
-
-        for (const group of Object.values(groupedItems)) {
-          const itemTotal = (group.sale_price * group.totalQuantity) - group.totalDiscount;
-          const payload = {
-            invoice_number: generateInvoiceNumber(companyId),
-            company_id: Number(companyId),
-            customer_name: customerName,
-            customer_phone: customerPhone,
-            total_amount: itemTotal,
-            payment_mode: group.paymentMode,
-            items: [{
-              product_id: group.productId,
-              product_name: group.name,
-              quantity: group.totalQuantity,
-              unit_price: group.sale_price,
-              discount: group.totalDiscount,
-              total_price: itemTotal,
-              company_id: Number(companyId)
-            }],
-          };
-          await processCheckout(payload);
-        }
-
-        setCompletedSale({
-          invoice_number: `${Object.keys(groupedItems).length} Bills Generated`,
-          customer_name: customerName,
-          created_at: new Date().toISOString(),
-          total_amount: grandTotal,
-          items: Object.values(groupedItems).map(g => ({
-            product_name: g.name,
-            quantity: g.totalQuantity,
-            unit_price: g.sale_price,
-            discount: g.totalDiscount,
-            total_price: (g.sale_price * g.totalQuantity) - g.totalDiscount,
-          }))
-        });
-
-        setShowInvoice(true);
-        setRecentlyScanned([]);
-        setSelectedItems([]);
-        clearPersistedSale();
-        fetchProducts();
       }
-    } catch (err) {
-      setError(err.message || (editingSale ? 'Update failed.' : 'Checkout failed. Check counter stock.'));
-    } finally {
-      setCheckingOut(false);
-      setUpdating(false);
+      aggregated[key].quantity += (item.quantity || 1);
+      aggregated[key].discount += ((item.discount || 0) * (item.quantity || 1));
+    });
+
+    // Recalculate total_price for each aggregated item
+    Object.values(aggregated).forEach(item => {
+      item.total_price = (item.unit_price * item.quantity) - item.discount;
+    });
+
+    // Determine payment mode from cart items
+    const modes = [...new Set(cart.map(i => i.paymentMode || 'CASH'))];
+    const paymentMode = modes.length > 1 ? 'MIXED' : modes[0];
+
+    if (editingSale) {
+      // ═══════════════════════════════════════════════════════
+      // EDIT MODE: Update existing sale, single invoice
+      // ═══════════════════════════════════════════════════════
+      setUpdating(true);
+
+      const newSaleDate = `${saleDate}T${saleTime || '00:00'}:00`;
+
+      const payload = {
+        invoice_number: editingSale.invoiceNumber,  // Keep original
+        company_id: Number(companyId),
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        total_amount: grandTotal,
+        payment_mode: paymentMode,
+        created_at: newSaleDate,
+        items: Object.values(aggregated).map(item => ({
+          ...item,
+          company_id: Number(companyId),
+        })),
+      };
+
+      await updateSale(editingSale.dbId, payload);
+
+      setCompletedSale({
+        invoice_number: editingSale.invoiceNumber,
+        customer_name: customerName,
+        created_at: newSaleDate,
+        total_amount: grandTotal,
+        items: Object.values(aggregated).map(g => ({
+          product_name: g.product_name,
+          quantity: g.quantity,
+          unit_price: g.unit_price,
+          discount: g.discount,
+          total_price: g.total_price,
+        })),
+        isEdit: true,
+      });
+
+      setShowInvoice(true);
+      setRecentlyScanned([]);
+      setSelectedItems([]);
+      sessionStorage.removeItem('editing_sale_data');
+      setEditingSale(null);
+      clearPersistedSale();
+      fetchProducts();
+
+    } else {
+      // ═══════════════════════════════════════════════════════
+      // NORMAL MODE: Single invoice with ALL items
+      // ═══════════════════════════════════════════════════════
+      const invoiceNumber = generateInvoiceNumber(companyId);
+
+      const payload = {
+        invoice_number: invoiceNumber,
+        company_id: Number(companyId),
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        total_amount: grandTotal,
+        payment_mode: paymentMode,
+        items: Object.values(aggregated).map(item => ({
+          ...item,
+          company_id: Number(companyId),
+        })),
+      };
+
+      await processCheckout(payload);
+      await fetchTodayCounterSale();
+
+      setCompletedSale({
+        invoice_number: invoiceNumber,
+        customer_name: customerName,
+        created_at: new Date().toISOString(),
+        total_amount: grandTotal,
+        items: Object.values(aggregated).map(g => ({
+          product_name: g.product_name,
+          quantity: g.quantity,
+          unit_price: g.unit_price,
+          discount: g.discount,
+          total_price: g.total_price,
+        })),
+      });
+
+      setShowInvoice(true);
+      setRecentlyScanned([]);
+      setSelectedItems([]);
+      clearPersistedSale();
+      fetchProducts();
     }
-  };
+  } catch (err) {
+    setError(err.message || (editingSale ? 'Update failed.' : 'Checkout failed. Check counter stock.'));
+  } finally {
+    setCheckingOut(false);
+    setUpdating(false);
+  }
+};
   const toggleSelectItem = (scanId) => {
     setSelectedItems(prev => prev.includes(scanId) ? prev.filter(id => id !== scanId) : [...prev, scanId]);
   };
@@ -888,7 +1047,7 @@ const cardTotal = cart
           <div className="mt-4 text-right">
             <p className="text-xl font-bold text-primary-600 dark:text-primary-400">Total: ₹{completedSale.total_amount.toFixed(2)}</p>
           </div>
-                   <button
+                   {/* <button
             onClick={() => {
               setShowInvoice(false);
               setDiscount(0);
@@ -898,7 +1057,18 @@ const cardTotal = cart
             className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors"
           >
             {completedSale.isEdit ? 'Back to POS' : 'New Sale'}
-          </button>
+          </button> */}
+
+          <button
+  onClick={() => {
+    setShowInvoice(false);
+    // ─── After edit complete, start fresh ───
+    clearPersistedSale();  // This now clears both localStorage cart AND sessionStorage
+  }}
+  className="mt-6 w-full px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors"
+>
+  {completedSale.isEdit ? 'New Sale' : 'New Sale'}
+</button>
         </div>
       </div>
     );
@@ -1028,7 +1198,17 @@ const cardTotal = cart
                         </div>
                         <p className="text-[11px] font-bold text-gray-900 dark:text-white truncate">{product.name}</p>
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-semibold text-primary-600 dark:text-primary-400">MRP: ₹{product.sale_price}</span>
+                          <span className={clsx(
+  "text-[10px] font-semibold",
+  isPriceModified(product) ? "text-amber-600 dark:text-amber-400" : "text-primary-600 dark:text-primary-400"
+)}>
+  MRP: ₹{product.sale_price}
+  {isPriceModified(product) && (
+    <span className="ml-1 text-[9px] text-gray-400 line-through font-normal">
+      ₹{product.originalPrice?.toFixed(2)}
+    </span>
+  )}
+</span>
                           <div className="flex items-center gap-1.5">
                             <span className="text-[11px] text-green-500 dark:text-green-400 flex items-center gap-0.5"><Layers className="w-2.5 h-2.5" /> {product.counter_stock}</span>
                             {cartCount > 0 && (
@@ -1085,6 +1265,38 @@ const cardTotal = cart
           </div>
         )}
 
+        {/* ─── EDIT MODE: Date/Time Picker ─── */}
+{editingSale && (
+  <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+    <div className="flex items-center gap-2 mb-2">
+      <Calendar className="w-4 h-4 text-amber-600" />
+      <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+        Modify Sale Date & Time
+      </span>
+    </div>
+    <div className="flex items-center gap-3">
+      <div className="flex-1">
+        <label className="text-[10px] font-medium text-gray-500 dark:text-gray-400 block mb-1">Date</label>
+        <input
+          type="date"
+          value={saleDate}
+          onChange={(e) => setSaleDate(e.target.value)}
+          className="w-full border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+        />
+      </div>
+      <div className="flex-1">
+        <label className="text-[10px] font-medium text-gray-500 dark:text-gray-400 block mb-1">Time</label>
+        <input
+          type="time"
+          value={saleTime}
+          onChange={(e) => setSaleTime(e.target.value)}
+          className="w-full border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-1.5 text-xs bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+        />
+      </div>
+    </div>
+  </div>
+)}
+
         {/* Table Header */}
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900">
           <div className="flex items-center gap-3">
@@ -1095,10 +1307,21 @@ const cardTotal = cart
             </span>
           </div>
 
+  
+
           <div className="flex items-center gap-3">
            
               {/* Payment Summary */}
               <div className="flex items-center gap-2">
+
+                        <div className="px-3 py-1 rounded-lg bg-green-50 border border-green-200">
+  <div className="text-[12px] text-green-600 font-bold">
+   SAVE BILL
+  </div>
+  <div className="text-sm font-bold text-green-700">
+    ₹{todayCounterSale.toLocaleString()}
+  </div>
+</div>
 
                 <div className="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-200">
                   <div className="text-[12px] text-emerald-600 font-bold">
@@ -1136,6 +1359,16 @@ const cardTotal = cart
                      ₹{grandTotal.toFixed(2)}
                   </div>
                 </div>
+
+                <div className="px-3 py-1 rounded-lg bg-amber-50 border border-amber-200">
+  <div className="text-[12px] text-amber-600 font-bold flex items-center gap-1">
+    Selected:
+    <span className="text-[10px] font-normal text-amber-500">({selectedItems.length})</span>
+  </div>
+  <div className="text-sm font-bold text-amber-700">
+    ₹{selectedTotal.toFixed(2)}
+  </div>
+</div>
 
               {/* Grand Total */}
               {/* <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -1223,7 +1456,41 @@ const cardTotal = cart
   />
 </td>
                       <td className="py-1.5 pr-2 text-right">
-                        <span className="text-[15px] font-medium text-gray-700 dark:text-gray-300">₹{item.sale_price}</span>
+                        {/* ─── EDITABLE MRP ─── */}
+<div className="flex flex-col items-end min-w-[100px]">
+  <div className="flex items-center gap-1">
+    <span className="text-[10px] text-gray-400">₹</span>
+    <input
+      type="number"
+      value={item.sale_price}
+      onChange={(e) => updateItemPrice(item.scanId, e.target.value)}
+      onBlur={(e) => {
+        const val = Math.max(0, Number(e.target.value) || 0);
+        if (val <= 0 && item.originalPrice) {
+          updateItemPrice(item.scanId, item.originalPrice);
+        }
+      }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+      step="0.01"
+      min="0"
+      className={clsx(
+        "w-[65px] text-right text-[13px] font-bold px-1.5 py-0.5 rounded ",
+        "focus:outline-none focus:ring-2 focus:ring-primary-500",
+        isPriceModified(item)
+          ? "bg-amber-50 dark:bg-black border-amber-400 dark:border-amber-600 text-amber-700 dark:text-amber-400"
+          : "bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200"
+      )}
+    />
+  </div>
+  {/* {isPriceModified(item) && (
+    <span className="text-[9px] text-amber-500 line-through">
+      was ₹{(item.originalPrice || 0).toFixed(2)}
+    </span>
+  )}
+  <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
+    = ₹{((item.sale_price - (item.discount || 0)) * (item.quantity || 1)).toFixed(2)}
+  </span> */}
+</div>
                       </td>
                       <td className="py-1.5 pr-2">
                         <div className="flex justify-center">

@@ -10,10 +10,11 @@ import { writeFile } from '@tauri-apps/plugin-fs'
 import { getProducts, createProduct, updateProduct, deleteProduct } from '../apiservices/inventoryapi'
 
 // ─── Dropdown Constants ───
-const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY', 'OTHER']
+const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY','SCOTCH WHISKY', 'OTHER']
 
 const SUB_CATEGORIES_BY_CATEGORY = {
   'WHISKY': ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE'],
+  'SCOTCH WHISKY':['SUPREME','SUPERIOR','RESERVE','CLASSIC','ULTRA PREMIUM','EXTRA PLANTINUM','ULTRA GOLD','ULTRA PREMIUM','ORIGINAL'],
   'RUM': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE', 'DARK', 'WHITE', 'SPICED', 'GOLD'],
   'VODKA': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'FLAVOURED', 'NEUTRAL'],
   'GIN': ['PREMIUM', 'LONDON DRY', 'PLYMOUTH', 'OLD TOM', 'FLAVOURED', 'NAVY STRENGTH'],
@@ -25,17 +26,20 @@ const SUB_CATEGORIES_BY_CATEGORY = {
 
 const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE']
 
-const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE']
+const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE','FMFL']
 
 const BOTTLE_SIZES_BY_TYPE = {
   'IMFL': ['90ml', '180ml','200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
   'BEER': ['275ml', '330ml', '500ml', '650ml'],
-  'WINE': ['375ml', '500ml', '750ml', '1000ml', '2000ml'],
+  'WINE': ['180ml', '375ml', '500ml', '750ml', '1000ml', '2000ml'],
+  'FMFL':['50ml','60ml','90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '700ml','750ml', '1000ml'],
   
 }
 const DEFAULT_SIZES = BOTTLE_SIZES_BY_TYPE['IMFL']
 
 const SIZE_TRADITIONAL_MAP = {
+  '50ml':   { traditionalName: 'Mini / Chota Peg',       bottlesPerCase: 150 },
+  '60ml':   { traditionalName: 'Chhota Peg / 60ml Peg',  bottlesPerCase: 150 },
   '90ml':   { traditionalName: 'Peg / Miniature', bottlesPerCase: 96 },
   '180ml':  { traditionalName: 'Nip / Quarter',   bottlesPerCase: 48 },
   '200ml':  { traditionalName: 'Nip + / Quarter+',bottlesPerCase: 24 },
@@ -46,6 +50,7 @@ const SIZE_TRADITIONAL_MAP = {
   '375ml':  { traditionalName: 'Pint / Half',     bottlesPerCase: 24 },
   '500ml':  { traditionalName: 'Medium',          bottlesPerCase: 24 },
   '650ml':  { traditionalName: 'Large Beer',      bottlesPerCase: 12 },
+  '700ml':  { traditionalName: 'Three Quarter / 700ml',   bottlesPerCase: 12 },
   '750ml':  { traditionalName: 'Quart / Bottle',  bottlesPerCase: 12 },
   '1000ml': { traditionalName: 'Liter',           bottlesPerCase: 9 },
   '2000ml': { traditionalName: 'Double Liter',    bottlesPerCase: 6 },

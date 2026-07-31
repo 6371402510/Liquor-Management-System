@@ -43,6 +43,21 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
             return model.company_id == company_id
         return True
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # FETCH COMPANY'S MGR TARGET (Instead of hardcoded static value)
+    # ═══════════════════════════════════════════════════════════════════════
+    DEFAULT_MGR_TARGET = 30890000.0  # Fallback if company not found or value is 0
+    
+    company = None
+    if company_id:
+        company = db.query(Company).filter(Company.id == company_id).first()
+    
+    # Use company's mger_targeted_value, fall back to default if not set
+    if company and company.mger_targeted_value and company.mger_targeted_value > 0:
+        MONTHLY_MGR_TARGET = float(company.mger_targeted_value)
+    else:
+        MONTHLY_MGR_TARGET = DEFAULT_MGR_TARGET
+
     # ═══════════════════════════════════════
     # 1. STATS
     # ═══════════════════════════════════════
@@ -72,10 +87,8 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     total_bottles_purchased = db.query(func.coalesce(func.sum(PurchaseItem.total_bottles), 0)).join(Purchase, PurchaseItem.purchase_id == Purchase.id).filter(and_(Purchase.created_at >= month_start, Purchase.created_at <= today_start + timedelta(days=1), company_filter(Purchase))).scalar() or 0
 
     # ═══════════════════════════════════════════════════════════════════════
-    # FIXED: MGR STATUS CALCULATION (Uses same logic as Excise Summary)
+    # MGR STATUS CALCULATION (Uses dynamic target from company)
     # ═══════════════════════════════════════════════════════════════════════
-    MONTHLY_MGR_TARGET = 30890000.0  # Fixed Monthly Target: ₹3,08,90,000
-    
     # Pulling total MGER value (same query as excise_summary.stock_mger)
     achieved_mgr = float(
         db.query(func.coalesce(func.sum(PurchaseItem.mger_value), 0))
@@ -203,7 +216,7 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     )
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 6. MGR STATUS OBJECT
+    # 6. MGR STATUS OBJECT (Uses dynamic target from company)
     # ═══════════════════════════════════════════════════════════════════════
     mgr_status = schema.MGRStatus(
         monthly_target=MONTHLY_MGR_TARGET,
