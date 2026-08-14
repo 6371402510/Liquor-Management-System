@@ -72,6 +72,7 @@ export default function Sidebar({ open, onClose, desktopCollapsed }) {
       '/damage': 'damage',
       '/item-wise-sell-report': 'item-wise-sell-report',
       '/item-wise-purchase-report': 'item-wise-purchase-report',
+      '/cash-bank-report': 'cash-bank-report',
     }
 
     for (const [route, key] of Object.entries(menuMap)) {
@@ -156,6 +157,7 @@ export default function Sidebar({ open, onClose, desktopCollapsed }) {
       children: [
         { to: '/expenses', label: 'Expenses', roles: ['ADMIN', 'MANAGER'] },
         { to: '/cash-deposit', label: 'Cash & Bank', roles: ['ADMIN', 'MANAGER'] },
+        { to: '/cash-bank-report', label: 'Cash & Bank Report', roles: ['ADMIN', 'MANAGER'] },
       ],
     },
     {

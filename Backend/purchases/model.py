@@ -24,7 +24,19 @@ class Purchase(Base):
     cess_amount = Column(Float, default=0.0)
     special_amount = Column(Float, default=0.0)
     tcs_amount = Column(Float, default=0.0)
+    
+
+    handling_transport = Column(Float, default=0.0)
+    handling_depot_exp = Column(Float, default=0.0)
+    handling_pass_fees = Column(Float, default=0.0)
+    handling_unloading = Column(Float, default=0.0)
+    handling_other_name = Column(String, nullable=True)
+    handling_other_amount = Column(Float, default=0.0)
+    total_handling = Column(Float, default=0.0)
     total_amount = Column(Float, default=0.0)
+
+
+
 
     notes = Column(Text, nullable=True)              
     vehicle_number = Column(String, nullable=True)   
@@ -32,6 +44,8 @@ class Purchase(Base):
 
     created_at = Column(Date, server_default=func.current_date())
     updated_at = Column(Date, onupdate=func.current_date())
+
+
 
 
 class PurchaseItem(Base):

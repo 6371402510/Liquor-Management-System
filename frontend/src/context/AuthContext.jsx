@@ -48,7 +48,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   // LOGIN
-  const signIn = async (email, password) => {
+  const signIn = async (phone, password) => {
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
           accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ phone, password }),  // Changed: email → phone
       })
 
       const data = await res.json()
@@ -97,7 +97,7 @@ export function AuthProvider({ children }) {
   }
 
   // SIGNUP
-  const signUp = async (name, email, password) => {
+  const signUp = async (name, phone, password) => {
     try {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST',
@@ -107,7 +107,7 @@ export function AuthProvider({ children }) {
         },
         body: JSON.stringify({
           name,
-          email,
+          phone,  // Changed: email → phone
           password,
           role: 'ADMIN',
         }),

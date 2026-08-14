@@ -1,7 +1,7 @@
 import { getSuppliers, createSupplier } from '../apiservices/supplierapi'
 
 const DEFAULT_SUPPLIER = {
-  name: 'Odisha State Beverages Corporation Limited',
+  name: 'OSBCL',
   contact_person: '',
   phone: '0674 2303972',
   email: 'contact.osbcl-od@nic.in',

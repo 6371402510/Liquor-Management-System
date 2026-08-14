@@ -635,7 +635,7 @@ const updateItemMrp = async (scanId, newPrice) => {
               ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
               ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
               ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">Shop Lic No: ${cExcise}</p>` : ''}
-              <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">GODOWN SALE BILL</p>
+              <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">INVOICE BILL </p>
             </div>
             <div style="border-top:1px dashed #000; margin:8px 0;"></div>
             <div style="font-size:11px; margin-bottom:5px;">
@@ -969,7 +969,7 @@ const updateItemMrp = async (scanId, newPrice) => {
                 ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
                 ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
                 ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">Shop Lic No: ${cExcise}</p>` : ''}
-                <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">GODOWN SALE BILL</p>
+                <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">INVOICE BILL</p>
               </div>
 
               <div style="border-top:1px dashed #000; margin:8px 0;"></div>
@@ -1041,54 +1041,168 @@ const updateItemMrp = async (scanId, newPrice) => {
     }
   };
 
-  const handleBulkWhatsApp = async () => {
-    if (selectedItems.length === 0) return alert('Please select items to send.');
-    const itemsToSend = cart.filter(i => selectedItems.includes(i.scanId));
+ const handleBulkWhatsApp = async () => {
+  if (selectedItems.length === 0) return alert('Please select items to send.');
 
-    const waGroups = {};
-    itemsToSend.forEach(item => {
-      const qty = Number(item.quantity) || 0;
-      if (!waGroups[item.productId]) {
-        waGroups[item.productId] = { name: item.name, bottle_size: item.bottle_size, sale_price: item.sale_price, qty: 0, totalDiscount: 0, lineTotal: 0 };
-      }
-      waGroups[item.productId].qty += qty;
-      waGroups[item.productId].totalDiscount += (item.discount || 0) * qty;
-      waGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0)) * qty;
-    });
+  // 1. Load PDF library safely
+  let html2pdf;
+  try {
+    html2pdf = (await import('html2pdf.js')).default;
+  } catch (e) {
+    alert("PDF library failed to load. Please check your internet connection and try again.");
+    return;
+  }
 
-    let msg = `*Godown Invoice Details*\n\n`;
-    let totalAmount = 0;
+  const itemsToSend = cart.filter(i => selectedItems.includes(i.scanId));
 
-    Object.values(waGroups).forEach(g => {
-      totalAmount += g.lineTotal;
-      msg += `_${g.name} ${g.bottle_size ? `(${g.bottle_size})` : ''}_ x${g.qty} - ₹${(g.sale_price * g.qty).toFixed(2)}`;
-      if (g.totalDiscount > 0) {
-        msg += `\n  Discount: -₹${g.totalDiscount.toFixed(2)}`;
-      }
-      msg += `\n  Total: ₹${g.lineTotal.toFixed(2)}\n\n`;
-    });
+  // 2. Group items safely (prevent NaN errors)
+  const waGroups = {};
+  itemsToSend.forEach(item => {
+    const qty = Number(item.quantity) || 0;
+    if (!waGroups[item.productId]) {
+      waGroups[item.productId] = { 
+        name: item.name || 'Item', 
+        bottle_size: item.bottle_size || '',
+        sale_price: Number(item.sale_price) || 0, 
+        qty: 0, 
+        totalDiscount: 0, 
+        lineTotal: 0 
+      };
+    }
+    waGroups[item.productId].qty += qty;
+    waGroups[item.productId].totalDiscount += (Number(item.discount) || 0) * qty;
+    waGroups[item.productId].lineTotal += ((Number(item.sale_price) || 0) * qty) - ((Number(item.discount) || 0) * qty);
+  });
 
-    msg += `*Grand Total: ₹${totalAmount.toFixed(2)}*`;
+  // 3. Build Bill HTML (same style as thermal print bill)
+  let itemsHtml = '';
+  let totalAmount = 0;
 
-    // Auto-add India country code if 10-digit number
+  Object.values(waGroups).forEach(g => {
+    totalAmount += g.lineTotal;
+    const discountHtml = g.totalDiscount > 0
+      ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
+      : '';
+
+    itemsHtml += `
+      <div style="margin-bottom:6px;">
+        <div style="font-weight:bold; text-transform:uppercase; font-size:12px;">${g.name} ${g.bottle_size ? `(${g.bottle_size})` : ''}</div>
+        <div style="display:flex; justify-content:space-between; font-size:11px;">
+          <span>₹${g.sale_price.toFixed(2)} x ${g.qty}</span>
+          <span>₹${(g.sale_price * g.qty).toFixed(2)}</span>
+        </div>
+        ${discountHtml}
+      </div>
+    `;
+  });
+
+  const invoiceNumber = generateInvoiceNumber(companyId);
+  const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
+  const cName = customerName === 'Walk-in Customer' ? 'Walk-in Customer' : customerName;
+  const cPhone = customerPhone || 'N/A';
+  const cAddress = companyDetails.address || '';
+  const cEmail = companyDetails.email || '';
+  const cExcise = companyDetails.exciseLicenseNo || '';
+
+  // 4. Create hidden container to render the bill
+  const container = document.createElement('div');
+  container.style.width = '280px';
+  container.style.fontFamily = "'Courier New', monospace";
+  container.style.fontSize = '12px';
+  container.style.lineHeight = '1.4';
+  container.style.padding = '10px 5px';
+  container.style.background = 'white';
+  container.style.color = 'black';
+  container.innerHTML = `
+    <div style="text-align:center; margin-bottom:5px;">
+      <h2 style="margin:0; font-size:16px; text-transform:uppercase; letter-spacing:1px;">${companyName}</h2>
+      ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px;">${cAddress}</p>` : ''}
+      ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
+      ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">Shop Lic No: ${cExcise}</p>` : ''}
+      <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">INVOICE BILL</p>
+    </div>
+    <div style="border-top:1px dashed #000; margin:8px 0;"></div>
+    <div style="font-size:11px; margin-bottom:5px;">
+      <div style="display:flex; justify-content:space-between;"><span>Bill No:</span><span>${invoiceNumber}</span></div>
+      <div style="display:flex; justify-content:space-between;"><span>Date:</span><span>${printDate}</span></div>
+      <div style="display:flex; justify-content:space-between;"><span>Customer:</span><span>${cName}</span></div>
+      ${cPhone !== 'N/A' ? `<div style="display:flex; justify-content:space-between;"><span>Phone:</span><span>${cPhone}</span></div>` : ''}
+    </div>
+    <div style="border-top:1px dashed #000; border-bottom:1px dashed #000; margin:8px 0; padding:4px 0; font-weight:bold; display:flex; justify-content:space-between; font-size:11px;">
+      <span>ITEM</span>
+      <span>AMOUNT</span>
+    </div>
+    ${itemsHtml}
+    <div style="border-top:1px dashed #000; margin-top:8px; padding-top:6px;">
+      <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:15px;">
+        <span>TOTAL</span>
+        <span>₹${totalAmount.toFixed(2)}</span>
+      </div>
+    </div>
+    <div style="border-top:1px dashed #000; margin-top:15px; padding-top:5px; text-align:center; font-size:9px; line-height:1.4;">
+      <p style="margin:0 0 4px 0; font-weight:bold;">Goods once sold will not be taken back.</p>
+      <p style="margin:0 0 4px 0;">Please check items before leaving.</p>
+      <p style="margin:0 0 4px 0; font-weight:bold;">Liquor consumption is injurious to health.</p>
+      <p style="margin:0 0 4px 0;">Do not drink and drive.</p>
+      <p style="margin:0 0 4px 0;">Subject to local jurisdiction.</p>
+      <p style="margin:8px 0 0 0; font-weight:bold;">Thank You. Visit Again.</p>
+    </div>
+  `;
+
+  // Add to DOM so html2pdf can read it
+  document.body.appendChild(container);
+
+  try {
+    // 5. Generate PDF (using 'a4' to prevent jsPDF crash)
+    const pdfBlob = await html2pdf()
+      .set({
+        margin: [10, 10, 10, 10],
+        filename: `GodownBill-${invoiceNumber}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      })
+      .from(container)
+      .outputPdf('blob');
+
+    // 6. Auto-download the PDF to user's computer/phone
+    const url = URL.createObjectURL(pdfBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `GodownBill-${invoiceNumber}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // 7. Auto-open WhatsApp with message
     let waPhone = (customerPhone || '').replace(/\D/g, '');
     if (waPhone.length === 10) waPhone = '91' + waPhone;
 
-    const url = waPhone
-      ? `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`
-      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    const waMsg = `Here is your godown bill for ₹${totalAmount.toFixed(2)} (Attached PDF)`;
+    const waUrl = waPhone
+      ? `https://wa.me/${waPhone}?text=${encodeURIComponent(waMsg)}`
+      : `https://wa.me/?text=${encodeURIComponent(waMsg)}`;
 
     if (isTauri()) {
-      try {
-        await openUrl(url);
-      } catch (err) {
-        console.error('Failed to open WhatsApp:', err);
-        alert('Could not open WhatsApp. Make sure it is installed.');
-      }
+      await openUrl(waUrl);
     } else {
-      window.open(url, '_blank');
+      window.open(waUrl, '_blank');
     }
-  };
+
+    // 8. Alert user to attach the downloaded file
+    alert(`✅ Bill PDF downloaded successfully!\n\n📌 WhatsApp is now open. Please click the 📎 (attachment/icon) icon in WhatsApp and select "GodownBill-${invoiceNumber}.pdf" from your Downloads folder to send it.`);
+
+  } catch (err) {
+    console.error('WhatsApp PDF failed:', err);
+    alert('Failed to generate PDF: ' + err.message);
+  } finally {
+    // 9. Clean up hidden container from DOM
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
+};
 
   // ─── FIXED: Uses iframe instead of window.open() ───
   const handleSavePDF = () => {

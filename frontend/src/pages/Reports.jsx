@@ -1,4 +1,4 @@
-// Reports.jsx - Updated data transformation and grouping logic
+// Reports.jsx - Fixed MRP race condition
 import { useState, useEffect, Fragment, useMemo } from 'react'
 import {
   Store, Warehouse, TrendingUp, CreditCard, Banknote, Smartphone,
@@ -45,15 +45,11 @@ const downloadAsBlob = (data, fileName) => {
   URL.revokeObjectURL(url)
 }
 
-// ═══════════════════════════════════════════════════════════════
-// NEW: Helper function to parse payment details
-// ═══════════════════════════════════════════════════════════════
 const parsePaymentDetails = (sale) => {
   let cashAmount = 0
   let upiAmount = 0
   let cardAmount = 0
 
-  // If payment_details exists and has splits, use those amounts
   if (sale.payment_details && Array.isArray(sale.payment_details) && sale.payment_details.length > 0) {
     sale.payment_details.forEach(split => {
       const amount = Number(split.amount) || 0
@@ -62,12 +58,10 @@ const parsePaymentDetails = (sale) => {
       if (split.mode === 'CARD') cardAmount += amount
     })
   } else {
-    // Fallback: Use single payment_mode for the full amount
     const amount = Number(sale.total_amount) || 0
     if (sale.payment_mode === 'CASH') cashAmount = amount
     else if (sale.payment_mode === 'UPI') upiAmount = amount
     else if (sale.payment_mode === 'CARD') cardAmount = amount
-    // For SPLIT without details, we can't determine individual amounts
   }
 
   return { cashAmount, upiAmount, cardAmount }
@@ -152,8 +146,6 @@ export default function Reports() {
 
       const transformed = (salesData || []).map(sale => {
         const billDiscount = (sale.items || []).reduce((sum, item) => sum + (item.discount || 0), 0)
-        
-        // ← NEW: Parse payment details to get individual amounts
         const { cashAmount, upiAmount, cardAmount } = parsePaymentDetails(sale)
 
         return {
@@ -163,20 +155,18 @@ export default function Reports() {
           type: activeTab,
           transactionType: 'SALE',
           paymentMode: sale.payment_mode,
-          paymentDetails: sale.payment_details,  // ← NEW: Store raw details for display
+          paymentDetails: sale.payment_details,
           customerId: sale.customer_phone,
           customerName: sale.customer_name,
           totalAmount: sale.total_amount,
           discount: billDiscount,
-          cashAmount,    // ← NEW
-          upiAmount,     // ← NEW
-          cardAmount,    // ← NEW
+          cashAmount,
+          upiAmount,
+          cardAmount,
+          // ← CHANGED: Store RAW item data here, NO productsMap lookup
           items: (sale.items || []).map(item => ({
             productId: item.product_id,
             name: item.product_name,
-            brand: productsMap[item.product_id]?.brand || 'Unknown',
-            category: productsMap[item.product_id]?.category || 'Unknown',
-            size: productsMap[item.product_id]?.bottle_size || 'Unknown',
             qty: item.quantity,
             amount: item.total_price,
             unit_price: item.unit_price,
@@ -193,25 +183,43 @@ export default function Reports() {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // FIXED: Added productsMap to dependency array
+  // Enrichment (brand, category, size, mrp) happens HERE,
+  // not in fetchReportData, so it re-runs when productsMap loads
+  // ═══════════════════════════════════════════════════════════
   const { summary, tableData, topSelling } = useMemo(() => {
-    let filtered = rawData.filter(row => {
+    // ─── Step 1: Enrich items with productsMap ───
+    const enrichedData = rawData.map(row => ({
+      ...row,
+      items: row.items.map(item => ({
+        ...item,
+        brand: productsMap[item.productId]?.brand || 'Unknown',
+        category: productsMap[item.productId]?.category || 'Unknown',
+        size: productsMap[item.productId]?.bottle_size || 'Unknown',
+        mrp: productsMap[item.productId]?.mrp || 0,
+      }))
+    }))
+
+    // ─── Step 2: Filter ───
+    let filtered = enrichedData.filter(row => {
       const rowDate = format(new Date(row.date), 'yyyy-MM-dd')
       if (rowDate < dateFrom || rowDate > dateTo) return false
       if (salesType !== 'ALL' && row.transactionType !== salesType) return false
-      
-      // ← UPDATED: Filter by payment mode using actual amounts
+
       if (paymentMode !== 'ALL') {
         if (paymentMode === 'CASH' && row.cashAmount <= 0) return false
         if (paymentMode === 'UPI' && row.upiAmount <= 0) return false
         if (paymentMode === 'CARD' && row.cardAmount <= 0) return false
         if (paymentMode === 'SPLIT' && (!row.paymentDetails || row.paymentDetails.length <= 1)) return false
       }
-      
+
       if (discountFilter === 'WITH_DISCOUNT' && (!row.discount || row.discount <= 0)) return false
       if (discountFilter === 'WITHOUT_DISCOUNT' && row.discount > 0) return false
       return true
     })
 
+    // ─── Step 3: Summary ───
     const totalBills = new Set(filtered.filter(f => f.transactionType === 'SALE').map(f => f.id)).size
     const totalCustomers = new Set(filtered.filter(f => f.customerId && f.transactionType === 'SALE').map(f => f.customerId)).size
     const nonBillCustomers = totalBills - totalCustomers
@@ -219,7 +227,6 @@ export default function Reports() {
     const totalReturns = filtered.filter(f => f.transactionType === 'RETURN').reduce((s, f) => s + Math.abs(f.totalAmount), 0)
     const totalDiscount = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.discount || 0), 0)
 
-    // ← UPDATED: Use actual split amounts for summary
     const totalUpi = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.upiAmount || 0), 0)
     const totalCash = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.cashAmount || 0), 0)
     const totalCard = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.cardAmount || 0), 0)
@@ -231,11 +238,12 @@ export default function Reports() {
       totalSales,
       totalReturns,
       totalDiscount,
-      upi: totalUpi,     // ← UPDATED
-      cash: totalCash,    // ← UPDATED
-      card: totalCard,    // ← UPDATED
+      upi: totalUpi,
+      cash: totalCash,
+      card: totalCard,
     }
 
+    // ─── Step 4: Grouping ───
     const groups = {}
 
     const getGroupKey = (row, item = null) => {
@@ -262,11 +270,15 @@ export default function Reports() {
       if (['item', 'brand', 'category', 'size'].includes(groupBy)) {
         row.items.forEach(item => {
           const key = getGroupKey(row, item)
-          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, bills: new Set() }
+          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, mrp: 0, bills: new Set() }
           groups[key].qty += item.qty * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].amount += item.amount * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].discount += (item.discount || 0) * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].bills.add(row.id)
+
+          if (groupBy === 'item') {
+            groups[key].mrp = item.mrp || 0
+          }
         })
       } else {
         const key = getGroupKey(row)
@@ -281,7 +293,6 @@ export default function Reports() {
         if (row.transactionType === 'RETURN') {
           groups[key].returns += Math.abs(amt)
         } else {
-          // ← UPDATED: Use actual split amounts instead of payment_mode
           groups[key].upi += row.upiAmount || 0
           groups[key].cash += row.cashAmount || 0
           groups[key].card += row.cardAmount || 0
@@ -308,6 +319,7 @@ export default function Reports() {
       bills: val.bills.size,
       customers: val.customers?.size || 0,
       qty: val.qty || 0,
+      mrp: val.mrp || 0,
       amount: val.amount,
       returns: val.returns || 0,
       discount: val.discount || 0,
@@ -335,8 +347,9 @@ export default function Reports() {
       return a.group.localeCompare(b.group)
     })
 
+    // ─── Step 5: Top Selling ───
     const itemGroups = {}
-    rawData.filter(f => f.transactionType === 'SALE' && format(new Date(f.date), 'yyyy-MM-dd') >= dateFrom && format(new Date(f.date), 'yyyy-MM-dd') <= dateTo).forEach(row => {
+    enrichedData.filter(f => f.transactionType === 'SALE' && format(new Date(f.date), 'yyyy-MM-dd') >= dateFrom && format(new Date(f.date), 'yyyy-MM-dd') <= dateTo).forEach(row => {
       row.items.forEach(item => {
         if (!itemGroups[item.name]) itemGroups[item.name] = { qty: 0, amount: 0 }
         itemGroups[item.name].qty += item.qty
@@ -349,23 +362,30 @@ export default function Reports() {
       .slice(0, 10)
 
     return { summary, tableData, topSelling }
-  }, [rawData, dateFrom, dateTo, groupBy, salesType, paymentMode, discountFilter])
+    // ↑↑↑ FIXED: added productsMap to deps — re-runs when products load
+  }, [rawData, productsMap, dateFrom, dateTo, groupBy, salesType, paymentMode, discountFilter])
 
   const handleExport = async () => {
     if (tableData.length === 0) return alert('No data to export')
 
-    const exportData = tableData.map(row => ({
-      [groupBy.toUpperCase()]: row.group,
-      'Bills': row.bills,
-      'Customers': row.customers,
-      'Qty': row.qty,
-      'Total Amount': row.amount,
-      'Discount': row.discount,
-      'Returns': row.returns,
-      'UPI': row.upi,
-      'Cash': row.cash,
-      'Card': row.card,
-    }))
+    const exportData = tableData.map(row => {
+      const base = {
+        [groupBy.toUpperCase()]: row.group,
+        'Bills': row.bills,
+        'Customers': row.customers,
+        'Qty': row.qty,
+        'Total Amount': row.amount,
+        'Discount': row.discount,
+        'Returns': row.returns,
+        'UPI': row.upi,
+        'Cash': row.cash,
+        'Card': row.card,
+      }
+      if (groupBy === 'item') {
+        base['MRP'] = row.mrp || 0
+      }
+      return base
+    })
 
     const ws = XLSX.utils.json_to_sheet(exportData)
     const wb = XLSX.utils.book_new()
@@ -435,7 +455,7 @@ export default function Reports() {
       customerName: row.customerName || 'Walk-in Customer',
       customerPhone: row.customerId || '',
       paymentMode: row.paymentMode || 'CASH',
-      paymentDetails: row.paymentDetails,  // ← NEW: Pass payment details for editing
+      paymentDetails: row.paymentDetails,
       saleDate: row.date,
       cartItems,
     }
@@ -449,7 +469,6 @@ export default function Reports() {
     )
   }
 
-  // ─── NEW: Render payment details for bill view ───
   const renderPaymentDetails = (row) => {
     if (row.paymentDetails && row.paymentDetails.length > 1) {
       return (
@@ -478,7 +497,7 @@ export default function Reports() {
 
   const billColSpan = 8
   const dateColSpan = 8
-  const itemColSpan = 4
+  const itemColSpan = groupBy === 'item' ? 6 : 5
 
   return (
     <div className="space-y-6">
@@ -516,62 +535,57 @@ export default function Reports() {
         </div>
       )}
 
-  
-    
-{/* ─── Summary Cards ─── */}
-<div className={clsx(
-  "grid gap-4",
-  // 8 columns for counter, 6 columns for godown (hide 2 customer cards)
-  activeTab === 'godown' 
-    ? "grid-cols-2 md:grid-cols-3 xl:grid-cols-6" 
-    : "grid-cols-2 md:grid-cols-4 xl:grid-cols-8"
-)}>
-  <div className="card p-4 border-l-4 border-blue-500">
-    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Receipt className="w-3.5 h-3.5" /> Bills</div>
-    <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalBills}</p>
-  </div>
+      {/* ─── Summary Cards ─── */}
+      <div className={clsx(
+        "grid gap-4",
+        activeTab === 'godown'
+          ? "grid-cols-2 md:grid-cols-3 xl:grid-cols-6"
+          : "grid-cols-2 md:grid-cols-4 xl:grid-cols-8"
+      )}>
+        <div className="card p-4 border-l-4 border-blue-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Receipt className="w-3.5 h-3.5" /> Bills</div>
+          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalBills}</p>
+        </div>
 
-  {/* ← HIDE for Godown */}
-  {activeTab === 'counter' && (
-    <div className="card p-4 border-l-4 border-indigo-500">
-      <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Users className="w-3.5 h-3.5" /> Customers</div>
-      <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalCustomers}</p>
-    </div>
-  )}
+        {activeTab === 'counter' && (
+          <div className="card p-4 border-l-4 border-indigo-500">
+            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Users className="w-3.5 h-3.5" /> Customers</div>
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalCustomers}</p>
+          </div>
+        )}
 
-  {/* ← HIDE for Godown */}
-  {activeTab === 'counter' && (
-    <div className="card p-4 border-l-4 border-orange-500">
-      <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1">
-        <Users className="w-3.5 h-3.5" /> Walk-in 
+        {activeTab === 'counter' && (
+          <div className="card p-4 border-l-4 border-orange-500">
+            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1">
+              <Users className="w-3.5 h-3.5" /> Walk-in
+            </div>
+            <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
+              {summary.nonBillCustomers}
+            </p>
+          </div>
+        )}
+
+        <div className="card p-4 border-l-4 border-emerald-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><TrendingUp className="w-3.5 h-3.5" /> Total Sales</div>
+          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">₹{summary.totalSales.toLocaleString()}</p>
+        </div>
+        <div className="card p-4 border-l-4 border-rose-400">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Tag className="w-3.5 h-3.5" /> Discount</div>
+          <p className="text-lg font-bold text-rose-500 dark:text-rose-400">₹{summary.totalDiscount.toLocaleString()}</p>
+        </div>
+        <div className="card p-4 border-l-4 border-green-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Smartphone className="w-3.5 h-3.5" /> UPI</div>
+          <p className="text-lg font-bold text-green-600 dark:text-green-400">₹{summary.upi.toLocaleString()}</p>
+        </div>
+        <div className="card p-4 border-l-4 border-amber-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Banknote className="w-3.5 h-3.5" /> Cash</div>
+          <p className="text-lg font-bold text-amber-600 dark:text-amber-400">₹{summary.cash.toLocaleString()}</p>
+        </div>
+        <div className="card p-4 border-l-4 border-blue-400">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><CreditCard className="w-3.5 h-3.5" /> Card</div>
+          <p className="text-lg font-bold text-blue-500 dark:text-blue-400">₹{summary.card.toLocaleString()}</p>
+        </div>
       </div>
-      <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
-        {summary.nonBillCustomers}
-      </p>
-    </div>
-  )}
-
-  <div className="card p-4 border-l-4 border-emerald-500">
-    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><TrendingUp className="w-3.5 h-3.5" /> Total Sales</div>
-    <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">₹{summary.totalSales.toLocaleString()}</p>
-  </div>
-  <div className="card p-4 border-l-4 border-rose-400">
-    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Tag className="w-3.5 h-3.5" /> Discount</div>
-    <p className="text-lg font-bold text-rose-500 dark:text-rose-400">₹{summary.totalDiscount.toLocaleString()}</p>
-  </div>
-  <div className="card p-4 border-l-4 border-green-500">
-    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Smartphone className="w-3.5 h-3.5" /> UPI</div>
-    <p className="text-lg font-bold text-green-600 dark:text-green-400">₹{summary.upi.toLocaleString()}</p>
-  </div>
-  <div className="card p-4 border-l-4 border-amber-500">
-    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Banknote className="w-3.5 h-3.5" /> Cash</div>
-    <p className="text-lg font-bold text-amber-600 dark:text-amber-400">₹{summary.cash.toLocaleString()}</p>
-  </div>
-  <div className="card p-4 border-l-4 border-blue-400">
-    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><CreditCard className="w-3.5 h-3.5" /> Card</div>
-    <p className="text-lg font-bold text-blue-500 dark:text-blue-400">₹{summary.card.toLocaleString()}</p>
-  </div>
-</div>
 
       {/* Filters */}
       <div className="card p-4 border dark:border-slate-700 shadow-sm">
@@ -688,6 +702,9 @@ export default function Reports() {
                       {['item', 'brand', 'category', 'size'].includes(groupBy) && (
                         <>
                           <th className="p-3 text-center font-semibold text-gray-500">Qty</th>
+                          {groupBy === 'item' && (
+                            <th className="p-3 text-right font-semibold text-amber-600 dark:text-amber-400">MRP ₹</th>
+                          )}
                           <th className="p-3 text-right font-semibold text-gray-500">Disc. ₹</th>
                         </>
                       )}
@@ -723,7 +740,6 @@ export default function Reports() {
                             )}>
                               {row.paymentMode}
                             </span>
-                            {/* ← NEW: Show split amounts in bill view */}
                             {renderPaymentDetails(row)}
                           </td>
                           <td className="p-3 text-center text-gray-500">
@@ -756,7 +772,6 @@ export default function Reports() {
                           <tr className="bg-gray-50 dark:bg-gray-800/30">
                             <td colSpan={billColSpan} className="p-0">
                               <div className="px-6 py-3 border-l-4 border-blue-400 ml-4">
-                                {/* ← NEW: Show payment split breakdown in expanded view */}
                                 {row.paymentDetails && row.paymentDetails.length > 1 && (
                                   <div className="mb-3 p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
                                     <div className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 mb-1">Payment Breakdown:</div>
@@ -831,6 +846,11 @@ export default function Reports() {
                         {['item', 'brand', 'category', 'size'].includes(groupBy) && (
                           <>
                             <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">{row.qty}</td>
+                            {groupBy === 'item' && (
+                              <td className="p-3 text-right font-medium text-amber-700 dark:text-amber-400">
+                                {row.mrp > 0 ? `₹${Number(row.mrp).toFixed(2)}` : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                              </td>
+                            )}
                             <td className={clsx("p-3 text-right", row.discount > 0 ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-600")}>
                               {row.discount > 0 ? `-₹${row.discount.toLocaleString()}` : '-'}
                             </td>
@@ -874,6 +894,7 @@ export default function Reports() {
                     <tr className="font-bold text-xs">
                       <td className="p-3 text-right text-gray-700 dark:text-gray-300">Grand Total</td>
                       <td className="p-3 text-center text-blue-600 dark:text-blue-400">{tableData.reduce((s, r) => s + r.qty, 0)}</td>
+                      {groupBy === 'item' && <td></td>}
                       <td className="p-3 text-right text-rose-500 dark:text-rose-400">
                         -₹{tableData.reduce((s, r) => s + r.discount, 0).toLocaleString()}
                       </td>

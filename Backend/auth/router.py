@@ -17,14 +17,13 @@ def register(user_data: RegisterSchema, db: Session = Depends(get_db)):
     user_data.role = "ADMIN"
     user = create_user(db, user_data)
     if not user:
-        raise HTTPException(status_code=400, detail="Email already exists")
+        raise HTTPException(status_code=400, detail="Phone number already registered")
     return {"message": "Admin account created successfully"}
 
 # ─── LOGIN ───
-# ─── LOGIN ───
 @router.post("/login")
 def login(login_data: LoginSchema, db: Session = Depends(get_db)):
-    user = authenticate_user(db, login_data.email, login_data.password)
+    user = authenticate_user(db, login_data.phone, login_data.password)  # Changed from email
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -41,7 +40,7 @@ def login(login_data: LoginSchema, db: Session = Depends(get_db)):
         companies = [{"id": c.id, "company_name": c.company_name} for c in db.query(Company).filter(Company.owner_id == user.id).all()]
         
     elif user.company_id:
-        # ─── FIX: Fetch the single assigned company for MANAGER/SALESMAN ───
+        # Fetch the single assigned company for MANAGER/SALESMAN
         comp = db.query(Company).filter(Company.id == user.company_id).first()
         if comp:
             companies = [{"id": comp.id, "company_name": comp.company_name}]
@@ -52,12 +51,13 @@ def login(login_data: LoginSchema, db: Session = Depends(get_db)):
         "user": {
             "id": user.id,
             "name": user.name,
-            "email": user.email,
+            "phone": user.phone,  # Changed from email
             "role": user.role,
             "company_id": user.company_id,
-            "companies": companies  # Now populated for Salesman/Manager too!
+            "companies": companies
         }
     }
+
 # ═══════════════════════════════════════════════════════════
 # ─── GET LIST OF USERS (Admin Only) ───
 # ═══════════════════════════════════════════════════════════
@@ -95,7 +95,7 @@ def create_staff(
     try:
         user = create_user(db, user_data)
         if not user:
-            raise HTTPException(status_code=400, detail="Email already exists")
+            raise HTTPException(status_code=400, detail="Phone number already registered")
         return {"message": f"{user_data.role} created successfully"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -125,15 +125,17 @@ def update_staff(
     if user_data.name is not None:
         user.name = user_data.name
     
-    if user_data.email is not None:
-        # Check if email is taken by another user
+    if user_data.phone is not None:  # Changed from email
+        from .service import normalize_phone
+        normalized_phone = normalize_phone(user_data.phone)
+        # Check if phone is taken by another user
         existing = db.query(User).filter(
-            User.email == user_data.email, 
+            User.phone == normalized_phone, 
             User.id != user_id
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Email already in use by another user")
-        user.email = user_data.email
+            raise HTTPException(status_code=400, detail="Phone number already in use by another user")
+        user.phone = normalized_phone
     
     if user_data.password is not None and user_data.password.strip() != "":
         user.password = hash_password(user_data.password)

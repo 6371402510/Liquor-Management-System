@@ -12,11 +12,18 @@ import {
   Save,
   Eye,
   EyeOff,
+  Phone,
 } from "lucide-react";
 
 // Import API functions
 import { getCompanies } from "../apiservices/companyApi";
 import { getUsers, createUser, updateUser } from "../apiservices/staffApi";
+
+// ─── Phone formatter ───────────────────────────────────────
+const formatPhone = (value) => {
+  const digits = value.replace(/\D/g, "");
+  return digits.slice(0, 10);
+};
 
 export default function StaffManagement() {
   const navigate = useNavigate();
@@ -24,7 +31,7 @@ export default function StaffManagement() {
   // Create Form States
   const [formData, setFormData] = useState({
     name: "",
-    email: "",
+    phone: "",        // Changed: email → phone
     password: "",
     role: "MANAGER",
     company_id: "",
@@ -38,11 +45,11 @@ export default function StaffManagement() {
   const [companies, setCompanies] = useState([]);
   const [listLoading, setListLoading] = useState(true);
 
-  // ─── NEW: Edit Modal States ───
+  // ─── Edit Modal States ───
   const [editingUser, setEditingUser] = useState(null);
   const [editForm, setEditForm] = useState({
     name: "",
-    email: "",
+    phone: "",        // Changed: email → phone
     password: "",
     role: "MANAGER",
     company_id: "",
@@ -71,7 +78,13 @@ export default function StaffManagement() {
   }, []);
 
   const handleInputChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    // Format phone number if it's the phone field
+    if (name === "phone") {
+      setFormData({ ...formData, [name]: formatPhone(value) });
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
   };
 
   const handleCreateUser = async (e) => {
@@ -79,6 +92,13 @@ export default function StaffManagement() {
     setFormLoading(true);
     setFormError("");
     setFormSuccess("");
+
+    // Validate phone number
+    if (formData.phone.length !== 10) {
+      setFormError("Please enter a valid 10-digit phone number");
+      setFormLoading(false);
+      return;
+    }
 
     try {
       await createUser(formData);
@@ -91,7 +111,7 @@ export default function StaffManagement() {
       // Reset form
       setFormData({
         name: "",
-        email: "",
+        phone: "",        // Changed: email → phone
         password: "",
         role: "MANAGER",
         company_id: "",
@@ -104,13 +124,13 @@ export default function StaffManagement() {
     }
   };
 
-  // ─── NEW: Open Edit Modal ───
+  // ─── Open Edit Modal ───
   const openEditModal = (staff) => {
     setEditingUser(staff);
     setEditForm({
       name: staff.name,
-      email: staff.email,
-      password: "", // Leave empty - only update if filled
+      phone: staff.phone || "",     // Changed: email → phone
+      password: "",                 // Leave empty - only update if filled
       role: staff.role,
       company_id: staff.company_id || "",
       is_active: staff.is_active,
@@ -120,12 +140,12 @@ export default function StaffManagement() {
     setShowPassword(false);
   };
 
-  // ─── NEW: Close Edit Modal ───
+  // ─── Close Edit Modal ───
   const closeEditModal = () => {
     setEditingUser(null);
     setEditForm({
       name: "",
-      email: "",
+      phone: "",        // Changed: email → phone
       password: "",
       role: "MANAGER",
       company_id: "",
@@ -136,27 +156,42 @@ export default function StaffManagement() {
     setShowPassword(false);
   };
 
-  // ─── NEW: Handle Edit Form Input ───
+  // ─── Handle Edit Form Input ───
   const handleEditInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setEditForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    // Format phone number if it's the phone field
+    if (name === "phone") {
+      setEditForm((prev) => ({
+        ...prev,
+        [name]: formatPhone(value),
+      }));
+    } else {
+      setEditForm((prev) => ({
+        ...prev,
+        [name]: type === "checkbox" ? checked : value,
+      }));
+    }
   };
 
-  // ─── NEW: Handle Update User ───
+  // ─── Handle Update User ───
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     setEditLoading(true);
     setEditError("");
     setEditSuccess("");
 
+    // Validate phone number
+    if (editForm.phone.length !== 10) {
+      setEditError("Please enter a valid 10-digit phone number");
+      setEditLoading(false);
+      return;
+    }
+
     try {
       // Build payload - only include password if it's not empty
       const payload = {
         name: editForm.name,
-        email: editForm.email,
+        phone: editForm.phone,      // Changed: email → phone
         role: editForm.role,
         company_id: editForm.company_id ? parseInt(editForm.company_id) : null,
         is_active: editForm.is_active,
@@ -190,7 +225,7 @@ export default function StaffManagement() {
     }
   };
 
-  // ─── NEW: Quick Toggle Active Status ───
+  // ─── Quick Toggle Active Status ───
   const handleToggleActive = async (staff) => {
     try {
       const updatedUser = await updateUser(staff.id, {
@@ -208,6 +243,15 @@ export default function StaffManagement() {
     if (!compId) return "N/A";
     const company = companies.find((c) => c.id === compId);
     return company ? company.companyName || company.company_name : "N/A";
+  };
+
+  // ─── Helper to format phone for display ───
+  const formatPhoneDisplay = (phone) => {
+    if (!phone) return "N/A";
+    if (phone.length === 10) {
+      return `+91 ${phone.slice(0, 5)} ${phone.slice(5)}`;
+    }
+    return phone;
   };
 
   return (
@@ -262,19 +306,31 @@ export default function StaffManagement() {
                 />
               </div>
 
+              {/* ─── Phone Number Input ─── */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email Address
+                  Phone Number
                 </label>
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  placeholder="e.g. manager@store.com"
-                  className="input-field"
-                />
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none">
+                    <Phone className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">+91</span>
+                  </div>
+                  <input
+                    type="tel"
+                    name="phone"
+                    required
+                    value={formData.phone}
+                    onChange={handleInputChange}
+                    placeholder="9876543210"
+                    maxLength={10}
+                    pattern="[6-9][0-9]{9}"
+                    className="input-field pl-20"
+                  />
+                </div>
+                <p className="mt-1 text-xs text-gray-400">
+                  10-digit Indian mobile number
+                </p>
               </div>
 
               <div>
@@ -364,7 +420,7 @@ export default function StaffManagement() {
                   <thead>
                     <tr className="border-b dark:border-gray-700 text-gray-500 dark:text-gray-400">
                       <th className="text-left py-3 px-2">Name</th>
-                      <th className="text-left py-3 px-2">Email</th>
+                      <th className="text-left py-3 px-2">Phone</th>
                       <th className="text-left py-3 px-2">Role</th>
                       <th className="text-left py-3 px-2">Assigned Store</th>
                       <th className="text-center py-3 px-2">Status</th>
@@ -379,7 +435,7 @@ export default function StaffManagement() {
                       >
                         <td className="py-3 px-2 font-medium">{staff.name}</td>
                         <td className="py-3 px-2 text-gray-500 dark:text-gray-400">
-                          {staff.email}
+                          {formatPhoneDisplay(staff.phone)}
                         </td>
                         <td className="py-3 px-2">
                           <span
@@ -433,7 +489,7 @@ export default function StaffManagement() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* ─── NEW: Edit Modal ─── */}
+      {/* ─── Edit Modal ─── */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {editingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -488,19 +544,33 @@ export default function StaffManagement() {
                 />
               </div>
 
-              {/* Email */}
+              {/* ─── Phone Number Input ─── */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email Address <span className="text-red-500">*</span>
+                  Phone Number <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  value={editForm.email}
-                  onChange={handleEditInputChange}
-                  className="input-field"
-                />
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none">
+                    <Phone className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">+91</span>
+                  </div>
+                  <input
+                    type="tel"
+                    name="phone"
+                    required
+                    value={editForm.phone}
+                    onChange={handleEditInputChange}
+                    placeholder="9876543210"
+                    maxLength={10}
+                    pattern="[6-9][0-9]{9}"
+                    className="input-field pl-20"
+                  />
+                </div>
+                {editForm.phone && editForm.phone.length !== 10 && (
+                  <p className="text-xs text-red-500 mt-1">
+                    Must be 10 digits
+                  </p>
+                )}
               </div>
 
               {/* Password */}

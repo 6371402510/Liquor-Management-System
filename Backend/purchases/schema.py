@@ -63,6 +63,16 @@ class PurchaseBase(BaseModel):
     cess_amount: float = 0.0
     special_amount: float = 0.0
     tcs_amount: float = 0.0
+
+    # ─── HANDLING EXPENSES ───
+    handling_transport: float = 0.0
+    handling_depot_exp: float = 0.0
+    handling_pass_fees: float = 0.0
+    handling_unloading: float = 0.0
+    handling_other_name: Optional[str] = None
+    handling_other_amount: float = 0.0
+    total_handling: float = 0.0
+    
     total_amount: float = 0.0
     notes: Optional[str] = None
     vehicle_number: Optional[str] = None      

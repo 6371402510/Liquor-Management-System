@@ -85,7 +85,7 @@ const EXCEL_COLUMNS = [
   { header: 'Item Code', key: 'item_code', sample: 'ITM001' },
   { header: 'Barcode', key: 'barcode', sample: '8901234567890' },
   { header: 'Product Name', key: 'name', sample: 'Royal Stag 750ml' },
-  { header: 'Short Name', key: 'short_name', sample: 'RS750' },
+  { header: 'Company/Supplier', key: 'short_name', sample: 'RS750' },
   { header: 'Brand', key: 'brand', sample: 'Royal Stag' },
   { header: 'Category', key: 'category', sample: 'WHISKY' },
   { header: 'Sub Category', key: 'sub_category', sample: 'REGULAR' },
@@ -1051,7 +1051,7 @@ export default function Inventory() {
                     <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Short Name</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Company/Supplier</label>
                     <input value={form.short_name} onChange={e => setForm(f => ({ ...f, short_name: e.target.value }))} className="input-field" />
                   </div>
                   <div>

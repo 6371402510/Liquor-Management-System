@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Wine, Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react'
+import { Wine, Eye, EyeOff, Loader2, AlertCircle, Phone } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Sun, Moon } from 'lucide-react'
@@ -30,11 +30,19 @@ const calcDaysLeft = (endDateStr) => {
   return Math.ceil((end - today) / 86400000)
 }
 
+// ─── Phone formatter ───────────────────────────────────────
+const formatPhone = (value) => {
+  // Only allow digits
+  const digits = value.replace(/\D/g, '')
+  // Limit to 10 digits
+  return digits.slice(0, 10)
+}
+
 // ═══════════════════════════════════════════════════════════
 export default function Login() {
   const [mode, setMode] = useState('login')
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')  // Changed from email
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -132,6 +140,13 @@ export default function Login() {
     setSuccess('')
     setLoading(true)
 
+    // Validate phone number
+    if (phone.length !== 10) {
+      setError('Please enter a valid 10-digit phone number')
+      setLoading(false)
+      return
+    }
+
     try {
       if (mode === 'login') {
         // Block login if license is expired
@@ -143,7 +158,7 @@ export default function Login() {
           return
         }
 
-        const { error, data } = await signIn(email, password)
+        const { error, data } = await signIn(phone, password)  // Changed from email
 
         if (error) {
           setError(error.message)
@@ -166,7 +181,7 @@ export default function Login() {
         }
       } else {
         // ─── SIGNUP ────────────────────────────────────────
-        const { error, message } = await signUp(name, email, password)
+        const { error, message } = await signUp(name, phone, password)  // Changed from email
         if (error) {
           setError(error.message)
         } else {
@@ -180,6 +195,7 @@ export default function Login() {
           setMode('login')
           setPassword('')
           setName('')
+          setPhone('')  // Changed from setEmail
           fetchLicense() // refresh so the trial days show immediately
         }
       }
@@ -202,6 +218,12 @@ export default function Login() {
     setActivateSuccess('')
     setLicenseKey('')
     setShowActivateModal(true)
+  }
+
+  // ─── Phone input handler ────────────────────────────────
+  const handlePhoneChange = (e) => {
+    const formatted = formatPhone(e.target.value)
+    setPhone(formatted)
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -508,18 +530,30 @@ export default function Login() {
                 </div>
               )}
 
+              {/* ─── PHONE NUMBER INPUT ─── */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                  Email address
+                  Phone Number
                 </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="admin@store.com"
-                  className="input-field"
-                />
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none">
+                    <Phone className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">+91</span>
+                  </div>
+                  <input
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={handlePhoneChange}
+                    placeholder="9876543210"
+                    maxLength={10}
+                    pattern="[6-9][0-9]{9}"
+                    className="input-field pl-20"
+                  />
+                </div>
+                <p className="mt-1 text-xs text-gray-400">
+                  Enter 10-digit Indian mobile number
+                </p>
               </div>
 
               <div>
@@ -579,15 +613,46 @@ export default function Login() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════
-          ACTIVATION MODAL — fixed overlay, outside the flex
+          ACTIVATION MODAL
+          ═══════════════════════════════════════════════════════ */}
+            {/* ═══════════════════════════════════════════════════════
+          ACTIVATION MODAL
           ═══════════════════════════════════════════════════════ */}
       {showActivateModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
             <h3 className="text-lg font-bold text-white mb-0.5">Activate License</h3>
-            <p className="text-gray-400 text-xs mb-5">
+            <p className="text-gray-400 text-xs mb-4">
               Enter your license key to activate or extend your subscription.
             </p>
+
+            {/* ── Supported Plans ── */}
+            <div className="mb-4 p-3 rounded-lg bg-white/5 border border-white/10">
+              <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest mb-2">Supported Plans</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: '15 Days', type: 'day' },
+                  { label: '30 Days', type: 'day' },
+                  { label: '3 Months', type: 'month' },
+                  { label: '6 Months', type: 'month' },
+                  { label: '12 Months', type: 'month' },
+                  { label: '24 Months', type: 'month' },
+                  { label: '36 Months', type: 'month' },
+                ].map(plan => (
+                  <span
+                    key={plan.label}
+                    className={clsx(
+                      "text-[10px] font-semibold px-2 py-0.5 rounded-full border",
+                      plan.type === 'day'
+                        ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
+                        : "bg-purple-500/10 border-purple-500/30 text-purple-400"
+                    )}
+                  >
+                    {plan.label}
+                  </span>
+                ))}
+              </div>
+            </div>
 
             {activateError && (
               <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-900/30 border border-red-800/50 mb-4">
@@ -611,7 +676,7 @@ export default function Login() {
                 type="text"
                 value={licenseKey}
                 onChange={e => setLicenseKey(e.target.value.toUpperCase())}
-                placeholder="XXXX-XXXX-XXXX-XXXX"
+                placeholder="XXXXXX-XXXXXX-XXX"
                 className="w-full px-3.5 py-3 rounded-lg bg-white/5 border border-white/10 text-white placeholder-gray-600 text-sm font-mono tracking-widest focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 disabled={activating}
                 autoFocus

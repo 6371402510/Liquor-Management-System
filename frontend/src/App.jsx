@@ -36,6 +36,7 @@ import CounterToGodownTransfer from './pages/CounterToGodownTransfer.jsx'
 import CounterToGodownReport  from './pages/CounterToGodownTransferReport.jsx'
 import ItemWiseSellReport from './pages/Daywisesalereport.jsx'
 import ItemWisePurchaseReport from './pages/PurchesItemwiseReport.jsx'
+import CashBankReport from './pages/CashBankReport.jsx'
 // ══════════════════════════════════════════════════
 // 👇 NEW: Component to wait for FastAPI to start
 // ══════════════════════════════════════════════════
@@ -130,6 +131,7 @@ function AppRoutes() {
         <Route path="/counter-to-godown-report" element={<CounterToGodownReport />} />
         <Route path="/item-wise-sell-report" element={<ItemWiseSellReport />} />
         <Route path="/item-wise-purchase-report" element={<ItemWisePurchaseReport />} />
+        <Route path="/cash-bank-report" element={<CashBankReport />} />
         {/* ─── ADMIN ROUTES ─── */}
       </Route>
 
