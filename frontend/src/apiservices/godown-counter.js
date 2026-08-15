@@ -79,3 +79,26 @@ export const updateGodownSale = async (saleId, saleData) => {
   if (!res.ok) throw new Error(data.detail || 'Failed to update godown sale')
   return data
 }
+
+// ═══════════════════════════════════════════════════════════════
+// NEW: Update product MRP from Godown POS (reuses sales endpoint)
+// ═══════════════════════════════════════════════════════════════
+export const updateProductMrp = async (productId, companyId, newMrp) => {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`${API_BASE}/sales/update-mrp`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      product_id: productId,
+      company_id: companyId,
+      new_mrp: newMrp,
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || 'Failed to update MRP')
+  return data
+}

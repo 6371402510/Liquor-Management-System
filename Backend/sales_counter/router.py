@@ -3,15 +3,21 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timedelta
 from database import get_db
-from .schema import SaleCreate, SaleResponse
+from .schema import SaleCreate, SaleResponse, UpdateMrpRequest
+from sqlalchemy.exc import IntegrityError  # ← ADD this import
 from .service import (
-    get_pos_products, create_sale, get_sales_report_service,
-    get_sale_by_id, update_sale  # ← NEW imports
+    get_pos_products,
+    create_sale,
+    get_sales_report_service,
+    get_sale_by_id,
+    update_sale,
+    update_product_mrp,  # ← NEW import
 )
 from .model import Sale
 from inventory.schema import ProductResponse
 
 router = APIRouter(prefix="/sales", tags=["POS & Sales"])
+
 
 @router.get("/pos-products/", response_model=List[ProductResponse])
 def list_pos_products(
@@ -21,15 +27,21 @@ def list_pos_products(
 ):
     return get_pos_products(db, company_id=company_id, search=search)
 
+
+
+
 @router.post("/", response_model=SaleResponse)
 def checkout(sale_data: SaleCreate, db: Session = Depends(get_db)):
     try:
         return create_sale(db, sale_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Duplicate entry: {str(e.orig)}")
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Failed to process sale")
+        raise HTTPException(status_code=400, detail=f"Failed to process sale: {str(e)}")
 
 @router.get("/", response_model=List[SaleResponse])
 def get_sales_report(
@@ -40,9 +52,7 @@ def get_sales_report(
 ):
     return get_sales_report_service(db, company_id=company_id, date_from=date_from, date_to=date_to)
 
-# ═══════════════════════════════════════════════════════════════
-# NEW: Get single sale by ID
-# ═══════════════════════════════════════════════════════════════
+
 @router.get("/{sale_id}", response_model=SaleResponse)
 def get_single_sale(sale_id: int, db: Session = Depends(get_db)):
     try:
@@ -50,9 +60,7 @@ def get_single_sale(sale_id: int, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-# ═══════════════════════════════════════════════════════════════
-# NEW: Update an existing sale
-# ═══════════════════════════════════════════════════════════════
+
 @router.put("/{sale_id}", response_model=SaleResponse)
 def edit_sale(sale_id: int, sale_data: SaleCreate, db: Session = Depends(get_db)):
     try:
@@ -62,3 +70,18 @@ def edit_sale(sale_id: int, sale_data: SaleCreate, db: Session = Depends(get_db)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to update sale")
+
+
+# ═══════════════════════════════════════════════════════════════
+# NEW: Update product MRP from POS counter
+# ═══════════════════════════════════════════════════════════════
+@router.post("/update-mrp")
+def update_mrp_endpoint(request: UpdateMrpRequest, db: Session = Depends(get_db)):
+    try:
+        result = update_product_mrp(db, request.product_id, request.company_id, request.new_mrp)
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update MRP: {str(e)}")

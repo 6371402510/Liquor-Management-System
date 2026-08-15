@@ -18,10 +18,11 @@ import { fetchSuppliersSafe } from './supplierHelper'
 // 1. INVENTORY CONSTANTS & HELPERS
 // ─────────────────────────────────────────────────────────────
 
-const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY', 'OTHER']
+const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY','SCOTCH WHISKY', 'OTHER']
 
 const SUB_CATEGORIES_BY_CATEGORY = {
   'WHISKY': ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE'],
+  'SCOTCH WHISKY':['SUPREME','SUPERIOR','RESERVE','CLASSIC','ULTRA PREMIUM','EXTRA PLANTINUM','ULTRA GOLD','ULTRA PREMIUM','ORIGINAL'],
   'RUM': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE', 'DARK', 'WHITE', 'SPICED', 'GOLD'],
   'VODKA': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'FLAVOURED', 'NEUTRAL'],
   'GIN': ['PREMIUM', 'LONDON DRY', 'PLYMOUTH', 'OLD TOM', 'FLAVOURED', 'NAVY STRENGTH'],
@@ -33,17 +34,20 @@ const SUB_CATEGORIES_BY_CATEGORY = {
 
 const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE']
 
-const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE',]
+const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE','FMFL']
 
 const BOTTLE_SIZES_BY_TYPE = {
+  'FMFL':['50ml','60ml','90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '700ml','750ml', '1000ml'],
   'IMFL': ['90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
   'BEER': ['275ml', '330ml', '500ml', '650ml'],
-  'WINE': ['375ml', '500ml', '750ml', '1000ml', '2000ml'],
+  'WINE': ['180ml', '375ml', '500ml', '750ml', '1000ml', '2000ml'],
   'COUNTRY LIQUOR': ['200ml', '300ml', '500ml', '750ml'],
 }
 const DEFAULT_SIZES = BOTTLE_SIZES_BY_TYPE['IMFL']
 
 const SIZE_TRADITIONAL_MAP = {
+  '50ml': { traditionalName: 'Peg / Miniature', bottlesPerCase: 150 },
+  '60ml': { traditionalName: 'Peg / Miniature', bottlesPerCase: 150},
   '90ml': { traditionalName: 'Peg / Miniature', bottlesPerCase: 96 },
   '180ml': { traditionalName: 'Nip / Quarter', bottlesPerCase: 48 },
   '200ml': { traditionalName: 'Nip + / Quarter+', bottlesPerCase: 24 },
@@ -54,6 +58,7 @@ const SIZE_TRADITIONAL_MAP = {
   '375ml': { traditionalName: 'Pint / Half', bottlesPerCase: 24 },
   '500ml': { traditionalName: 'Medium', bottlesPerCase: 24 },
   '650ml': { traditionalName: 'Large Beer', bottlesPerCase: 12 },
+  '700ml': { traditionalName: 'Large ', bottlesPerCase: 12 },
   '750ml': { traditionalName: 'Quart / Bottle', bottlesPerCase: 12 },
   '1000ml': { traditionalName: 'Liter', bottlesPerCase: 9 },
   '2000ml': { traditionalName: 'Double Liter', bottlesPerCase: 6 },
@@ -62,6 +67,14 @@ const SIZE_TRADITIONAL_MAP = {
 const UNITS = ['BOTTLE', 'CASE', 'BOX', 'PACK', 'CARTON', 'PINT', 'QUARTER', 'CAN']
 const PACKING_TYPES = ['BOTTLE', 'CAN', 'TETRA PACK']
 const BARCODE_TYPES = ['EAN13', 'CODE128', 'UPC', 'QR']
+
+
+// ─── HANDLING EXPENSES DROPDOWN OPTIONS ───
+
+
+
+
+
 
 const emptyProductForm = {
   item_code: '', barcode: '', name: '', short_name: '', brand: '', category: 'WHISKY',
@@ -438,6 +451,41 @@ export default function Purchases() {
 
   const [editingPurchaseId, setEditingPurchaseId] = useState(null)
   const [editingItemIndex, setEditingItemIndex] = useState(null)
+  // ─── NEW: Stock destination state ───
+const [stockDestination, setStockDestination] = useState('GODOWN')
+
+
+// ─── HANDLING EXPENSES STATE ───
+// ─── HANDLING EXPENSES STATE ───
+const [showHandling, setShowHandling] = useState(false)
+const [handlingTransport, setHandlingTransport] = useState('')
+const [handlingDepotExp, setHandlingDepotExp] = useState('')
+const [handlingPassFees, setHandlingPassFees] = useState('')
+const [handlingUnloading, setHandlingUnloading] = useState('')
+const [handlingOtherName, setHandlingOtherName] = useState('')
+const [handlingOtherAmount, setHandlingOtherAmount] = useState('')
+
+
+// ─── HANDLING EXPENSE HELPERS ───
+// ─── HANDLING EXPENSE HELPERS ───
+const h = (val) => Number(val) || 0
+
+const calcTotalHandling = () => {
+  return h(handlingTransport) + h(handlingDepotExp) + h(handlingPassFees) + h(handlingUnloading) + h(handlingOtherAmount)
+}
+
+const resetHandlingState = () => {
+  setShowHandling(false)
+  setHandlingTransport(''); setHandlingDepotExp(''); setHandlingPassFees('')
+  setHandlingUnloading(''); setHandlingOtherName(''); setHandlingOtherAmount('')
+}
+
+
+
+// ─────────────────────────────────────────────────────────────
+// HANDLING EXPENSES ROW COMPONENT
+// ─────────────────────────────────────────────────────────────
+
 
   useEffect(() => {
     if (companyId) {
@@ -501,6 +549,21 @@ export default function Purchases() {
       setInvoiceDate(purchase.invoice_date || '')
       setTransportPass(purchase.notes || '')
       setVehicleNumber(purchase.vehicle_number || '')
+      setStockDestination(purchase.stock_destination || 'GODOWN')
+      // Add after: setStockDestination(purchase.stock_destination || 'GODOWN')
+setHandlingTransport(purchase.handling_transport || '')
+setHandlingDepotExp(purchase.handling_depot_exp || '')
+setHandlingPassFees(purchase.handling_pass_fees || '')
+setHandlingUnloading(purchase.handling_unloading || '')
+setHandlingOtherName(purchase.handling_other_name || '')
+setHandlingOtherAmount(purchase.handling_other_amount || '')
+setShowHandling(
+  (purchase.handling_transport || 0) > 0 ||
+  (purchase.handling_depot_exp || 0) > 0 ||
+  (purchase.handling_pass_fees || 0) > 0 ||
+  (purchase.handling_unloading || 0) > 0 ||
+  (purchase.handling_other_amount || 0) > 0
+)
       setPurchaseVat(purchase.subtotal > 0 ? ((purchase.vat_amount / purchase.subtotal) * 100).toFixed(1) : 35)
       setPurchaseCess(purchase.subtotal > 0 ? ((purchase.cess_amount / purchase.subtotal) * 100).toFixed(1) : 0)
       setPurchaseSpecial(purchase.subtotal > 0 ? ((purchase.special_amount / purchase.subtotal) * 100).toFixed(1) : 0)
@@ -818,14 +881,21 @@ export default function Purchases() {
   }
 
 
-  const calcTotals = () => {
-    const subtotal = items.reduce((s, i) => s + calcLineTotal(i), 0)
-    const vatTotal = subtotal * Number(purchaseVat) / 100
-    const cessTotal = subtotal * Number(purchaseCess) / 100
-    const specialTotal = subtotal * Number(purchaseSpecial) / 100
-    const tcsTotal = subtotal * Number(purchaseTcs) / 100
-    return { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total: subtotal + vatTotal + cessTotal + specialTotal + tcsTotal }
+const calcTotals = () => {
+  const subtotal = items.reduce((s, i) => s + calcLineTotal(i), 0)
+  const vatTotal = subtotal * Number(purchaseVat) / 100
+  const cessTotal = subtotal * Number(purchaseCess) / 100
+  const specialTotal = subtotal * Number(purchaseSpecial) / 100
+  const tcsTotal = subtotal * Number(purchaseTcs) / 100
+  const handlingTotal = calcTotalHandling()
+  const totalWithoutHandling = subtotal + vatTotal + cessTotal + specialTotal + tcsTotal
+  return {
+    subtotal, vatTotal, cessTotal, specialTotal, tcsTotal,
+    handlingTotal,
+    totalWithoutHandling,
+    total: totalWithoutHandling + handlingTotal
   }
+}
 
 
 
@@ -875,7 +945,7 @@ const roundTaxAmount = () => {
     const supplier = suppliers.find(s => s.id === Number(selectedSupplier))
     const { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total } = calcTotals()
     const finalInvoiceNumber = invoiceNumber.trim() || generatePurchaseNumber()
-
+    const totalHand = calcTotalHandling()
     const payload = {
       invoice_number: finalInvoiceNumber,
       company_id: Number(companyId),
@@ -884,11 +954,20 @@ const roundTaxAmount = () => {
       purchase_date: billingDate || format(new Date(), 'yyyy-MM-dd'),
       invoice_date: invoiceDate || null,
       billing_date: billingDate,
+      stock_destination: stockDestination,   // ← NEW
       notes: transportPass,
       vehicle_number: vehicleNumber,
       subtotal, vat_amount: vatTotal, cess_amount: cessTotal,
       special_amount: specialTotal, tcs_amount: tcsTotal,
-      total_amount: total, status: "RECEIVED",
+handling_transport: h(handlingTransport),
+handling_depot_exp: h(handlingDepotExp),
+handling_pass_fees: h(handlingPassFees),
+handling_unloading: h(handlingUnloading),
+handling_other_name: handlingOtherName || null,
+handling_other_amount: h(handlingOtherAmount),
+  total_handling: totalHand,
+  total_amount: subtotal + vatTotal + cessTotal + specialTotal + tcsTotal + totalHand,
+  status: "RECEIVED",
       items: items.map(item => {
         const ratePerUnit = calcRatePerUnit(item)
         return {
@@ -934,6 +1013,8 @@ const roundTaxAmount = () => {
       setNotes(''); setInvoiceDate('')
       setBillingDate(format(new Date(), 'yyyy-MM-dd'))
       setTransportPass(''); setVehicleNumber('')
+      setStockDestination('GODOWN')
+      resetHandlingState()  // ← ADD THIS
       fetchPurchases()
     } catch (err) { setError(err.message || 'Failed to save purchase') }
     finally { setSaving(false) }
@@ -1002,6 +1083,7 @@ const roundTaxAmount = () => {
       'Billing Date': p.billing_date || p.purchase_date || '',
       'Invoice Date': p.invoice_date || '',
       'Supplier': p.supplier_name || '',
+       'Stock To': p.stock_destination || 'GODOWN',   // ← ADD THIS
       'Transport Pass': p.notes || '',
       'Vehicle Number': p.vehicle_number || '',
       'Subtotal': Number(p.subtotal) || 0,
@@ -1038,7 +1120,7 @@ const roundTaxAmount = () => {
     }
   }
 
-  const { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total } = calcTotals()
+  const { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, handlingTotal, totalWithoutHandling, total } = calcTotals()
   const isTotalQtyAuto = Number(currentItem.qtyCases) > 0 && Number(currentItem.bottlesPerCase) > 0
   const currentRatePerUnit = calcRatePerUnit(currentItem)
 
@@ -1088,6 +1170,8 @@ const roundTaxAmount = () => {
                 setPurchaseCess(0)
                 setPurchaseSpecial(0)
                 setPurchaseTcs(2.7)
+                setStockDestination('GODOWN') 
+                resetHandlingState()  // ← ADD THIS
               } else {
                 setEditingPurchaseId(null)
                 setEditingItemIndex(null)
@@ -1097,6 +1181,8 @@ const roundTaxAmount = () => {
                 setCurrentItem(EMPTY_ITEM)
                 setSearchQuery('')
                 setShowForm(true)
+                setStockDestination('GODOWN')
+                resetHandlingState()  // ← ADD THIS
               }
             }}
             className={clsx(
@@ -1130,7 +1216,7 @@ const roundTaxAmount = () => {
             {editingPurchaseId ? '✏️ Edit Purchase' : 'New Purchase Entry'}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <div>
                 <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Date</label>
                 <input type="date" value={billingDate} onChange={e => setBillingDate(e.target.value)} className="input-field bg-green-50 dark:bg-green-900/10" />
@@ -1142,6 +1228,37 @@ const roundTaxAmount = () => {
                   {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
+              <div>
+  <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Stock To *</label>
+  <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+    <button
+      type="button"
+      onClick={() => setStockDestination('GODOWN')}
+      className={clsx(
+        "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors border-r border-gray-200 dark:border-gray-700",
+        stockDestination === 'GODOWN'
+          ? "bg-blue-600 text-white"
+          : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+      )}
+    >
+      <Warehouse className="w-4 h-4" />
+      Godown
+    </button>
+    <button
+      type="button"
+      onClick={() => setStockDestination('COUNTER')}
+      className={clsx(
+        "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors",
+        stockDestination === 'COUNTER'
+          ? "bg-emerald-600 text-white"
+          : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+      )}
+    >
+      <Store className="w-4 h-4" />
+      Counter
+    </button>
+  </div>
+</div>
               <div>
                 <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice Number *</label>
                 <div className="relative">
@@ -1166,7 +1283,7 @@ const roundTaxAmount = () => {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left: Item Entry Form */}
               <div className="lg:col-span-4 border dark:border-slate-700 rounded-lg p-4 bg-white dark:bg-slate-900">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-0">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
                     <Package className="w-4 h-4 text-blue-500" />
                     {editingItemIndex !== null ? 'Edit Item' : 'Add New Item'}
@@ -1181,7 +1298,7 @@ const roundTaxAmount = () => {
                   </button>
                 </div>
 
-                <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2">
+                <div className="space-y-3 max-h-[620px] overflow-y-auto pr-2">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2 relative" ref={dropdownRef}>
                       <label className="block text-md font-semibold text-black-800 mb-1">
@@ -1205,7 +1322,7 @@ const roundTaxAmount = () => {
                       )}
                     </div>
 
-                    {currentItem.productId && (
+                    {/* {currentItem.productId && (
                       <div className="col-span-2 rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/20 px-3 py-2">
                         <div className="flex items-center justify-between">
                           <div className="text-xs">
@@ -1216,22 +1333,58 @@ const roundTaxAmount = () => {
                           <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-full">{currentItem.bottlesPerCase} btls/case</span>
                         </div>
                       </div>
-                    )}
+                    )} */}
 
                     <div className="col-span-2">
-                      <label className="block text-md font-semibold text-black-800 mb-1">Item Name *</label>
+                      <label className="block text-md font-semibold text-black-800 mb-0">Item Name *</label>
                       <input type="text" value={currentItem.name} onChange={e => handleItemChange('name', e.target.value)} placeholder="e.g. Royal Stag" className="input-field text-sm" />
                     </div>
-                    <div><label className="block text-md font-semibold text-black-800 mb-1">Brand</label><input type="text" value={currentItem.brand} onChange={e => handleItemChange('brand', e.target.value)} className="input-field text-sm" /></div>
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">Product Type</label>
-                      <select value={currentItem.productType} onChange={e => handleItemChange('productType', e.target.value)} className="input-field text-sm">
-                        {PRODUCT_TYPES.map(pt => <option key={pt} value={pt}>{pt}</option>)}
-                      </select>
+                   
+                    <div><label className="block text-md font-semibold text-black-800 mb-0">MRP (₹) *</label><input type="number" value={currentItem.mrp} onChange={e => handleItemChange('mrp', e.target.value)} className="input-field text-sm" /></div>
+ <div>
+                      <label className="block text-md font-semibold text-black-800 mb-0">
+                        Qty in Cases
+                        {currentItem.bottlesPerCase > 0 && <span className="ml-1 text-[10px] text-blue-500">×{currentItem.bottlesPerCase} btls</span>}
+                      </label>
+                      <input
+                        id="qtyCasesInput"
+                        type="number"
+                        min="0"
+                        value={currentItem.qtyCases}
+                        onChange={e => handleItemChange('qtyCases', e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addItemToTable();
+                          }
+                        }}
+                        className="input-field text-sm"
+                        placeholder="0"
+                      />
                     </div>
-                    <div><label className="block text-md font-semibold text-black-800 mb-1">Category</label><input type="text" value={currentItem.category} onChange={e => handleItemChange('category', e.target.value)} className="input-field text-sm" /></div>
-                    <div><label className="block text-md font-semibold text-black-800 mb-1">MRP (₹) *</label><input type="number" value={currentItem.mrp} onChange={e => handleItemChange('mrp', e.target.value)} className="input-field text-sm" /></div>
-
+                    <div>
+                      <label className="block text-md font-semibold text-black-800 mb-0">Total Qty (Bottles) {isTotalQtyAuto ? <span className="ml-1 text-[10px] text-blue-500">auto</span> : ''}</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={currentItem.totalQty}
+                        onChange={e => handleItemChange('totalQty', e.target.value)}
+                        className={clsx("input-field text-sm", isTotalQtyAuto && "bg-gray-50 dark:bg-gray-800")}
+                        readOnly={isTotalQtyAuto}
+                      />
+                    </div>
+                     <div>
+                      <label className="block text-md font-semibold text-black-800 mb-1">MGER Value</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={currentItem.mgerValue || ''}
+                        onChange={e => handleItemChange('mgerValue', e.target.value)}
+                        className="input-field text-sm font-semibold"
+                        placeholder="Enter MGER"
+                      />
+                    </div>
                     <div>
                       <label className="block text-md font-semibold text-black-800 mb-1">
                         Purchase Rate / Case (₹) *
@@ -1264,38 +1417,7 @@ const roundTaxAmount = () => {
                     </div>
                     <div><label className="block text-md font-semibold text-black-800 mb-1">Selling Rate (₹) *</label><input type="number" min="0" step="0.01" value={currentItem.sellingRate} onChange={e => handleItemChange('sellingRate', e.target.value)} className="input-field text-sm" /></div>
 
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">
-                        Qty in Cases
-                        {currentItem.bottlesPerCase > 0 && <span className="ml-1 text-[10px] text-blue-500">×{currentItem.bottlesPerCase} btls</span>}
-                      </label>
-                      <input
-                        id="qtyCasesInput"
-                        type="number"
-                        min="0"
-                        value={currentItem.qtyCases}
-                        onChange={e => handleItemChange('qtyCases', e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            addItemToTable();
-                          }
-                        }}
-                        className="input-field text-sm"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">Total Qty (Bottles) {isTotalQtyAuto ? <span className="ml-1 text-[10px] text-blue-500">auto</span> : ''}</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={currentItem.totalQty}
-                        onChange={e => handleItemChange('totalQty', e.target.value)}
-                        className={clsx("input-field text-sm", isTotalQtyAuto && "bg-gray-50 dark:bg-gray-800")}
-                        readOnly={isTotalQtyAuto}
-                      />
-                    </div>
+                   
 
                     {/* ─── RESTORED OPENING, MIN, BL, LPL FIELDS ─── */}
                     <div>
@@ -1306,7 +1428,7 @@ const roundTaxAmount = () => {
                       <label className="block text-md font-semibold text-black-800 mb-1">Min Stock</label>
                       <input type="number" min="0" value={currentItem.minStock} onChange={e => handleItemChange('minStock', e.target.value)} className="input-field text-sm" />
                     </div>
-                    <div>
+                    {/* <div>
                       <label className="block text-md font-semibold text-black-800 mb-1">Bulk Liters (BL) <span className="ml-1 text-[10px] text-cyan-500 font-medium">auto</span></label>
                       <input type="text" value={currentItem.qtyBulkLiters > 0 ? currentItem.qtyBulkLiters.toFixed(3) : '—'} readOnly className="input-field text-sm font-semibold bg-cyan-50 dark:bg-cyan-900/20 border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 cursor-not-allowed" />
                     </div>
@@ -1318,19 +1440,15 @@ const roundTaxAmount = () => {
                         readOnly
                         className="input-field text-sm font-semibold bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 cursor-not-allowed"
                       />
-                    </div>
+                    </div> */}
+                     <div><label className="block text-md font-semibold text-black-800 mb-1">Brand</label><input type="text" value={currentItem.brand} onChange={e => handleItemChange('brand', e.target.value)} className="input-field text-sm" /></div>
                     <div>
-                      <label className="block text-md font-semibold text-black-800 mb-1">MGER Value</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={currentItem.mgerValue || ''}
-                        onChange={e => handleItemChange('mgerValue', e.target.value)}
-                        className="input-field text-sm font-semibold"
-                        placeholder="Enter MGER"
-                      />
+                      <label className="block text-md font-semibold text-black-800 mb-1">Product Type</label>
+                      <select value={currentItem.productType} onChange={e => handleItemChange('productType', e.target.value)} className="input-field text-sm">
+                        {PRODUCT_TYPES.map(pt => <option key={pt} value={pt}>{pt}</option>)}
+                      </select>
                     </div>
+                    <div><label className="block text-md font-semibold text-black-800 mb-1">Category</label><input type="text" value={currentItem.category} onChange={e => handleItemChange('category', e.target.value)} className="input-field text-sm" /></div> 
                   </div>
                 </div>
 
@@ -1458,76 +1576,214 @@ const roundTaxAmount = () => {
 
             {/* Totals Section */}
 
-            <div className="flex flex-col items-end gap-2 w-full sm:w-auto mt-6">
-              <div className="w-full sm:w-72 text-sm space-y-2">
-                <div className="flex justify-between items-center font-semibold text-gray-800 dark:text-gray-200">
-                  <span>Subtotal</span>
-                  <span className="w-24 text-right">₹{subtotal.toFixed(2)}</span>
-                </div>
+          <div className="flex flex-col items-end gap-2 w-full sm:w-auto mt-6">
+  <div className="w-full sm:w-72 text-sm space-y-2">
+    
+    {/* ─── SUBTOTAL ─── */}
+    <div className="flex justify-between items-center font-semibold text-gray-800 dark:text-gray-200">
+      <span>Subtotal</span>
+      <span className="w-24 text-right">₹{subtotal.toFixed(2)}</span>
+    </div>
 
-                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
-                  <div className="flex items-center gap-2">
-                    <span className="w-16">VAT</span>
-                    <input type="number" value={purchaseVat} onChange={e => setPurchaseVat(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
-                    <span>%</span>
-                  </div>
-                  <span className="w-24 text-right">₹{vatTotal.toFixed(2)}</span>
-                </div>
+    {/* ─── VAT ─── */}
+    <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
+      <div className="flex items-center gap-2">
+        <span className="w-16">VAT</span>
+        <input type="number" value={purchaseVat} onChange={e => setPurchaseVat(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+        <span>%</span>
+      </div>
+      <span className="w-24 text-right">₹{vatTotal.toFixed(2)}</span>
+    </div>
 
-                {/* Uncomment CESS and Special if you need them later */}
-                {/*
-                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
-                  <div className="flex items-center gap-2">
-                    <span className="w-16">CESS</span>
-                    <input type="number" value={purchaseCess} onChange={e => setPurchaseCess(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
-                    <span>%</span>
-                  </div>
-                  <span className="w-24 text-right">₹{cessTotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
-                  <div className="flex items-center gap-2">
-                    <span className="w-16">Special</span>
-                    <input type="number" value={purchaseSpecial} onChange={e => setPurchaseSpecial(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
-                    <span>%</span>
-                  </div>
-                  <span className="w-24 text-right">₹{specialTotal.toFixed(2)}</span>
-                </div>
-                */}
+    {/* ─── TCS ─── */}
+    <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
+      <div className="flex items-center gap-2">
+        <span className="w-16">TCS</span>
+        <div className="flex items-center gap-1">
+          <input type="number" value={purchaseTcs} onChange={e => setPurchaseTcs(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
+          <button type="button" onClick={roundTaxAmount} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition-colors" title="Round TCS amount">⤴</button>
+        </div>
+        <span>%</span>
+      </div>
+      <span className="w-24 text-right font-medium">₹{tcsTotal.toFixed(2)}</span>
+    </div>
 
-                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400">
-                  <div className="flex items-center gap-2">
-                   <span className="w-16">TCS</span>
-                    <div className="flex items-center gap-1">
-                      <input type="number" value={purchaseTcs} onChange={e => setPurchaseTcs(e.target.value)} className="w-14 input-field text-xs py-0.5 text-right" />
-                      <button type="button" onClick={roundTaxAmount}
- className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition-colors" title="Round TCS amount">⤴</button>
-                    </div>
-                    <span>%</span>
-                    <span className="w-24 text-right font-medium">₹{tcsTotal.toFixed(2)}</span>
-                  </div>
-                  
-                </div>
+    {/* ─── HANDLING EXPENSES BUTTON & PANEL ─── */}
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={() => setShowHandling(!showHandling)}
+        className={clsx(
+          "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border w-full justify-center",
+          showHandling
+            ? "bg-orange-50 dark:bg-orange-900/20 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400"
+            : calcTotalHandling() > 0
+              ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400"
+              : "bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-750"
+        )}
+      >
+        <span className="text-base">🧾</span>
+        <span>Handling Expenses</span>
+        {calcTotalHandling() > 0 && (
+          <span className="ml-1 px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-800 text-emerald-700 dark:text-emerald-300">
+            ₹ {calcTotalHandling().toLocaleString('en-IN')}
+          </span>
+        )}
+        {showHandling ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
 
-                <div className="flex justify-between items-center border-t border-gray-200 dark:border-gray-700 pt-2 font-bold text-base text-gray-800 dark:text-gray-200">
-                  <span>Grand Total</span>
-                  <span className="w-24 text-right">₹{total.toFixed(2)}</span>
-                </div>
-              </div>
+      
+     {/* ─── COLLAPSIBLE PANEL ─── */}
+{showHandling && (
+  <div className="mt-3 p-4 rounded-xl bg-orange-50/60 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800/50 space-y-3">
+    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-orange-200 dark:border-orange-800/50">
+      <span className="text-sm">📦</span>
+      <span className="text-xs font-bold text-orange-700 dark:text-orange-400 uppercase tracking-wider">
+        Handling & Transport Expenses
+      </span>
+    </div>
 
-              <button
-                type="submit"
-                disabled={saving || items.length === 0}
-                className={clsx(
-                  "w-full sm:w-72 flex justify-center items-center gap-2 py-2.5 rounded-lg text-white font-semibold transition-all",
-                  saving || items.length === 0
-                    ? "bg-gray-300 dark:bg-gray-700 cursor-not-allowed"
-                    : "bg-green-600 hover:bg-green-700 active:scale-95 shadow-md"
-                )}
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? "Saving Purchase..." : editingPurchaseId ? "Update Purchase" : "Confirm Purchase"}
-              </button>
-            </div>
+    <div className="grid grid-cols-1 gap-2.5">
+      {/* TRANSPORT */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 w-[100px] flex-shrink-0 flex items-center gap-1.5">
+          <span>🚛</span> TRANSPORT
+        </span>
+        <div className="flex items-center gap-1 flex-1">
+          <span className="text-xs text-gray-400">₹</span>
+          <input
+            type="number" min="0" step="1"
+            value={handlingTransport}
+            onChange={e => setHandlingTransport(e.target.value)}
+            placeholder="0"
+            className="input-field !py-1.5 !text-xs w-full"
+          />
+        </div>
+      </div>
+
+      {/* DEPOT EXP */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 w-[100px] flex-shrink-0 flex items-center gap-1.5">
+          <span>🏭</span> DEPOT EXP
+        </span>
+        <div className="flex items-center gap-1 flex-1">
+          <span className="text-xs text-gray-400">₹</span>
+          <input
+            type="number" min="0" step="1"
+            value={handlingDepotExp}
+            onChange={e => setHandlingDepotExp(e.target.value)}
+            placeholder="0"
+            className="input-field !py-1.5 !text-xs w-full"
+          />
+        </div>
+      </div>
+
+      {/* PASS FEES */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 w-[100px] flex-shrink-0 flex items-center gap-1.5">
+          <span>🎫</span> PASS FEES
+        </span>
+        <div className="flex items-center gap-1 flex-1">
+          <span className="text-xs text-gray-400">₹</span>
+          <input
+            type="number" min="0" step="1"
+            value={handlingPassFees}
+            onChange={e => setHandlingPassFees(e.target.value)}
+            placeholder="0"
+            className="input-field !py-1.5 !text-xs w-full"
+          />
+        </div>
+      </div>
+
+      {/* UNLOADING */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 w-[100px] flex-shrink-0 flex items-center gap-1.5">
+          <span>🏋️</span> UNLOADING
+        </span>
+        <div className="flex items-center gap-1 flex-1">
+          <span className="text-xs text-gray-400">₹</span>
+          <input
+            type="number" min="0" step="1"
+            value={handlingUnloading}
+            onChange={e => setHandlingUnloading(e.target.value)}
+            placeholder="0"
+            className="input-field !py-1.5 !text-xs w-full"
+          />
+        </div>
+      </div>
+
+      {/* OTHER */}
+      <div className="flex items-center gap-2 pt-1 border-t border-orange-200/50 dark:border-orange-800/30">
+        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 w-[100px] flex-shrink-0 flex items-center gap-1.5">
+          <span>📋</span> OTHER
+        </span>
+        <input
+          type="text"
+          value={handlingOtherName}
+          onChange={e => setHandlingOtherName(e.target.value)}
+          placeholder="Expense name..."
+          className="input-field !py-1.5 !text-xs flex-1 min-w-0"
+        />
+        <div className="flex items-center gap-1 w-[100px] flex-shrink-0">
+          <span className="text-xs text-gray-400">₹</span>
+          <input
+            type="number" min="0" step="1"
+            value={handlingOtherAmount}
+            onChange={e => setHandlingOtherAmount(e.target.value)}
+            placeholder="0"
+            className="input-field !py-1.5 !text-xs w-full"
+          />
+        </div>
+      </div>
+    </div>
+
+    {/* ─── TOTAL HANDLING ─── */}
+    <div className="flex items-center justify-between pt-3 mt-1 border-t-2 border-orange-300 dark:border-orange-700">
+      <span className="text-sm font-bold text-orange-800 dark:text-orange-300">
+        Total Handling Expenses
+      </span>
+      <span className="text-lg font-extrabold text-orange-700 dark:text-orange-400 tabular-nums">
+        ₹ {calcTotalHandling().toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      </span>
+    </div>
+  </div>
+)}
+    </div>
+
+    {/* ─── HANDLING SUMMARY LINE (when panel is closed but has value) ─── */}
+    {calcTotalHandling() > 0 && !showHandling && (
+      <div className="flex justify-between text-sm">
+        <span className="text-orange-600 dark:text-orange-400 font-medium">+ Handling Expenses</span>
+        <span className="font-semibold text-orange-600 dark:text-orange-400 tabular-nums">
+          ₹ {handlingTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+        </span>
+      </div>
+    )}
+
+    {/* ─── GRAND TOTAL ─── */}
+    <div className="flex justify-between text-base font-bold border-t-2 border-gray-300 dark:border-gray-600 pt-2">
+      <span>Grand Total</span>
+      <span className="text-green-600 dark:text-green-400 tabular-nums">
+        ₹ {total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+      </span>
+    </div>
+  </div>
+
+  {/* ─── SUBMIT BUTTON ─── */}
+  <button
+    type="submit"
+    disabled={saving || items.length === 0}
+    className={clsx(
+      "w-full sm:w-72 flex justify-center items-center gap-2 py-2.5 rounded-lg text-white font-semibold transition-all",
+      saving || items.length === 0
+        ? "bg-gray-300 dark:bg-gray-700 cursor-not-allowed"
+        : "bg-green-600 hover:bg-green-700 active:scale-95 shadow-md"
+    )}
+  >
+    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+    {saving ? "Saving Purchase..." : editingPurchaseId ? "Update Purchase" : "Confirm Purchase"}
+  </button>
+</div>
           </form>
         </div>
       )}
@@ -1539,152 +1795,224 @@ const roundTaxAmount = () => {
       />
 
       {/* ─── PURCHASES LIST TABLE ─── */}
-      <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50">
-                <th className="table-header text-left">Invoice No.</th>
-                <th className="table-header text-left">Date</th>
-                <th className="table-header text-left">Supplier</th>
-                <th className="table-header text-right">VAT</th>
-                <th className="table-header text-right">TCS</th> {/* ADDED TCS HEADER */}
-                <th className="table-header text-right">Total</th>
-                <th className="table-header text-center">Status</th>
-                <th className="table-header text-center">Actions</th>
+    <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
+  <div className="overflow-x-auto">
+    <table className="w-full">
+      <thead>
+        <tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50">
+          <th className="table-header text-left">Invoice No.</th>
+          <th className="table-header text-left">Date</th>
+          <th className="table-header text-left">Supplier</th>
+          <th className="table-header text-left">Stock To</th>
+          <th className="table-header text-right">VAT</th>
+          <th className="table-header text-right">TCS</th>
+          <th className="table-header text-right text-blue-600 dark:text-blue-400">Subtotal</th>
+          <th className="table-header text-right text-blue-600 dark:text-blue-400">Total Cost</th>
+          <th className="table-header text-right">Handling</th>
+          <th className="table-header text-right text-green-600 dark:text-green-400">Grand Total</th>
+          <th className="table-header text-center">Status</th>
+          <th className="table-header text-center">Actions</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+        {loading ? (
+          <tr><td colSpan={12} className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary-500 mx-auto" /></td></tr>
+        ) : filteredPurchases.length === 0 ? (
+          <tr><td colSpan={12} className="text-center py-10 text-sm text-gray-400">No purchases match the selected filters</td></tr>
+        ) : filteredPurchases.map(p => {
+          // Total Cost = WITHOUT handling expense
+          const totalCost = (Number(p.subtotal) || 0)
+            + (Number(p.vat_amount) || 0)
+            + (Number(p.cess_amount) || 0)
+            + (Number(p.special_amount) || 0)
+            + (Number(p.tcs_amount) || 0)
+          // Grand Total = WITH handling expense (same as total_amount)
+          const grandTotal = Number(p.total_amount) || 0
+
+          return (
+            <Fragment key={p.id}>
+              <tr className={clsx("hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors", p.status === 'RETURN' && "bg-red-50/30 dark:bg-red-900/10")}>
+                <td className="table-cell font-mono text-xs font-semibold">{p.invoice_number}</td>
+                <td className="table-cell text-gray-500">
+                  {p.billing_date
+                    ? format(new Date(p.billing_date + 'T00:00:00'), 'dd MMM yyyy')
+                    : p.purchase_date
+                      ? format(new Date(p.purchase_date + 'T00:00:00'), 'dd MMM yyyy')
+                      : '—'
+                  }
+                </td>
+                <td className="table-cell text-gray-600 dark:text-gray-400">{p.supplier_name || '—'}</td>
+                <td className="px-3 py-3">
+                  <span className={clsx(
+                    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold",
+                    (p.stock_destination || 'GODOWN') === 'COUNTER'
+                      ? "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800"
+                      : "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                  )}>
+                    {(p.stock_destination || 'GODOWN') === 'COUNTER' ? (
+                      <><Store className="w-3 h-3" /> Counter</>
+                    ) : (
+                      <><Warehouse className="w-3 h-3" /> Godown</>
+                    )}
+                  </span>
+                </td>
+                <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
+                <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
+
+                {/* ── Subtotal (line items only, no taxes) ── */}
+                <td className="table-cell text-right font-semibold text-blue-600 dark:text-blue-400">
+                  ₹{Number(p.subtotal || 0).toFixed(2)}
+                </td>
+
+                {/* ── Total Cost (subtotal + taxes, WITHOUT handling) ── */}
+                <td className="table-cell text-right font-semibold text-blue-700 dark:text-blue-400">
+                  ₹{totalCost.toFixed(2)}
+                </td>
+
+                {/* ── Handling ── */}
+                <td className="table-cell text-right">
+                  {Number(p.total_handling || 0) > 0
+                    ? <span className="text-orange-600 dark:text-orange-400 font-medium">₹{Number(p.total_handling).toFixed(2)}</span>
+                    : <span className="text-gray-300 dark:text-gray-600">—</span>
+                  }
+                </td>
+
+                {/* ── Grand Total (WITH handling) ── */}
+                <td className="table-cell text-right font-bold text-green-700 dark:text-green-400">
+                  {Number(p.total_handling || 0) > 0
+                    ? <>₹{grandTotal.toFixed(2)} <span className="text-[9px] text-orange-500 ml-0.5">▲</span></>
+                    : <>₹{grandTotal.toFixed(2)}</>
+                  }
+                </td>
+
+                <td className="table-cell text-center">
+                  <span className={clsx("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold", p.status === 'RETURN' ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400" : "bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400")}>{p.status}</span>
+                </td>
+                <td className="table-cell text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    {isAdmin && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleEditPurchase(p) }}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        title="Edit Purchase"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    <button onClick={() => loadItems(p.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors">
+                      {expandedId === p.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-              {loading ? (
-                <tr><td colSpan={7} className="text-center py-10"><Loader2 className="w-6 h-6 animate-spin text-primary-500 mx-auto" /></td></tr>
-              ) : filteredPurchases.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-10 text-sm text-gray-400">No purchases match the selected filters</td></tr>
-              ) : filteredPurchases.map(p => (
-                <Fragment key={p.id}>
-                  <tr className={clsx("hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors", p.status === 'RETURN' && "bg-red-50/30 dark:bg-red-900/10")}>
-                    <td className="table-cell font-mono text-xs font-semibold">{p.invoice_number}</td>
-                    <td className="table-cell text-gray-500">
-                      {p.billing_date
-                        ? format(new Date(p.billing_date + 'T00:00:00'), 'dd MMM yyyy')
-                        : p.purchase_date
-                          ? format(new Date(p.purchase_date + 'T00:00:00'), 'dd MMM yyyy')
-                          : '—'
-                      }
-                    </td>
-                    <td className="table-cell text-gray-600 dark:text-gray-400">{p.supplier_name || '—'}</td>
-                    <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
-                    <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
-                    <td className="table-cell text-right font-semibold">₹{Number(p.total_amount).toFixed(2)}</td>
-                    <td className="table-cell text-center">
-                      <span className={clsx("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold", p.status === 'RETURN' ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400" : "bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400")}>{p.status}</span>
-                    </td>
-                    <td className="table-cell text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        {/* ─── ONLY SHOW EDIT BUTTON IF ADMIN ─── */}
-                        {isAdmin && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleEditPurchase(p) }}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                            title="Edit Purchase"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        )}
+              {expandedId === p.id && expandedItems[p.id] && (
+                <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20">
+                  <td colSpan={12} className="px-6 py-3">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                          <th className="text-left py-1 font-medium">#</th>
+                          <th className="text-left py-1 font-medium">Product</th>
+                          <th className="text-center py-1 font-medium">Size</th>
+                          <th className="text-center py-1 font-medium">Cases</th>
+                          <th className="text-center py-1 font-medium font-bold text-green-500">Btls</th>
+                          <th className="text-center py-1 font-medium text-cyan-500">BL</th>
+                          <th className="text-center py-1 font-medium text-purple-500">LPL</th>
+                          <th className="text-center py-2 px-2 font-medium text-orange-500">MGER</th>
+                          <th className="text-right py-1 font-medium text-orange-500">Rate/Case</th>
+                          <th className="text-right py-1 font-medium text-green-500">Rate/Unit</th>
+                          <th className="text-right py-1 font-medium">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expandedItems[p.id].map((item, idx) => {
+                          const cases = item.qty_cases || 0
+                          const totalBtls = item.total_bottles || 0
+                          const ratePerCase = item.unit_cost || 0
+                          const ratePerUnit = item.purchase_rate_per_unit > 0
+                            ? item.purchase_rate_per_unit
+                            : (totalBtls > 0 ? (ratePerCase * cases) / totalBtls : 0)
 
-                        <button onClick={() => loadItems(p.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors">
-                          {expandedId === p.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {expandedId === p.id && expandedItems[p.id] && (
-                    <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20">
-                      <td colSpan={7} className="px-6 py-3">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                              <th className="text-left py-1 font-medium">#</th>
-                              <th className="text-left py-1 font-medium">Product</th>
-                              <th className="text-center py-1 font-medium">Size</th>
-                              <th className="text-center py-1 font-medium">Cases</th>
-                              <th className="text-center py-1 font-medium font-bold text-green-500">Btls</th>
-                              <th className="text-center py-1 font-medium text-cyan-500">BL</th>
-                              <th className="text-center py-1 font-medium text-purple-500">LPL</th>
-                              <th className="text-center py-2 px-2 font-medium text-orange-500">MGER</th>
-
-
-                              <th className="text-right py-1 font-medium text-orange-500">Rate/Case</th>
-                              <th className="text-right py-1 font-medium text-green-500">Rate/Unit</th>
-                              <th className="text-right py-1 font-medium">Total</th>
+                          return (
+                            <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800">
+                              <td className="py-1.5 text-gray-400">{idx + 1}</td>
+                              <td className="py-1.5">
+                                <span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>
+                                {item.traditional_name && <span className="text-gray-400 ml-1">· {item.traditional_name}</span>}
+                              </td>
+                              <td className="text-center py-1.5 text-gray-500">{item.bottle_size || '-'}</td>
+                              <td className="text-center py-1.5 font-medium">{cases || '-'}</td>
+                              <td className="text-center py-1.5 font-bold text-green-600">{totalBtls || '-'}</td>
+                              <td className="text-center py-1.5 font-semibold text-cyan-600 dark:text-cyan-400">{item.qty_bulk_liters > 0 ? item.qty_bulk_liters.toFixed(3) : '-'}</td>
+                              <td className="text-center py-1.5 font-semibold text-purple-600 dark:text-purple-400">{item.qty_lp_liters > 0 ? item.qty_lp_liters.toFixed(3) : '-'}</td>
+                              <td className="px-2 py-2 text-center font-semibold text-orange-600">
+                                {item.mger_value || 0}
+                              </td>
+                              <td className="text-right py-1.5 font-semibold text-orange-600">₹{ratePerCase.toFixed(2)}</td>
+                              <td className="text-right py-1.5 font-semibold text-green-600">₹{ratePerUnit.toFixed(2)}</td>
+                              <td className="text-right py-1.5 font-medium">₹{item.total_cost.toFixed(2)}</td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {expandedItems[p.id].map((item, idx) => {
-                              const cases = item.qty_cases || 0
-                              const totalBtls = item.total_bottles || 0
-                              const ratePerCase = item.unit_cost || 0
-                              const ratePerUnit = item.purchase_rate_per_unit > 0
-                                ? item.purchase_rate_per_unit
-                                : (totalBtls > 0 ? (ratePerCase * cases) / totalBtls : 0)
+                          )
+                        })}
+                        {expandedItems[expandedId]?.length > 0 && (() => {
+                          const t = expandedItems[expandedId].reduce((acc, item) => {
+                            acc.totalBottles += Number(item.total_bottles) || 0
+                            acc.totalCases += Number(item.qty_cases) || 0
+                            acc.totalBL += Number(item.qty_bulk_liters) || 0
+                            acc.totalLPL += Number(item.qty_lp_liters) || 0
+                            acc.totalMger += Number(item.mger_value) || 0
+                            acc.totalCost += Number(item.total_cost) || 0
+                            return acc
+                          }, { totalBottles: 0, totalCases: 0, totalBL: 0, totalLPL: 0, totalMger: 0, totalCost: 0 })
 
-                              return (
-                                <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800">
-                                  <td className="py-1.5 text-gray-400">{idx + 1}</td>
-                                  <td className="py-1.5">
-                                    <span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>
-                                    {item.traditional_name && <span className="text-gray-400 ml-1">· {item.traditional_name}</span>}
-                                  </td>
-                                  <td className="text-center py-1.5 text-gray-500">{item.bottle_size || '-'}</td>
-                                  <td className="text-center py-1.5 font-medium">{cases || '-'}</td>
-                                  <td className="text-center py-1.5 font-bold text-green-600">{totalBtls || '-'}</td>
-                                  <td className="text-center py-1.5 font-semibold text-cyan-600 dark:text-cyan-400">{item.qty_bulk_liters > 0 ? item.qty_bulk_liters.toFixed(3) : '-'}</td>
-                                  <td className="text-center py-1.5 font-semibold text-purple-600 dark:text-purple-400">{item.qty_lp_liters > 0 ? item.qty_lp_liters.toFixed(3) : '-'}</td>
-                                  <td className="px-2 py-2 text-center font-semibold text-orange-600">
-                                   {item.mger_value || 0}
-                                  </td>
-                                  <td className="text-right py-1.5 font-semibold text-orange-600">₹{ratePerCase.toFixed(2)}</td>
-                                  <td className="text-right py-1.5 font-semibold text-green-600">₹{ratePerUnit.toFixed(2)}</td>
-                                  <td className="text-right py-1.5 font-medium">₹{item.total_cost.toFixed(2)}</td>
-                                </tr>
-                              )
-                            })}
-                            {expandedItems[expandedId]?.length > 0 && (() => {
-  const t = expandedItems[expandedId].reduce((acc, item) => {
-    acc.totalBottles += Number(item.total_bottles) || 0
-    acc.totalCases += Number(item.qty_cases) || 0
-    acc.totalBL += Number(item.qty_bulk_liters) || 0
-    acc.totalLPL += Number(item.qty_lp_liters) || 0
-    acc.totalMger += Number(item.mger_value) || 0
-    acc.totalCost += Number(item.total_cost) || 0
-    return acc
-  }, { totalBottles: 0, totalCases: 0, totalBL: 0, totalLPL: 0, totalMger: 0, totalCost: 0 })
-
-  return (
-    <tr className="bg-emerald-50 dark:bg-emerald-900/20 border-t-2 border-emerald-300 dark:border-emerald-700 font-bold text-xs">
-      <td className="px-2 py-2 text-emerald-800 dark:text-emerald-300" colSpan={3}>TOTAL</td>
-      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalCases}</td>
-      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBottles}</td>
-      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBL.toFixed(3)}</td>
-      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalLPL.toFixed(3)}</td>
-      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalMger.toFixed(2)}</td>
-      <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">₹{t.totalCost.toFixed(2)}</td>
-      <td colSpan={2}></td>
-    </tr>
-  )
-})()}
-                          </tbody>
-                        </table>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-
-              
-            </tbody>
-          </table>
-        </div>
-      </div>
+                          return (
+                            <>
+                              {/* ── Items Subtotal (line items only, no taxes) ── */}
+                              <tr className="bg-blue-50 dark:bg-blue-900/15 border-t border-blue-200 dark:border-blue-800 text-xs">
+                                <td className="px-2 py-2 font-semibold text-blue-700 dark:text-blue-300" colSpan={10}>
+                                  Items Subtotal
+                                </td>
+                                <td className="px-2 py-2 text-right font-bold text-blue-700 dark:text-blue-300">
+                                  ₹{t.totalCost.toFixed(2)}
+                                </td>
+                              </tr>
+                              {/* ── Items Row Totals (qty summary) ── */}
+                              <tr className="bg-emerald-50 dark:bg-emerald-900/20 border-t-2 border-emerald-300 dark:border-emerald-700 font-bold text-xs">
+                                <td className="px-2 py-2 text-emerald-800 dark:text-emerald-300" colSpan={3}>TOTAL QTY</td>
+                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalCases}</td>
+                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBottles}</td>
+                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBL.toFixed(3)}</td>
+                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalLPL.toFixed(3)}</td>
+                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalMger.toFixed(2)}</td>
+                                <td colSpan={3}></td>
+                              </tr>
+                              {/* ── Purchase-level Total Cost vs Grand Total summary ── */}
+                              <tr className="bg-slate-100 dark:bg-slate-800/40 border-t border-slate-300 dark:border-slate-600 text-xs">
+                                <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400" colSpan={8}>
+                                  Taxes: VAT ₹{Number(p.vat_amount || 0).toFixed(2)}
+                                  {Number(p.cess_amount || 0) > 0 && <> · CESS ₹{Number(p.cess_amount).toFixed(2)}</>}
+                                  {Number(p.special_amount || 0) > 0 && <> · Special ₹{Number(p.special_amount).toFixed(2)}</>}
+                                  {Number(p.tcs_amount || 0) > 0 && <> · TCS ₹{Number(p.tcs_amount).toFixed(2)}</>}
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-semibold text-blue-700 dark:text-blue-400">₹{totalCost.toFixed(2)}</td>
+                                <td className="px-2 py-1.5 text-right font-bold text-green-700 dark:text-green-400">₹{grandTotal.toFixed(2)}</td>
+                              </tr>
+                            </>
+                          )
+                        })()}
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          )
+        })}
+      </tbody>
+    </table>
+  </div>
+</div>
     </div>
   )
 }

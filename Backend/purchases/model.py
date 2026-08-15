@@ -2,12 +2,11 @@ from sqlalchemy import Column, Integer, String, Float, Date, Text, ForeignKey
 from sqlalchemy.sql import func
 from database import Base
 
-
 class Purchase(Base):
     __tablename__ = "purchases"
 
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, nullable=True, index=True) # ─── ADDED
+    company_id = Column(Integer, nullable=True, index=True)
     
     invoice_number = Column(String, unique=True, index=True, nullable=False)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
@@ -17,12 +16,27 @@ class Purchase(Base):
     invoice_date = Column(Date, nullable=True)       
     billing_date = Column(Date, nullable=False)      
 
+    # ─── NEW: COUNTER or GODOWN ───
+    stock_destination = Column(String, default="GODOWN", nullable=False)
+
     subtotal = Column(Float, default=0.0)
     vat_amount = Column(Float, default=0.0)
     cess_amount = Column(Float, default=0.0)
     special_amount = Column(Float, default=0.0)
     tcs_amount = Column(Float, default=0.0)
+    
+
+    handling_transport = Column(Float, default=0.0)
+    handling_depot_exp = Column(Float, default=0.0)
+    handling_pass_fees = Column(Float, default=0.0)
+    handling_unloading = Column(Float, default=0.0)
+    handling_other_name = Column(String, nullable=True)
+    handling_other_amount = Column(Float, default=0.0)
+    total_handling = Column(Float, default=0.0)
     total_amount = Column(Float, default=0.0)
+
+
+
 
     notes = Column(Text, nullable=True)              
     vehicle_number = Column(String, nullable=True)   
@@ -30,6 +44,8 @@ class Purchase(Base):
 
     created_at = Column(Date, server_default=func.current_date())
     updated_at = Column(Date, onupdate=func.current_date())
+
+
 
 
 class PurchaseItem(Base):

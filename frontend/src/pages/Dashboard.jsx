@@ -127,6 +127,7 @@ export default function Dashboard() {
   // ═══════════════════════════════════════════════════════════
   const mgrPct = mgr_status?.percentage || 0
   const mgrAchieved = mgr_status?.achieved || 0
+  
   const mgrTarget = mgr_status?.monthly_target || 30890000
   const mgrToBe = mgr_status?.to_be_achieved || 0
   const daysLeft = Math.max(0, new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate())

@@ -1,9 +1,10 @@
+// Reports.jsx - Fixed MRP race condition
 import { useState, useEffect, Fragment, useMemo } from 'react'
 import {
   Store, Warehouse, TrendingUp, CreditCard, Banknote, Smartphone,
   Users, Receipt, RotateCcw, Filter, FileDown, Clock3, Calendar,
   Tag, Package, BarChart3, ArrowUpDown, AlertCircle, Loader as Loader2,
-  Pencil
+  Pencil, SplitSquareHorizontal
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
@@ -11,7 +12,6 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 import { format } from 'date-fns'
 
-// Import API functions
 import { getCounterSales } from '../apiservices/sales-counter'
 import { getPosProducts } from '../apiservices/sales-counter'
 import { getGodownProducts, getGodownSales } from '../apiservices/godown-counter'
@@ -43,6 +43,28 @@ const downloadAsBlob = (data, fileName) => {
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+const parsePaymentDetails = (sale) => {
+  let cashAmount = 0
+  let upiAmount = 0
+  let cardAmount = 0
+
+  if (sale.payment_details && Array.isArray(sale.payment_details) && sale.payment_details.length > 0) {
+    sale.payment_details.forEach(split => {
+      const amount = Number(split.amount) || 0
+      if (split.mode === 'CASH') cashAmount += amount
+      if (split.mode === 'UPI') upiAmount += amount
+      if (split.mode === 'CARD') cardAmount += amount
+    })
+  } else {
+    const amount = Number(sale.total_amount) || 0
+    if (sale.payment_mode === 'CASH') cashAmount = amount
+    else if (sale.payment_mode === 'UPI') upiAmount = amount
+    else if (sale.payment_mode === 'CARD') cardAmount = amount
+  }
+
+  return { cashAmount, upiAmount, cardAmount }
 }
 
 export default function Reports() {
@@ -100,7 +122,7 @@ export default function Reports() {
       }
     };
     fetchProducts();
-  }, [activeTab, companyId]);
+  }, [activeTab, companyId])
 
   // ─── Fetch report data ───
   useEffect(() => {
@@ -124,6 +146,7 @@ export default function Reports() {
 
       const transformed = (salesData || []).map(sale => {
         const billDiscount = (sale.items || []).reduce((sum, item) => sum + (item.discount || 0), 0)
+        const { cashAmount, upiAmount, cardAmount } = parsePaymentDetails(sale)
 
         return {
           id: sale.invoice_number,
@@ -132,18 +155,21 @@ export default function Reports() {
           type: activeTab,
           transactionType: 'SALE',
           paymentMode: sale.payment_mode,
+          paymentDetails: sale.payment_details,
           customerId: sale.customer_phone,
           customerName: sale.customer_name,
           totalAmount: sale.total_amount,
           discount: billDiscount,
+          cashAmount,
+          upiAmount,
+          cardAmount,
+          // ← CHANGED: Store RAW item data here, NO productsMap lookup
           items: (sale.items || []).map(item => ({
             productId: item.product_id,
             name: item.product_name,
-            brand: productsMap[item.product_id]?.brand || 'Unknown',
-            category: productsMap[item.product_id]?.category || 'Unknown',
-            size: productsMap[item.product_id]?.bottle_size || 'Unknown',
             qty: item.quantity,
             amount: item.total_price,
+            unit_price: item.unit_price,
             discount: item.discount || 0,
           }))
         }
@@ -157,17 +183,43 @@ export default function Reports() {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // FIXED: Added productsMap to dependency array
+  // Enrichment (brand, category, size, mrp) happens HERE,
+  // not in fetchReportData, so it re-runs when productsMap loads
+  // ═══════════════════════════════════════════════════════════
   const { summary, tableData, topSelling } = useMemo(() => {
-    let filtered = rawData.filter(row => {
+    // ─── Step 1: Enrich items with productsMap ───
+    const enrichedData = rawData.map(row => ({
+      ...row,
+      items: row.items.map(item => ({
+        ...item,
+        brand: productsMap[item.productId]?.brand || 'Unknown',
+        category: productsMap[item.productId]?.category || 'Unknown',
+        size: productsMap[item.productId]?.bottle_size || 'Unknown',
+        mrp: productsMap[item.productId]?.mrp || 0,
+      }))
+    }))
+
+    // ─── Step 2: Filter ───
+    let filtered = enrichedData.filter(row => {
       const rowDate = format(new Date(row.date), 'yyyy-MM-dd')
       if (rowDate < dateFrom || rowDate > dateTo) return false
       if (salesType !== 'ALL' && row.transactionType !== salesType) return false
-      if (paymentMode !== 'ALL' && row.paymentMode !== paymentMode) return false
+
+      if (paymentMode !== 'ALL') {
+        if (paymentMode === 'CASH' && row.cashAmount <= 0) return false
+        if (paymentMode === 'UPI' && row.upiAmount <= 0) return false
+        if (paymentMode === 'CARD' && row.cardAmount <= 0) return false
+        if (paymentMode === 'SPLIT' && (!row.paymentDetails || row.paymentDetails.length <= 1)) return false
+      }
+
       if (discountFilter === 'WITH_DISCOUNT' && (!row.discount || row.discount <= 0)) return false
       if (discountFilter === 'WITHOUT_DISCOUNT' && row.discount > 0) return false
       return true
     })
 
+    // ─── Step 3: Summary ───
     const totalBills = new Set(filtered.filter(f => f.transactionType === 'SALE').map(f => f.id)).size
     const totalCustomers = new Set(filtered.filter(f => f.customerId && f.transactionType === 'SALE').map(f => f.customerId)).size
     const nonBillCustomers = totalBills - totalCustomers
@@ -175,7 +227,9 @@ export default function Reports() {
     const totalReturns = filtered.filter(f => f.transactionType === 'RETURN').reduce((s, f) => s + Math.abs(f.totalAmount), 0)
     const totalDiscount = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.discount || 0), 0)
 
-    const byPayment = (type) => filtered.filter(f => f.paymentMode === type && f.transactionType === 'SALE').reduce((s, f) => s + f.totalAmount, 0)
+    const totalUpi = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.upiAmount || 0), 0)
+    const totalCash = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.cashAmount || 0), 0)
+    const totalCard = filtered.filter(f => f.transactionType === 'SALE').reduce((s, f) => s + (f.cardAmount || 0), 0)
 
     const summary = {
       totalBills,
@@ -184,11 +238,12 @@ export default function Reports() {
       totalSales,
       totalReturns,
       totalDiscount,
-      upi: byPayment('UPI'),
-      cash: byPayment('CASH'),
-      card: byPayment('CARD'),
+      upi: totalUpi,
+      cash: totalCash,
+      card: totalCard,
     }
 
+    // ─── Step 4: Grouping ───
     const groups = {}
 
     const getGroupKey = (row, item = null) => {
@@ -215,11 +270,15 @@ export default function Reports() {
       if (['item', 'brand', 'category', 'size'].includes(groupBy)) {
         row.items.forEach(item => {
           const key = getGroupKey(row, item)
-          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, bills: new Set() }
+          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, mrp: 0, bills: new Set() }
           groups[key].qty += item.qty * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].amount += item.amount * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].discount += (item.discount || 0) * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].bills.add(row.id)
+
+          if (groupBy === 'item') {
+            groups[key].mrp = item.mrp || 0
+          }
         })
       } else {
         const key = getGroupKey(row)
@@ -234,19 +293,23 @@ export default function Reports() {
         if (row.transactionType === 'RETURN') {
           groups[key].returns += Math.abs(amt)
         } else {
-          if (row.paymentMode === 'UPI') groups[key].upi += amt
-          if (row.paymentMode === 'CASH') groups[key].cash += amt
-          if (row.paymentMode === 'CARD') groups[key].card += amt
+          groups[key].upi += row.upiAmount || 0
+          groups[key].cash += row.cashAmount || 0
+          groups[key].card += row.cardAmount || 0
         }
 
         if (groupBy === 'bill') {
           if (!groups[key].date) groups[key].date = row.date
           if (!groups[key].paymentMode) groups[key].paymentMode = row.paymentMode
+          if (!groups[key].paymentDetails) groups[key].paymentDetails = row.paymentDetails
           if (!groups[key].customerId) groups[key].customerId = row.customerId
           if (!groups[key].customerName) groups[key].customerName = row.customerName
           if (!groups[key].billItems) groups[key].billItems = row.items
           if (!groups[key].discount) groups[key].discount = row.discount
           if (!groups[key].dbId) groups[key].dbId = row.dbId
+          if (!groups[key].cashAmount) groups[key].cashAmount = row.cashAmount
+          if (!groups[key].upiAmount) groups[key].upiAmount = row.upiAmount
+          if (!groups[key].cardAmount) groups[key].cardAmount = row.cardAmount
         }
       }
     })
@@ -256,6 +319,7 @@ export default function Reports() {
       bills: val.bills.size,
       customers: val.customers?.size || 0,
       qty: val.qty || 0,
+      mrp: val.mrp || 0,
       amount: val.amount,
       returns: val.returns || 0,
       discount: val.discount || 0,
@@ -264,10 +328,14 @@ export default function Reports() {
       card: val.card || 0,
       date: val.date || null,
       paymentMode: val.paymentMode || null,
+      paymentDetails: val.paymentDetails || null,
       customerId: val.customerId || null,
       customerName: val.customerName || null,
       billItems: val.billItems || null,
       dbId: val.dbId || null,
+      cashAmount: val.cashAmount || 0,
+      upiAmount: val.upiAmount || 0,
+      cardAmount: val.cardAmount || 0,
     })).sort((a, b) => {
       if (groupBy === 'bill' && a.date && b.date) {
         return new Date(b.date) - new Date(a.date)
@@ -279,8 +347,9 @@ export default function Reports() {
       return a.group.localeCompare(b.group)
     })
 
+    // ─── Step 5: Top Selling ───
     const itemGroups = {}
-    rawData.filter(f => f.transactionType === 'SALE' && format(new Date(f.date), 'yyyy-MM-dd') >= dateFrom && format(new Date(f.date), 'yyyy-MM-dd') <= dateTo).forEach(row => {
+    enrichedData.filter(f => f.transactionType === 'SALE' && format(new Date(f.date), 'yyyy-MM-dd') >= dateFrom && format(new Date(f.date), 'yyyy-MM-dd') <= dateTo).forEach(row => {
       row.items.forEach(item => {
         if (!itemGroups[item.name]) itemGroups[item.name] = { qty: 0, amount: 0 }
         itemGroups[item.name].qty += item.qty
@@ -293,23 +362,30 @@ export default function Reports() {
       .slice(0, 10)
 
     return { summary, tableData, topSelling }
-  }, [rawData, dateFrom, dateTo, groupBy, salesType, paymentMode, discountFilter])
+    // ↑↑↑ FIXED: added productsMap to deps — re-runs when products load
+  }, [rawData, productsMap, dateFrom, dateTo, groupBy, salesType, paymentMode, discountFilter])
 
   const handleExport = async () => {
     if (tableData.length === 0) return alert('No data to export')
 
-    const exportData = tableData.map(row => ({
-      [groupBy.toUpperCase()]: row.group,
-      'Bills': row.bills,
-      'Customers': row.customers,
-      'Qty': row.qty,
-      'Total Amount': row.amount,
-      'Discount': row.discount,
-      'Returns': row.returns,
-      'UPI': row.upi,
-      'Cash': row.cash,
-      'Card': row.card,
-    }))
+    const exportData = tableData.map(row => {
+      const base = {
+        [groupBy.toUpperCase()]: row.group,
+        'Bills': row.bills,
+        'Customers': row.customers,
+        'Qty': row.qty,
+        'Total Amount': row.amount,
+        'Discount': row.discount,
+        'Returns': row.returns,
+        'UPI': row.upi,
+        'Cash': row.cash,
+        'Card': row.card,
+      }
+      if (groupBy === 'item') {
+        base['MRP'] = row.mrp || 0
+      }
+      return base
+    })
 
     const ws = XLSX.utils.json_to_sheet(exportData)
     const wb = XLSX.utils.book_new()
@@ -336,9 +412,6 @@ export default function Reports() {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // EDIT: Navigate to POS with sale data
-  // ═══════════════════════════════════════════════════════════════
   const handleEditSale = (row) => {
     if (!row.dbId || !row.billItems) {
       alert('Cannot edit this sale — missing data')
@@ -347,12 +420,30 @@ export default function Reports() {
 
     const cartItems = row.billItems.map((item, idx) => {
       const product = productsMap[item.productId] || {}
+      const unitPrice = item.unit_price || product.sale_price || 0
+      const perUnitDiscount = item.qty > 0 ? (item.discount || 0) / item.qty : 0
+      const itemMrp = product.mrp || unitPrice
+
       return {
         ...product,
-        scanId: `edit-${item.productId}-${idx}-${Date.now()}`,
-        productId: item.productId,
+        scanId: `edit-${item.productId || item.name}-${idx}-${Date.now()}`,
+        productId: item.productId != null ? item.productId : (product.id != null ? product.id : null),
+        id: item.productId != null ? item.productId : (product.id != null ? product.id : null),
+        name: item.name || product.name || 'Unknown Product',
+        sale_price: unitPrice,
+        mrp: itemMrp,
+        bottle_size: item.size !== 'Unknown' ? item.size : (product.bottle_size || ''),
+        brand: item.brand !== 'Unknown' ? item.brand : (product.brand || ''),
+        category: item.category !== 'Unknown' ? item.category : (product.category || ''),
+        traditional_name: product.traditional_name || '',
+        barcode: product.barcode || '',
+        item_code: product.item_code || '',
+        godown_stock: product.godown_stock != null ? product.godown_stock : 9999,
+        current_stock: product.current_stock != null ? product.current_stock : 9999,
+        image_url: product.image_url || null,
+        is_active: product.is_active ?? true,
         quantity: item.qty,
-        discount: item.discount || 0,
+        discount: perUnitDiscount,
         paymentMode: row.paymentMode === 'SPLIT' ? 'CASH' : (row.paymentMode || 'CASH'),
       }
     })
@@ -364,6 +455,8 @@ export default function Reports() {
       customerName: row.customerName || 'Walk-in Customer',
       customerPhone: row.customerId || '',
       paymentMode: row.paymentMode || 'CASH',
+      paymentDetails: row.paymentDetails,
+      saleDate: row.date,
       cartItems,
     }
 
@@ -376,7 +469,22 @@ export default function Reports() {
     )
   }
 
-  // ─── GUARD: NO COMPANY SELECTED ───
+  const renderPaymentDetails = (row) => {
+    if (row.paymentDetails && row.paymentDetails.length > 1) {
+      return (
+        <div className="mt-1 space-y-0.5">
+          {row.paymentDetails.map((split, idx) => (
+            <div key={idx} className="flex justify-between text-[10px] text-gray-500">
+              <span>{split.mode}:</span>
+              <span>₹{Number(split.amount).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      )
+    }
+    return null
+  }
+
   if (!companyId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
@@ -387,16 +495,13 @@ export default function Reports() {
     )
   }
 
-  // Bill-wise has 8 columns
   const billColSpan = 8
-  // Non-bill date/month/year/hour has 8 columns
   const dateColSpan = 8
-  // Non-bill item/brand/category/size has 4 columns
-  const itemColSpan = 4
+  const itemColSpan = groupBy === 'item' ? 6 : 5
 
   return (
     <div className="space-y-6">
-      {/* ─── Header with Tab Toggle & Company Badge ─── */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex items-center gap-3">
           <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
@@ -431,23 +536,35 @@ export default function Reports() {
       )}
 
       {/* ─── Summary Cards ─── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-9 gap-4">
+      <div className={clsx(
+        "grid gap-4",
+        activeTab === 'godown'
+          ? "grid-cols-2 md:grid-cols-3 xl:grid-cols-6"
+          : "grid-cols-2 md:grid-cols-4 xl:grid-cols-8"
+      )}>
         <div className="card p-4 border-l-4 border-blue-500">
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Receipt className="w-3.5 h-3.5" /> Bills</div>
           <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalBills}</p>
         </div>
-        <div className="card p-4 border-l-4 border-indigo-500">
-          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Users className="w-3.5 h-3.5" /> Customers</div>
-          <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalCustomers}</p>
-        </div>
-        <div className="card p-4 border-l-4 border-orange-500">
-          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1">
-            <Users className="w-3.5 h-3.5" /> Non Bill Customer
+
+        {activeTab === 'counter' && (
+          <div className="card p-4 border-l-4 border-indigo-500">
+            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Users className="w-3.5 h-3.5" /> Customers</div>
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{summary.totalCustomers}</p>
           </div>
-          <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
-            {summary.nonBillCustomers}
-          </p>
-        </div>
+        )}
+
+        {activeTab === 'counter' && (
+          <div className="card p-4 border-l-4 border-orange-500">
+            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1">
+              <Users className="w-3.5 h-3.5" /> Walk-in
+            </div>
+            <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
+              {summary.nonBillCustomers}
+            </p>
+          </div>
+        )}
+
         <div className="card p-4 border-l-4 border-emerald-500">
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><TrendingUp className="w-3.5 h-3.5" /> Total Sales</div>
           <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">₹{summary.totalSales.toLocaleString()}</p>
@@ -468,13 +585,9 @@ export default function Reports() {
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><CreditCard className="w-3.5 h-3.5" /> Card</div>
           <p className="text-lg font-bold text-blue-500 dark:text-blue-400">₹{summary.card.toLocaleString()}</p>
         </div>
-        <div className="card p-4 border-l-4 border-red-500">
-          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><RotateCcw className="w-3.5 h-3.5" /> Returns</div>
-          <p className="text-lg font-bold text-red-500 dark:text-red-400">₹{summary.totalReturns.toLocaleString()}</p>
-        </div>
       </div>
 
-      {/* ─── Filters & Grouping ─── */}
+      {/* Filters */}
       <div className="card p-4 border dark:border-slate-700 shadow-sm">
         <div className="flex items-center gap-2 mb-3 text-gray-700 dark:text-gray-300 font-medium text-sm">
           <Filter className="w-4 h-4 text-blue-500" /> Report Filters & Grouping
@@ -509,6 +622,7 @@ export default function Reports() {
               <option value="CASH">Cash</option>
               <option value="UPI">UPI</option>
               <option value="CARD">Card</option>
+              <option value="SPLIT">Split Payments</option>
             </select>
           </div>
           <div>
@@ -547,7 +661,7 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* ─── Report Table & Top Selling ─── */}
+      {/* Report Table & Top Selling */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card overflow-hidden border dark:border-slate-700 shadow-sm">
           <div className="p-4 border-b dark:border-slate-700 flex justify-between items-center">
@@ -588,6 +702,9 @@ export default function Reports() {
                       {['item', 'brand', 'category', 'size'].includes(groupBy) && (
                         <>
                           <th className="p-3 text-center font-semibold text-gray-500">Qty</th>
+                          {groupBy === 'item' && (
+                            <th className="p-3 text-right font-semibold text-amber-600 dark:text-amber-400">MRP ₹</th>
+                          )}
                           <th className="p-3 text-right font-semibold text-gray-500">Disc. ₹</th>
                         </>
                       )}
@@ -623,6 +740,7 @@ export default function Reports() {
                             )}>
                               {row.paymentMode}
                             </span>
+                            {renderPaymentDetails(row)}
                           </td>
                           <td className="p-3 text-center text-gray-500">
                             {row.billItems?.length || 0}
@@ -654,6 +772,23 @@ export default function Reports() {
                           <tr className="bg-gray-50 dark:bg-gray-800/30">
                             <td colSpan={billColSpan} className="p-0">
                               <div className="px-6 py-3 border-l-4 border-blue-400 ml-4">
+                                {row.paymentDetails && row.paymentDetails.length > 1 && (
+                                  <div className="mb-3 p-2 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                                    <div className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 mb-1">Payment Breakdown:</div>
+                                    <div className="flex flex-wrap gap-3">
+                                      {row.paymentDetails.map((split, idx) => (
+                                        <div key={idx} className="flex items-center gap-1.5 text-xs">
+                                          <span className={clsx("w-2 h-2 rounded-full",
+                                            split.mode === 'CASH' ? "bg-amber-500" :
+                                            split.mode === 'UPI' ? "bg-green-500" : "bg-blue-500"
+                                          )}></span>
+                                          <span className="text-gray-600 dark:text-gray-400">{split.mode}:</span>
+                                          <span className="font-semibold text-gray-800 dark:text-gray-200">₹{Number(split.amount).toFixed(2)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                                 <table className="w-full text-xs">
                                   <thead>
                                     <tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700">
@@ -711,6 +846,11 @@ export default function Reports() {
                         {['item', 'brand', 'category', 'size'].includes(groupBy) && (
                           <>
                             <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">{row.qty}</td>
+                            {groupBy === 'item' && (
+                              <td className="p-3 text-right font-medium text-amber-700 dark:text-amber-400">
+                                {row.mrp > 0 ? `₹${Number(row.mrp).toFixed(2)}` : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                              </td>
+                            )}
                             <td className={clsx("p-3 text-right", row.discount > 0 ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-600")}>
                               {row.discount > 0 ? `-₹${row.discount.toLocaleString()}` : '-'}
                             </td>
@@ -754,6 +894,7 @@ export default function Reports() {
                     <tr className="font-bold text-xs">
                       <td className="p-3 text-right text-gray-700 dark:text-gray-300">Grand Total</td>
                       <td className="p-3 text-center text-blue-600 dark:text-blue-400">{tableData.reduce((s, r) => s + r.qty, 0)}</td>
+                      {groupBy === 'item' && <td></td>}
                       <td className="p-3 text-right text-rose-500 dark:text-rose-400">
                         -₹{tableData.reduce((s, r) => s + r.discount, 0).toLocaleString()}
                       </td>

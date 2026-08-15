@@ -79,3 +79,23 @@ export const updateSale = async (saleId, saleData) => {
   if (!res.ok) throw new Error(data.detail || 'Failed to update sale')
   return data
 }
+
+export const updateProductMrp = async (productId, companyId, newMrp) => {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`${API_BASE}/sales/update-mrp`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      product_id: productId,
+      company_id: companyId,
+      new_mrp: newMrp,
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || 'Failed to update MRP')
+  return data
+}

@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Building2, Clock, Plus, ChevronDown, ChevronUp, Save, Loader2,
-  ShieldCheck, Settings, Landmark, ArrowLeft, LayoutDashboard, AlertCircle, Edit3, Trash2
+  ShieldCheck, Settings, Landmark, ArrowLeft, LayoutDashboard, AlertCircle, Edit3, Trash2, Target
 } from 'lucide-react'
 
 // Import the API functions
@@ -27,6 +27,7 @@ const EMPTY_COMPANY = {
   defaultCess: 0,
   defaultSpecial: 0,
   defaultTcs: 1,
+  mgerTargetedValue: 0,  // ← ADD THIS
 }
 
 export default function Companies() {
@@ -233,23 +234,23 @@ export default function Companies() {
                     <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Owner Name *</label>
                     <input type="text" required value={currentCompany.ownerName} onChange={e => handleChange('ownerName', e.target.value)} className="input-field" />
                   </div>
-                 <div>
-  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-    Phone
-  </label>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      Phone
+                    </label>
 
-  <input
-    type="text"
-    value={currentCompany.phone}
-    maxLength={10}
-    onChange={e => {
-      const value = e.target.value.replace(/\D/g, ""); // only numbers
-      handleChange('phone', value);
-    }}
-    className="input-field"
-    placeholder="Enter 10 digit phone number"
-  />
-</div>
+                    <input
+                      type="text"
+                      value={currentCompany.phone}
+                      maxLength={10}
+                      onChange={e => {
+                        const value = e.target.value.replace(/\D/g, ""); // only numbers
+                        handleChange('phone', value);
+                      }}
+                      className="input-field"
+                      placeholder="Enter 10 digit phone number"
+                    />
+                  </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Email</label>
                     <input type="email" value={currentCompany.email} onChange={e => handleChange('email', e.target.value)} className="input-field" />
@@ -286,24 +287,24 @@ export default function Companies() {
                     </label>
 
                     <select
-  value={currentCompany.exciseZone}
-  onChange={e => handleChange('exciseZone', e.target.value)}
-  className="input-field"
->
-  <option value="">Select Excise Division</option>
+                      value={currentCompany.exciseZone}
+                      onChange={e => handleChange('exciseZone', e.target.value)}
+                      className="input-field"
+                    >
+                      <option value="">Select Excise Division</option>
 
-  <option value="Northern Division (Sambalpur)">
-    Northern Division (Sambalpur)
-  </option>
+                      <option value="Northern Division (Sambalpur)">
+                        Northern Division (Sambalpur)
+                      </option>
 
-  <option value="Central Division (Cuttack)">
-    Central Division (Cuttack)
-  </option>
+                      <option value="Central Division (Cuttack)">
+                        Central Division (Cuttack)
+                      </option>
 
-  <option value="Southern Division (Berhampur)">
-    Southern Division (Berhampur)
-  </option>
-</select>
+                      <option value="Southern Division (Berhampur)">
+                        Southern Division (Berhampur)
+                      </option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">PAN Number</label>
@@ -358,8 +359,16 @@ export default function Companies() {
                     <span className="text-sm text-gray-700 dark:text-gray-300">TCS %</span>
                     <input type="number" value={currentCompany.defaultTcs} onChange={e => handleChange('defaultTcs', e.target.value)} className="w-20 input-field text-right text-sm py-1" />
                   </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-700 dark:text-gray-300">MGR Target (₹)</span>
+                    <input type="number" value={currentCompany.mgerTargetedValue} onChange={e => handleChange('mgerTargetedValue', e.target.value)} className="w-20 input-field text-right text-sm py-1" />
+                  </div>
                 </div>
+
+                
               </div>
+
+              
 
               <button
                 type="submit"
@@ -452,7 +461,15 @@ export default function Companies() {
                                 <p className="text-xs text-gray-500 dark:text-gray-400">VAT: <span className="text-gray-900 dark:text-white font-medium">{c.defaultVat}%</span></p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">CESS: <span className="text-gray-900 dark:text-white font-medium">{c.defaultCess}%</span></p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">Special: <span className="text-gray-900 dark:text-white font-medium">{c.defaultSpecial}%</span></p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">TCS: <span className="text-gray-900 dark:text-white font-medium">{c.defaultTcs}%</span></p>
+                               
+                               <p className="text-xs text-gray-500 dark:text-gray-400">TCS: <span className="text-gray-900 dark:text-white font-medium">{c.defaultTcs}%</span></p>
+                               <p className="text-xs text-gray-500 dark:text-gray-400">
+  MGER Target:
+  <span className="text-gray-900 dark:text-white font-medium">
+    {" "}
+    {c.mgerTargetedValue}
+  </span>
+</p>
                               </div>
                             </div>
 

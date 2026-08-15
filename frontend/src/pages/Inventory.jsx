@@ -10,10 +10,11 @@ import { writeFile } from '@tauri-apps/plugin-fs'
 import { getProducts, createProduct, updateProduct, deleteProduct } from '../apiservices/inventoryapi'
 
 // ─── Dropdown Constants ───
-const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY', 'OTHER']
+const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY','SCOTCH WHISKY', 'OTHER']
 
 const SUB_CATEGORIES_BY_CATEGORY = {
   'WHISKY': ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE'],
+  'SCOTCH WHISKY':['SUPREME','SUPERIOR','RESERVE','CLASSIC','ULTRA PREMIUM','EXTRA PLANTINUM','ULTRA GOLD','ULTRA PREMIUM','ORIGINAL'],
   'RUM': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE', 'DARK', 'WHITE', 'SPICED', 'GOLD'],
   'VODKA': ['PREMIUM', 'SUPER PREMIUM', 'REGULAR', 'ECONOMY', 'FLAVOURED', 'NEUTRAL'],
   'GIN': ['PREMIUM', 'LONDON DRY', 'PLYMOUTH', 'OLD TOM', 'FLAVOURED', 'NAVY STRENGTH'],
@@ -25,17 +26,20 @@ const SUB_CATEGORIES_BY_CATEGORY = {
 
 const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'REGULAR', 'ECONOMY', 'DELUXE']
 
-const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE']
+const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE','FMFL']
 
 const BOTTLE_SIZES_BY_TYPE = {
   'IMFL': ['90ml', '180ml','200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
   'BEER': ['275ml', '330ml', '500ml', '650ml'],
-  'WINE': ['375ml', '500ml', '750ml', '1000ml', '2000ml'],
+  'WINE': ['180ml', '375ml', '500ml', '750ml', '1000ml', '2000ml'],
+  'FMFL':['50ml','60ml','90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '700ml','750ml', '1000ml'],
   
 }
 const DEFAULT_SIZES = BOTTLE_SIZES_BY_TYPE['IMFL']
 
 const SIZE_TRADITIONAL_MAP = {
+  '50ml':   { traditionalName: 'Mini / Chota Peg',       bottlesPerCase: 150 },
+  '60ml':   { traditionalName: 'Chhota Peg / 60ml Peg',  bottlesPerCase: 150 },
   '90ml':   { traditionalName: 'Peg / Miniature', bottlesPerCase: 96 },
   '180ml':  { traditionalName: 'Nip / Quarter',   bottlesPerCase: 48 },
   '200ml':  { traditionalName: 'Nip + / Quarter+',bottlesPerCase: 24 },
@@ -46,6 +50,7 @@ const SIZE_TRADITIONAL_MAP = {
   '375ml':  { traditionalName: 'Pint / Half',     bottlesPerCase: 24 },
   '500ml':  { traditionalName: 'Medium',          bottlesPerCase: 24 },
   '650ml':  { traditionalName: 'Large Beer',      bottlesPerCase: 12 },
+  '700ml':  { traditionalName: 'Three Quarter / 700ml',   bottlesPerCase: 12 },
   '750ml':  { traditionalName: 'Quart / Bottle',  bottlesPerCase: 12 },
   '1000ml': { traditionalName: 'Liter',           bottlesPerCase: 9 },
   '2000ml': { traditionalName: 'Double Liter',    bottlesPerCase: 6 },
@@ -80,7 +85,7 @@ const EXCEL_COLUMNS = [
   { header: 'Item Code', key: 'item_code', sample: 'ITM001' },
   { header: 'Barcode', key: 'barcode', sample: '8901234567890' },
   { header: 'Product Name', key: 'name', sample: 'Royal Stag 750ml' },
-  { header: 'Short Name', key: 'short_name', sample: 'RS750' },
+  { header: 'Company/Supplier', key: 'short_name', sample: 'RS750' },
   { header: 'Brand', key: 'brand', sample: 'Royal Stag' },
   { header: 'Category', key: 'category', sample: 'WHISKY' },
   { header: 'Sub Category', key: 'sub_category', sample: 'REGULAR' },
@@ -1046,7 +1051,7 @@ export default function Inventory() {
                     <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Short Name</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Company/Supplier</label>
                     <input value={form.short_name} onChange={e => setForm(f => ({ ...f, short_name: e.target.value }))} className="input-field" />
                   </div>
                   <div>

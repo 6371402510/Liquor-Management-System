@@ -1,11 +1,11 @@
+# schema.py
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-# ─── Product Schema for Godown POS ───
 class GodownProductResponse(BaseModel):
     id: int
-    company_id: Optional[int] = None # ─── ADDED
+    company_id: Optional[int] = None
     item_code: Optional[str] = None
     barcode: Optional[str] = None
     name: str
@@ -22,15 +22,18 @@ class GodownProductResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# ─── Checkout Schemas ───
 class GodownCheckoutItem(BaseModel):
-    product_id: int
+    product_id: Optional[int] = None 
     product_name: str
     quantity: int
     unit_price: float
     discount: float = 0.0
     total_price: float
     company_id: Optional[int] = None
+
+class PaymentSplitDetail(BaseModel):
+    mode: str  # CASH, UPI, CARD
+    amount: float
 
 class GodownCheckoutRequest(BaseModel):
     invoice_number: str
@@ -39,9 +42,13 @@ class GodownCheckoutRequest(BaseModel):
     customer_phone: Optional[str] = ""
     total_amount: float
     payment_mode: str = "CASH"
+    created_at: Optional[datetime] = None
+    payment_details: Optional[List[PaymentSplitDetail]] = None  # ← NEW
     items: List[GodownCheckoutItem]
 
 class GodownSaleItemResponse(BaseModel):
+    id: Optional[int] = None
+    product_id: Optional[int] = None
     product_name: str
     quantity: int
     unit_price: float
@@ -52,12 +59,14 @@ class GodownSaleItemResponse(BaseModel):
         from_attributes = True
 
 class GodownSaleResponse(BaseModel):
+    id: Optional[int] = None
     invoice_number: str
     company_id: Optional[int] = None
     customer_name: str
     customer_phone: Optional[str] = ""
     total_amount: float
     payment_mode: str
+    payment_details: Optional[List[Dict[str, Any]]] = None  # ← NEW
     created_at: datetime
     items: List[GodownSaleItemResponse]
 

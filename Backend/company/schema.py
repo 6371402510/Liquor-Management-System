@@ -18,6 +18,7 @@ class CompanyBase(BaseModel):
     excise_zone: Optional[str] = None
     gstin:Optional[str] = None
     pan: Optional[str] = None
+    mger_targeted_value: float = 0.0
     
     operating_hours: Optional[str] = "10:00 AM - 10:30 PM"
     dry_days_policy: Optional[str] = "Closed on National Holidays & Election Days as per Govt. norms"
@@ -38,6 +39,7 @@ class CompanyUpdate(CompanyBase):
     excise_license_no: Optional[str] = None
     trade_license_no: Optional[str] = None  # Added trade license field
     gstin: Optional[str] = None
+    mger_targeted_value: Optional[float] = None
 
 class CompanyResponse(CompanyBase):
     id: int

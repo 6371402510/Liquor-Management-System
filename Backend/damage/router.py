@@ -1,29 +1,31 @@
-from fastapi import APIRouter, Depends, HTTPException, status,Form, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile
 from sqlalchemy.orm import Session
-from typing import List,Optional
-import os                # <--- ADD THIS
-import uuid  
+from typing import List, Optional
+import os
+import uuid
 
 from database import get_db
 from .schema import DamageCreate, DamageUpdate, DamageResponse
 from .service import (
-    get_damages, 
-    get_damage, 
-    create_damage, 
-    update_damage, 
+    get_damages,
+    get_damage,
+    create_damage,
+    update_damage,
     soft_delete_damage
 )
 
+# ═══════════════════════════════════════════════════════════════
+# THIS LINE WAS MISSING — MUST BE BEFORE ANY @router decorators
+# ═══════════════════════════════════════════════════════════════
 router = APIRouter(
     prefix="/damages",
     tags=["Inventory / Damages"]
-    
 )
 
-
-# Directory to save images (create this folder in your project root)
+# Directory to save images
 UPLOAD_DIR = "uploads/damages"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 
 # =========================================================
 # STANDARD CRUD ROUTES
@@ -32,8 +34,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @router.get("/", response_model=List[DamageResponse])
 def list_damages(
     company_id: int | None = None,
-    skip: int = 0, 
-    limit: int = 1000, 
+    skip: int = 0,
+    limit: int = 1000,
     db: Session = Depends(get_db)
 ):
     """Get all active damage records, optionally filtered by company_id"""
@@ -51,7 +53,6 @@ def read_damage(damage_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=DamageResponse, status_code=status.HTTP_201_CREATED)
 async def create_new_damage(
-    # Accept standard fields as Form data
     company_id: Optional[int] = Form(None),
     product_id: Optional[int] = Form(None),
     product_name: str = Form(...),
@@ -62,30 +63,23 @@ async def create_new_damage(
     reason: str = Form(...),
     notes: Optional[str] = Form(None),
     damage_date: Optional[str] = Form(None),
+    damage_source: Optional[str] = Form('COUNTER'),
     recorded_by: Optional[int] = Form(None),
-    # Accept the image file
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
     """Create a new damage record with optional image upload"""
     image_url = None
-    
-    # Handle image saving
+
     if image and image.filename:
-        # Generate a unique filename to prevent overwrites
         file_extension = image.filename.split(".")[-1]
         unique_filename = f"{uuid.uuid4()}.{file_extension}"
         file_path = os.path.join(UPLOAD_DIR, unique_filename)
-        
-        # Read and save the file
         with open(file_path, "wb") as buffer:
             content = await image.read()
             buffer.write(content)
-            
-        # Store the relative path to serve it later
         image_url = f"/uploads/damages/{unique_filename}"
 
-    # Map form data to Pydantic model
     damage_data = DamageCreate(
         company_id=company_id,
         product_id=product_id,
@@ -97,18 +91,27 @@ async def create_new_damage(
         reason=reason,
         notes=notes,
         damage_date=damage_date,
+        damage_source=damage_source,
         recorded_by=recorded_by,
         image_url=image_url
     )
-    
-    return create_damage(db, damage_data)
 
+    try:
+        return create_damage(db, damage_data)
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.put("/{damage_id}", response_model=DamageResponse)
 def update_existing_damage(damage_id: int, damage_data: DamageUpdate, db: Session = Depends(get_db)):
     """Update a damage record"""
-    damage = update_damage(db, damage_id, damage_data)
+    try:
+        damage = update_damage(db, damage_id, damage_data)
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
     if not damage:
         raise HTTPException(status_code=404, detail="Damage record not found")
     return damage
@@ -117,7 +120,12 @@ def update_existing_damage(damage_id: int, damage_data: DamageUpdate, db: Sessio
 @router.delete("/{damage_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_damage(damage_id: int, db: Session = Depends(get_db)):
     """Soft delete a damage record"""
-    success = soft_delete_damage(db, damage_id)
+    try:
+        success = soft_delete_damage(db, damage_id)
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
     if not success:
         raise HTTPException(status_code=404, detail="Damage record not found")
     return

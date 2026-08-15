@@ -27,6 +27,7 @@ class SaleBase(BaseModel):
     customer_phone: Optional[str] = None
     total_amount: float
     payment_mode: str = "CASH"
+    created_at: Optional[datetime] = None  # ─── ADDED: Allow date modification
 
 class SaleCreate(SaleBase):
     items: List[SaleItemCreate]
@@ -38,3 +39,10 @@ class SaleResponse(SaleBase):
     items: List[SaleItemResponse] = []
     class Config:
         from_attributes = True
+
+
+
+class UpdateMrpRequest(BaseModel):
+    product_id: int
+    company_id: int
+    new_mrp: float

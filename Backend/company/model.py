@@ -22,6 +22,7 @@ class Company(Base):
     excise_zone = Column(String, nullable=True)
     gstin = Column(String, unique=True, index=True, nullable=True)
     pan = Column(String, nullable=True)
+    mger_targeted_value = Column(Float, default=0.0)
     
     # Store Operations
     operating_hours = Column(String, nullable=True)
@@ -32,6 +33,7 @@ class Company(Base):
     default_cess = Column(Float, default=0.0)
     default_special = Column(Float, default=0.0)
     default_tcs = Column(Float, default=1.0)
+
     
     # Volume Standards REMOVED
     
