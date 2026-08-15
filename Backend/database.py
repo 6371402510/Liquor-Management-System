@@ -1,42 +1,64 @@
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 from pathlib import Path
+load_dotenv()
+
+DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite").lower()    
+
+if DATABASE_TYPE == "sqlite":
+    def get_app_data_dir():
+        if os.name == "nt":  # Windows
+            base = os.getenv("APPDATA")
+        else:
+            base = os.path.expanduser("~/.local/share")
+
+        folder = Path(base) / "LiquorDesktop"
+
+        folder.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        return folder
 
 
-def get_app_data_dir():
-    if os.name == "nt":  # Windows
-        base = os.getenv("APPDATA")
-    else:
-        base = os.path.expanduser("~/.local/share")
+    DB_DIR = get_app_data_dir()
 
-    folder = Path(base) / "LiquorDesktop"
+    DB_PATH = DB_DIR / "liquor.db"
 
-    folder.mkdir(
-        parents=True,
-        exist_ok=True
+    DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+
+    print("DATABASE:", DB_PATH)
+
+
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={
+            "check_same_thread": False
+        }
     )
+    
+elif DATABASE_TYPE == "postgresql":
 
-    return folder
+    DATABASE_URL = os.getenv("DATABASE_URL")
 
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL environment variable is required "
+            "when DATABASE_TYPE=postgresql"
+        )
 
-DB_DIR = get_app_data_dir()
+    print("Database: PostgreSQL")
 
-DB_PATH = DB_DIR / "liquor.db"
-
-DATABASE_URL = f"sqlite:///{DB_PATH}"
-
-
-print("DATABASE:", DB_PATH)
-
-
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={
-        "check_same_thread": False
-    }
-)
-
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+    )
 
 SessionLocal = sessionmaker(
     autocommit=False,

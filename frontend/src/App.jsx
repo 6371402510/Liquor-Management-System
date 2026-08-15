@@ -40,6 +40,9 @@ import CashBankReport from './pages/CashBankReport.jsx'
 // ══════════════════════════════════════════════════
 // 👇 NEW: Component to wait for FastAPI to start
 // ══════════════════════════════════════════════════
+
+const API_BASE = import.meta.env.VITE_API_BASE;
+
 function BackendReady({ children }) {
   const [backendReady, setBackendReady] = useState(false);
 
@@ -47,7 +50,7 @@ function BackendReady({ children }) {
     const checkHealth = async () => {
       try {
         // Pings the root route of your FastAPI backend
-        const res = await fetch("http://127.0.0.1:8000/");
+        const res = await fetch(`${API_BASE}/`);
         if (res.ok) {
           setBackendReady(true);
         }

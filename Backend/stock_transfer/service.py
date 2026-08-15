@@ -10,7 +10,7 @@ def get_transfers(db: Session, company_id: int | None = None, skip: int = 0, lim
         
     return query.order_by(StockTransfer.created_at.desc()).offset(skip).limit(limit).all()
 
-def create_transfer(db: Session, transfer_data: StockTransferCreate):
+def create_transfer(db: Session, transfer_data: StockTransfer):
     items_data = transfer_data.items
     transfer_dict = transfer_data.model_dump(exclude={"items"})
     
