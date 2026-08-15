@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 // Import API functions
-import { getCompanies } from "../apiservices/companyApi";
+import { getCompanies } from "../apiservices/companyapi";
 import { getUsers, createUser, updateUser } from "../apiservices/staffApi";
 
 export default function StaffManagement() {
