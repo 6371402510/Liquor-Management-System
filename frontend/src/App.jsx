@@ -41,45 +41,45 @@ import CashBankReport from './pages/CashBankReport.jsx'
 // 👇 NEW: Component to wait for FastAPI to start
 // ══════════════════════════════════════════════════
 
-const API_BASE = import.meta.env.VITE_API_BASE;
+// const API_BASE = import.meta.env.VITE_API_BASE;
 
-function BackendReady({ children }) {
-  const [backendReady, setBackendReady] = useState(false);
+// function BackendReady({ children }) {
+//   const [backendReady, setBackendReady] = useState(false);
 
-  useEffect(() => {
-    const checkHealth = async () => {
-      try {
-        // Pings the root route of your FastAPI backend
-        const res = await fetch(`${API_BASE}/`);
-        if (res.ok) {
-          setBackendReady(true);
-        }
-      } catch (err) {
-        // FastAPI is not up yet, will try again in 1 second
-        console.log("Waiting for Python backend to start...");
-      }
-    };
+//   useEffect(() => {
+//     const checkHealth = async () => {
+//       try {
+//         // Pings the root route of your FastAPI backend
+//         const res = await fetch(`${API_BASE}/`);
+//         if (res.ok) {
+//           setBackendReady(true);
+//         }
+//       } catch (err) {
+//         // FastAPI is not up yet, will try again in 1 second
+//         console.log("Waiting for Python backend to start...");
+//       }
+//     };
 
-    const interval = setInterval(checkHealth, 1000);
-    return () => clearInterval(interval);
-  }, []);
+//     const interval = setInterval(checkHealth, 1000);
+//     return () => clearInterval(interval);
+//   }, []);
 
-  // Show a loading screen while FastAPI boots up
-  if (!backendReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto mb-4" />
-          <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Starting Local Database...</h2>
-          <p className="text-sm text-gray-500 mt-1">Please wait a moment while the system boots up.</p>
-        </div>
-      </div>
-    );
-  }
+//   // Show a loading screen while FastAPI boots up
+//   if (!backendReady) {
+//     return (
+//       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+//         <div className="text-center">
+//           <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto mb-4" />
+//           <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Starting Local Database...</h2>
+//           <p className="text-sm text-gray-500 mt-1">Please wait a moment while the system boots up.</p>
+//         </div>
+//       </div>
+//     );
+//   }
 
-  // Once FastAPI is ready, render the actual React App
-  return children;
-}
+//   // Once FastAPI is ready, render the actual React App
+//   return children;
+// }
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -148,13 +148,13 @@ export default function App() {
   return (
     <ThemeProvider>
       {/* 👇 Wrapping the app in BackendReady prevents network errors on startup */}
-      <BackendReady>
+      {/* <BackendReady> */}
         <AuthProvider>
           <BrowserRouter>
             <AppRoutes />
           </BrowserRouter>
         </AuthProvider>
-      </BackendReady>
+      {/* </BackendReady> */}
     </ThemeProvider>
   )
 }
