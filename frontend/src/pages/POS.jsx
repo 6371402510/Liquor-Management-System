@@ -81,12 +81,12 @@ export default function POS() {
 
 
   // Add these state variables after your existing state declarations
-const [paymentSplit, setPaymentSplit] = useState({
-  cash: 0,
-  card: 0,
-  upi: 0
-});
-const [showPaymentSplit, setShowPaymentSplit] = useState(false);
+  const [paymentSplit, setPaymentSplit] = useState({
+    cash: 0,
+    card: 0,
+    upi: 0
+  });
+  const [showPaymentSplit, setShowPaymentSplit] = useState(false);
 
   const [recentlyScanned, setRecentlyScanned] = useState([]);
   const [barcodeValue, setBarcodeValue] = useState('');
@@ -660,113 +660,114 @@ const [showPaymentSplit, setShowPaymentSplit] = useState(false);
 
 
   // Add this function before your handleBulkPrint function
-const handlePaymentSplitChange = (field, value) => {
-  const numValue = Math.max(0, Number(value) || 0);
-  const totalAmount = selectedTotal || grandTotal;
-  
-  setPaymentSplit(prev => {
-    const newSplit = { ...prev, [field]: numValue };
-    
-    // Auto-calculate UPI if cash is entered
-    if (field === 'cash') {
-      const remaining = totalAmount - numValue - newSplit.card;
-      newSplit.upi = Math.max(0, remaining);
-    }
-    // Auto-calculate UPI if card is entered
-    else if (field === 'card') {
-      const remaining = totalAmount - numValue - newSplit.cash;
-      newSplit.upi = Math.max(0, remaining);
-    }
-    
-    // Validate total doesn't exceed grand total
-    const enteredTotal = newSplit.cash + newSplit.card + newSplit.upi;
-    if (enteredTotal > totalAmount) {
-      // Adjust UPI to match exact total
-      newSplit.upi = Math.max(0, totalAmount - newSplit.cash - newSplit.card);
-    }
-    
-    return newSplit;
-  });
-};
+  const handlePaymentSplitChange = (field, value) => {
+    const numValue = Math.max(0, Number(value) || 0);
+    const totalAmount = selectedTotal || grandTotal;
 
-const resetPaymentSplit = () => {
-  setPaymentSplit({ cash: 0, card: 0, upi: 0 });
-};
-// Replace your existing handleBulkPrint function with this updated version
-const handleBulkPrint = () => {
-  if (selectedItems.length === 0) return alert('Please select items to print.');
-  setPrintCustomerName(customerName === 'Walk-in Customer' ? '' : customerName);
-  setPrintCustomerPhone(customerPhone);
-  setShowPaymentSplit(true); // Show payment split section
-  setIsPrintModalOpen(true);
-  resetPaymentSplit(); // Reset payment split when opening modal
-};
+    setPaymentSplit(prev => {
+      const newSplit = { ...prev, [field]: numValue };
 
- // Replace your existing confirmPrint function with this updated version
-const confirmPrint = async () => {
-  const itemsToPrint = cart.filter(i => selectedItems.includes(i.scanId));
-  if (!itemsToPrint.length) return;
-
-  // Validate payment split matches total
-  const totalEntered = paymentSplit.cash + paymentSplit.card + paymentSplit.upi;
-  const totalAmount = selectedTotal || grandTotal;
-  if (totalEntered !== totalAmount) {
-    alert(`Payment split (₹${totalEntered.toFixed(2)}) must equal total amount (₹${totalAmount.toFixed(2)})`);
-    return;
-  }
-
-  const cName = printCustomerName || 'Walk-in Customer';
-  const cPhone = printCustomerPhone || 'N/A';
-
-  setPrinting(true);
-
-  try {
-    let lastInvoiceNumber = '';
-
-    for (const item of itemsToPrint) {
-      const invNum = generateInvoiceNumber(companyId);
-      lastInvoiceNumber = invNum;
-
-      const payload = {
-        invoice_number: invNum,
-        company_id: Number(companyId),
-        customer_name: cName,
-        customer_phone: cPhone === 'N/A' ? '' : cPhone,
-        total_amount: item.sale_price - (item.discount || 0),
-        payment_mode: item.paymentMode || 'CASH',
-        items: [{
-          product_id: item.productId,
-          product_name: item.name,
-          quantity: item.quantity,
-          unit_price: item.sale_price,
-          discount: item.discount || 0,
-          total_price: (item.sale_price - (item.discount || 0)) * item.quantity,
-          company_id: Number(companyId)
-        }],
-      };
-      await processCheckout(payload);
-    }
-
-    const printGroups = {};
-    let totalAmountCalc = 0;
-    itemsToPrint.forEach(item => {
-      if (!printGroups[item.productId]) {
-        printGroups[item.productId] = { name: item.name, sale_price: item.sale_price, qty: 0, totalDiscount: 0, lineTotal: 0 };
+      // Auto-calculate UPI if cash is entered
+      if (field === 'cash') {
+        const remaining = totalAmount - numValue - newSplit.card;
+        newSplit.upi = Math.max(0, remaining);
       }
-      printGroups[item.productId].qty += 1;
-      printGroups[item.productId].totalDiscount += (item.discount || 0);
-      printGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0));
-      totalAmountCalc += (item.sale_price - (item.discount || 0));
+      // Auto-calculate UPI if card is entered
+      else if (field === 'card') {
+        const remaining = totalAmount - numValue - newSplit.cash;
+        newSplit.upi = Math.max(0, remaining);
+      }
+
+      // Validate total doesn't exceed grand total
+      const enteredTotal = newSplit.cash + newSplit.card + newSplit.upi;
+      if (enteredTotal > totalAmount) {
+        // Adjust UPI to match exact total
+        newSplit.upi = Math.max(0, totalAmount - newSplit.cash - newSplit.card);
+      }
+
+      return newSplit;
     });
+  };
 
-    let itemsHtml = '';
+  const resetPaymentSplit = () => {
+    setPaymentSplit({ cash: 0, card: 0, upi: 0 });
+  };
+  // Replace your existing handleBulkPrint function with this updated version
+  const handleBulkPrint = () => {
+    if (selectedItems.length === 0) return alert('Please select items to print.');
+    setPrintCustomerName(customerName === 'Walk-in Customer' ? '' : customerName);
+    setPrintCustomerPhone(customerPhone);
+    setShowPaymentSplit(true); // Show payment split section
+    setIsPrintModalOpen(true);
+    resetPaymentSplit(); // Reset payment split when opening modal
+  };
 
-    Object.values(printGroups).forEach(g => {
-      const discountHtml = g.totalDiscount > 0
-        ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
-        : '';
+  // Replace your existing confirmPrint function with this updated version
+  const confirmPrint = async () => {
+    const itemsToPrint = cart.filter(i => selectedItems.includes(i.scanId));
+    if (!itemsToPrint.length) return;
 
-      itemsHtml += `
+    // Validate payment split matches total
+    const totalEntered = paymentSplit.cash + paymentSplit.card + paymentSplit.upi;
+    const totalAmount = selectedTotal || grandTotal;
+    if (totalEntered !== totalAmount) {
+      alert(`Payment split (₹${totalEntered.toFixed(2)}) must equal total amount (₹${totalAmount.toFixed(2)})`);
+      return;
+    }
+
+    const cName = printCustomerName || 'Walk-in Customer';
+    const cPhone = printCustomerPhone || 'N/A';
+
+    setPrinting(true);
+
+    try {
+      let lastInvoiceNumber = '';
+
+      for (const item of itemsToPrint) {
+        const invNum = generateInvoiceNumber(companyId);
+        lastInvoiceNumber = invNum;
+
+        const payload = {
+          invoice_number: invNum,
+          company_id: Number(companyId),
+          customer_name: cName,
+          customer_phone: cPhone === 'N/A' ? '' : cPhone,
+          total_amount: item.sale_price - (item.discount || 0),
+          payment_mode: item.paymentMode || 'CASH',
+          items: [{
+            product_id: item.productId,
+            product_name: item.name,
+            quantity: item.quantity,
+            unit_price: item.sale_price,
+            discount: item.discount || 0,
+            total_price: (item.sale_price - (item.discount || 0)) * item.quantity,
+            company_id: Number(companyId)
+          }],
+        };
+        await processCheckout(payload);
+      }
+
+      const printGroups = {};
+let totalAmountCalc = 0;
+itemsToPrint.forEach(item => {
+    if (!printGroups[item.productId]) {
+        printGroups[item.productId] = { name: item.name, sale_price: item.sale_price, qty: 0, totalDiscount: 0, lineTotal: 0 };
+    }
+    const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+    printGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+    printGroups[item.productId].totalDiscount += (item.discount || 0) * itemQty;  // ✅ Multiply discount by qty
+    printGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
+    totalAmountCalc += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
+});
+
+      let itemsHtml = '';
+
+      Object.values(printGroups).forEach(g => {
+        const discountHtml = g.totalDiscount > 0
+          ? `<div style="display:flex; justify-content:space-between; font-size:11px;"><span>Discount</span><span>-₹${g.totalDiscount.toFixed(2)}</span></div>`
+          : '';
+
+        itemsHtml += `
         <div style="margin-bottom:6px;">
           <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.name}</div>
           <div style="display:flex; justify-content:space-between; font-size:11px;">
@@ -776,61 +777,61 @@ const confirmPrint = async () => {
           ${discountHtml}
         </div>
       `;
-    });
+      });
 
-    const invoiceNumber = lastInvoiceNumber;
-    const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
+      const invoiceNumber = lastInvoiceNumber;
+      const printDate = format(new Date(), 'dd/MM/yyyy hh:mm a');
 
-    // ─── PREPARE COMPANY DETAILS ───
-    const cAddress = companyDetails.address || '';
-    const cEmail = companyDetails.email || '';
-    const cExcise = companyDetails.exciseLicenseNo || '';
-    const cTrade = companyDetails.tradeLicenseNo || '';
-    const cGstin = companyDetails.gstin || '';
+      // ─── PREPARE COMPANY DETAILS ───
+      const cAddress = companyDetails.address || '';
+      const cEmail = companyDetails.email || '';
+      const cExcise = companyDetails.exciseLicenseNo || '';
+      const cTrade = companyDetails.tradeLicenseNo || '';
+      const cGstin = companyDetails.gstin || '';
 
-    // ─── PREPARE PAYMENT BREAKDOWN HTML ───
-    let paymentBreakdownHtml = '';
-    if (paymentSplit.cash > 0) {
-      paymentBreakdownHtml += `
+      // ─── PREPARE PAYMENT BREAKDOWN HTML ───
+      let paymentBreakdownHtml = '';
+      if (paymentSplit.cash > 0) {
+        paymentBreakdownHtml += `
         <div style="display:flex; justify-content:space-between; font-size:11px;">
           <span>💰 Cash</span>
           <span>₹${paymentSplit.cash.toFixed(2)}</span>
         </div>
       `;
-    }
-    if (paymentSplit.card > 0) {
-      paymentBreakdownHtml += `
+      }
+      if (paymentSplit.card > 0) {
+        paymentBreakdownHtml += `
         <div style="display:flex; justify-content:space-between; font-size:11px;">
           <span>💳 Card</span>
           <span>₹${paymentSplit.card.toFixed(2)}</span>
         </div>
       `;
-    }
-    if (paymentSplit.upi > 0) {
-      paymentBreakdownHtml += `
+      }
+      if (paymentSplit.upi > 0) {
+        paymentBreakdownHtml += `
         <div style="display:flex; justify-content:space-between; font-size:11px;">
           <span>📱 UPI</span>
           <span>₹${paymentSplit.upi.toFixed(2)}</span>
         </div>
       `;
-    }
+      }
 
-    // ─── USE IFRAME INSTEAD OF window.open() ───
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "1px";
-    iframe.style.height = "1px";
-    iframe.style.border = "0";
+      // ─── USE IFRAME INSTEAD OF window.open() ───
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "1px";
+      iframe.style.height = "1px";
+      iframe.style.border = "0";
 
-    document.body.appendChild(iframe);
+      document.body.appendChild(iframe);
 
-    const doc = iframe.contentWindow.document;
+      const doc = iframe.contentWindow.document;
 
-    doc.open();
+      doc.open();
 
-    doc.write(`
+      doc.write(`
       <html>
         <head>
           <title>Receipt</title>
@@ -907,29 +908,29 @@ const confirmPrint = async () => {
       </html>
     `);
 
-    doc.close();
+      doc.close();
 
-    setTimeout(() => {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
+      setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
 
-      document.body.removeChild(iframe);
-    }, 500);
+        document.body.removeChild(iframe);
+      }, 500);
 
-    setCart(prev => prev.filter(i => !selectedItems.includes(i.scanId)));
-    setSelectedItems([]);
-    setIsPrintModalOpen(false);
-    setShowPaymentSplit(false);
-    resetPaymentSplit();
-    fetchProducts();
+      setCart(prev => prev.filter(i => !selectedItems.includes(i.scanId)));
+      setSelectedItems([]);
+      setIsPrintModalOpen(false);
+      setShowPaymentSplit(false);
+      resetPaymentSplit();
+      fetchProducts();
 
-  } catch (err) {
-    alert(err.message || 'Checkout/Print failed. Check counter stock.');
-  } finally {
-    setPrinting(false);
-  }
-};
-    const handleBulkWhatsApp = async () => {
+    } catch (err) {
+      alert(err.message || 'Checkout/Print failed. Check counter stock.');
+    } finally {
+      setPrinting(false);
+    }
+  };
+  const handleBulkWhatsApp = async () => {
     if (selectedItems.length === 0) return alert('Please select items to send.');
 
     // 1. Load PDF library safely
@@ -945,20 +946,21 @@ const confirmPrint = async () => {
 
     // 2. Group items safely (prevent NaN errors)
     const waGroups = {};
-    itemsToSend.forEach(item => {
-      if (!waGroups[item.productId]) {
-        waGroups[item.productId] = { 
-          name: item.name || 'Item', 
-          sale_price: Number(item.sale_price) || 0, 
-          qty: 0, 
-          totalDiscount: 0, 
-          lineTotal: 0 
+itemsToSend.forEach(item => {
+    if (!waGroups[item.productId]) {
+        waGroups[item.productId] = {
+            name: item.name || 'Item',
+            sale_price: Number(item.sale_price) || 0,
+            qty: 0,
+            totalDiscount: 0,
+            lineTotal: 0
         };
-      }
-      waGroups[item.productId].qty += 1;
-      waGroups[item.productId].totalDiscount += (Number(item.discount) || 0);
-      waGroups[item.productId].lineTotal += ((Number(item.sale_price) || 0) - (Number(item.discount) || 0));
-    });
+    }
+    const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+    waGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+    waGroups[item.productId].totalDiscount += (Number(item.discount) || 0) * itemQty;  // ✅ Multiply by qty
+    waGroups[item.productId].lineTotal += ((Number(item.sale_price) || 0) - (Number(item.discount) || 0)) * itemQty;  // ✅ Multiply by qty
+});
 
     // 3. Build Bill HTML (exact same style as your thermal print bill)
     let itemsHtml = '';
@@ -1095,13 +1097,14 @@ const confirmPrint = async () => {
     const invoiceNumber = generateInvoiceNumber(companyId);
 
     const pdfGroups = {};
-    cart.forEach(item => {
-      if (!pdfGroups[item.productId]) {
+cart.forEach(item => {
+    if (!pdfGroups[item.productId]) {
         pdfGroups[item.productId] = { name: item.name, sale_price: item.sale_price, qty: 0, totalDiscount: 0 };
-      }
-      pdfGroups[item.productId].qty += 1;
-      pdfGroups[item.productId].totalDiscount += (item.discount || 0);
-    });
+    }
+    const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+    pdfGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+    pdfGroups[item.productId].totalDiscount += (item.discount || 0) * itemQty;  // ✅ Multiply by qty
+});
 
     let itemsHtml = '';
 
@@ -1310,170 +1313,171 @@ const confirmPrint = async () => {
 
       {/* PRINT MODAL */}
       {isPrintModalOpen && (
-  <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4 relative max-h-[90vh] overflow-y-auto">
-      <button onClick={() => { setIsPrintModalOpen(false); setShowPaymentSplit(false); }} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-        <X className="w-5 h-5" />
-      </button>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4 relative max-h-[90vh] overflow-y-auto">
+            <button onClick={() => { setIsPrintModalOpen(false); setShowPaymentSplit(false); }} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+              <X className="w-5 h-5" />
+            </button>
 
-      <h3 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-2">Checkout & Print Bill</h3>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-2">Checkout & Print Bill</h3>
 
-      <div className="space-y-3">
-        <div>
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">Customer Name</label>
-          <input type="text" value={printCustomerName} onChange={(e) => setPrintCustomerName(e.target.value)} className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white" placeholder="Enter customer name" />
-        </div>
-        <div>
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">Mobile Number</label>
-          <input type="tel" value={printCustomerPhone} onChange={(e) => setPrintCustomerPhone(e.target.value)} className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white" placeholder="Enter mobile number" />
-        </div>
-      </div>
-
-      {/* ═══ PAYMENT SPLIT SECTION ═══ */}
-      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800 space-y-3">
-        <div className="flex items-center justify-between">
-          <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 flex items-center gap-2">
-            <CreditCard className="w-4 h-4" />
-            Payment Split
-          </h4>
-          <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
-            ₹{(selectedTotal || grandTotal).toFixed(2)}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          {/* CASH FIELD */}
-          <div>
-            <label className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1 mb-1">
-              <Banknote className="w-3 h-3 text-green-600" />
-              CASH
-            </label>
-            <input
-              type="number"
-              value={paymentSplit.cash || ''}
-              onChange={(e) => handlePaymentSplitChange('cash', e.target.value)}
-              placeholder="0.00"
-              className="w-full border border-green-300 dark:border-green-700 rounded-lg px-2 py-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-gray-800 dark:text-white"
-              min="0"
-              step="0.01"
-            />
-          </div>
-
-          {/* CARD FIELD */}
-          <div>
-            <label className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1 mb-1">
-              <CreditCard className="w-3 h-3 text-purple-600" />
-              CARD
-            </label>
-            <input
-              type="number"
-              value={paymentSplit.card || ''}
-              onChange={(e) => handlePaymentSplitChange('card', e.target.value)}
-              placeholder="0.00"
-              className="w-full border border-purple-300 dark:border-purple-700 rounded-lg px-2 py-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500 dark:bg-gray-800 dark:text-white"
-              min="0"
-              step="0.01"
-            />
-          </div>
-
-          {/* UPI FIELD (Auto-calculated) */}
-          <div>
-            <label className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1 mb-1">
-              <Smartphone className="w-3 h-3 text-orange-600" />
-              UPI
-            </label>
-            <input
-              type="number"
-              value={paymentSplit.upi || ''}
-              onChange={(e) => handlePaymentSplitChange('upi', e.target.value)}
-              placeholder="0.00"
-              className="w-full border border-orange-300 dark:border-orange-700 rounded-lg px-2 py-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500 dark:bg-gray-800 dark:text-white"
-              min="0"
-              step="0.01"
-            />
-          </div>
-        </div>
-
-        {/* Payment Summary */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-2 border border-blue-100 dark:border-blue-900">
-          <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-            <span>Entered:</span>
-            <span className="font-mono">₹{(paymentSplit.cash + paymentSplit.card + paymentSplit.upi).toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mt-1">
-            <span>Remaining:</span>
-            <span className={`font-mono font-bold ${(selectedTotal || grandTotal) - (paymentSplit.cash + paymentSplit.card + paymentSplit.upi) === 0 ? 'text-green-600' : 'text-red-600'}`}>
-              ₹{Math.max(0, (selectedTotal || grandTotal) - (paymentSplit.cash + paymentSplit.card + paymentSplit.upi)).toFixed(2)}
-            </span>
-          </div>
-        </div>
-
-        {/* Quick Fill Buttons */}
-        <div className="flex gap-2">
-          <button
-            onClick={() => setPaymentSplit({ cash: selectedTotal || grandTotal, card: 0, upi: 0 })}
-            className="flex-1 text-xs bg-green-100 hover:bg-green-200 dark:bg-green-900/30 dark:hover:bg-green-900/50 text-green-700 dark:text-green-400 py-1.5 px-2 rounded-lg font-semibold transition-colors"
-          >
-            All Cash
-          </button>
-          <button
-            onClick={() => setPaymentSplit({ cash: 0, card: selectedTotal || grandTotal, upi: 0 })}
-            className="flex-1 text-xs bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-400 py-1.5 px-2 rounded-lg font-semibold transition-colors"
-          >
-            All Card
-          </button>
-          <button
-            onClick={() => setPaymentSplit({ cash: 0, card: 0, upi: selectedTotal || grandTotal })}
-            className="flex-1 text-xs bg-orange-100 hover:bg-orange-200 dark:bg-orange-900/30 dark:hover:bg-orange-900/50 text-orange-700 dark:text-orange-400 py-1.5 px-2 rounded-lg font-semibold transition-colors"
-          >
-            All UPI
-          </button>
-        </div>
-      </div>
-
-      {/* Selected Items Preview */}
-      <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 max-h-40 overflow-y-auto space-y-2">
-        <p className="text-[10px] font-bold text-gray-500">Selected Items</p>
-        {(() => {
-          const selectedCartItems = cart.filter(i => selectedItems.includes(i.scanId));
-          const modalGroups = {};
-          selectedCartItems.forEach(item => {
-            if (!modalGroups[item.productId]) {
-              modalGroups[item.productId] = { name: item.name, qty: 0, lineTotal: 0 };
-            }
-            modalGroups[item.productId].qty += 1;
-            modalGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0));
-          });
-          return Object.entries(modalGroups).map(([id, g]) => (
-            <div key={id} className="flex justify-between text-xs">
-              <span className="text-gray-700 dark:text-gray-300">{g.name} x{g.qty}</span>
-              <span className="font-semibold">₹{g.lineTotal.toFixed(2)}</span>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">Customer Name</label>
+                <input type="text" value={printCustomerName} onChange={(e) => setPrintCustomerName(e.target.value)} className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white" placeholder="Enter customer name" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 block mb-1">Mobile Number</label>
+                <input type="tel" value={printCustomerPhone} onChange={(e) => setPrintCustomerPhone(e.target.value)} className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white" placeholder="Enter mobile number" />
+              </div>
             </div>
-          ));
-        })()}
-      </div>
 
-      {/* Print Button */}
-      <button
-        onClick={confirmPrint}
-        disabled={printing || (paymentSplit.cash + paymentSplit.card + paymentSplit.upi) !== (selectedTotal || grandTotal)}
-        className="w-full py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
-      >
-        {printing ? (
-          <>
-            <Loader2 className="w-4 h-4 animate-spin" />
-            Processing...
-          </>
-        ) : (
-          <>
-            <Printer className="w-4 h-4" />
-            Print Bill
-          </>
-        )}
-      </button>
-    </div>
-  </div>
-)}
+            {/* ═══ PAYMENT SPLIT SECTION ═══ */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 flex items-center gap-2">
+                  <CreditCard className="w-4 h-4" />
+                  Payment Split
+                </h4>
+                <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                  ₹{(selectedTotal || grandTotal).toFixed(2)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {/* CASH FIELD */}
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1 mb-1">
+                    <Banknote className="w-3 h-3 text-green-600" />
+                    CASH
+                  </label>
+                  <input
+                    type="number"
+                    value={paymentSplit.cash || ''}
+                    onChange={(e) => handlePaymentSplitChange('cash', e.target.value)}
+                    placeholder="0.00"
+                    className="w-full border border-green-300 dark:border-green-700 rounded-lg px-2 py-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-gray-800 dark:text-white"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+
+                {/* CARD FIELD */}
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1 mb-1">
+                    <CreditCard className="w-3 h-3 text-purple-600" />
+                    CARD
+                  </label>
+                  <input
+                    type="number"
+                    value={paymentSplit.card || ''}
+                    onChange={(e) => handlePaymentSplitChange('card', e.target.value)}
+                    placeholder="0.00"
+                    className="w-full border border-purple-300 dark:border-purple-700 rounded-lg px-2 py-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500 dark:bg-gray-800 dark:text-white"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+
+                {/* UPI FIELD (Auto-calculated) */}
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1 mb-1">
+                    <Smartphone className="w-3 h-3 text-orange-600" />
+                    UPI
+                  </label>
+                  <input
+                    type="number"
+                    value={paymentSplit.upi || ''}
+                    onChange={(e) => handlePaymentSplitChange('upi', e.target.value)}
+                    placeholder="0.00"
+                    className="w-full border border-orange-300 dark:border-orange-700 rounded-lg px-2 py-2 text-sm text-center font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500 dark:bg-gray-800 dark:text-white"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+
+              {/* Payment Summary */}
+              <div className="bg-white dark:bg-gray-800 rounded-lg p-2 border border-blue-100 dark:border-blue-900">
+                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                  <span>Entered:</span>
+                  <span className="font-mono">₹{(paymentSplit.cash + paymentSplit.card + paymentSplit.upi).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mt-1">
+                  <span>Remaining:</span>
+                  <span className={`font-mono font-bold ${(selectedTotal || grandTotal) - (paymentSplit.cash + paymentSplit.card + paymentSplit.upi) === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    ₹{Math.max(0, (selectedTotal || grandTotal) - (paymentSplit.cash + paymentSplit.card + paymentSplit.upi)).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Quick Fill Buttons */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPaymentSplit({ cash: selectedTotal || grandTotal, card: 0, upi: 0 })}
+                  className="flex-1 text-xs bg-green-100 hover:bg-green-200 dark:bg-green-900/30 dark:hover:bg-green-900/50 text-green-700 dark:text-green-400 py-1.5 px-2 rounded-lg font-semibold transition-colors"
+                >
+                  All Cash
+                </button>
+                <button
+                  onClick={() => setPaymentSplit({ cash: 0, card: selectedTotal || grandTotal, upi: 0 })}
+                  className="flex-1 text-xs bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-400 py-1.5 px-2 rounded-lg font-semibold transition-colors"
+                >
+                  All Card
+                </button>
+                <button
+                  onClick={() => setPaymentSplit({ cash: 0, card: 0, upi: selectedTotal || grandTotal })}
+                  className="flex-1 text-xs bg-orange-100 hover:bg-orange-200 dark:bg-orange-900/30 dark:hover:bg-orange-900/50 text-orange-700 dark:text-orange-400 py-1.5 px-2 rounded-lg font-semibold transition-colors"
+                >
+                  All UPI
+                </button>
+              </div>
+            </div>
+
+            {/* Selected Items Preview */}
+           <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 max-h-40 overflow-y-auto space-y-2">
+  <p className="text-[10px] font-bold text-gray-500">Selected Items</p>
+  {(() => {
+    const selectedCartItems = cart.filter(i => selectedItems.includes(i.scanId));
+    const modalGroups = {};
+    selectedCartItems.forEach(item => {
+      if (!modalGroups[item.productId]) {
+        modalGroups[item.productId] = { name: item.name, qty: 0, lineTotal: 0 };
+      }
+      const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+      modalGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+      modalGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
+    });
+    return Object.entries(modalGroups).map(([id, g]) => (
+      <div key={id} className="flex justify-between text-xs">
+        <span className="text-gray-700 dark:text-gray-300">{g.name} x{g.qty}</span>
+        <span className="font-semibold">₹{g.lineTotal.toFixed(2)}</span>
+      </div>
+    ));
+  })()}
+</div>
+
+            {/* Print Button */}
+            <button
+              onClick={confirmPrint}
+              disabled={printing || (paymentSplit.cash + paymentSplit.card + paymentSplit.upi) !== (selectedTotal || grandTotal)}
+              className="w-full py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              {printing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Printer className="w-4 h-4" />
+                  Print Bill
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* LEFT PANEL */}
       <div className="w-[280px] flex-shrink-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col overflow-hidden">

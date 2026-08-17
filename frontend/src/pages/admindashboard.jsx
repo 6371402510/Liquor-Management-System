@@ -474,8 +474,8 @@ export default function AdminDashboard() {
                   <th className="text-left py-2">Store</th>
                   <th className="text-right py-2">Sales</th>
                   <th className="text-right py-2">COGS</th>
-                  <th className="text-right py-2">VAT (35%)</th>
-                  <th className="text-right py-2">TCS (2.7%)</th>
+                  <th className="text-right py-2">VAT </th>
+                  <th className="text-right py-2">TCS </th>
                   <th className="text-right py-2">Expense</th>
                   <th className="text-right py-2">Profit</th>
                   <th className="text-right py-2">Staff</th>

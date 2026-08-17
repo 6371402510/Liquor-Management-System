@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo,useRef } from 'react'
 import { Plus, Search, CreditCard as Edit2, Trash2, X, Loader as Loader2, TriangleAlert as AlertTriangle, Package, ChevronUp, ShieldAlert, ChevronDown, Upload, Download, FileDown, AlertCircle, TrendingDown, Clock3, TrendingUp, Warehouse, Store, Printer, Minus } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
@@ -180,6 +180,220 @@ function StockInput({ productId, field, value, onSave }) {
       >
         <Plus className="w-3 h-3" />
       </button>
+    </div>
+  )
+}
+
+
+
+// ─── COMPANY/SUPPLIER SMART DROPDOWN ───
+function CompanySupplierDropdown({ value, onChange, products, onRemoveSupplier }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [showManage, setShowManage] = useState(false)
+  const ref = useRef(null)
+  const inputRef = useRef(null)
+
+  const uniqueSuppliers = useMemo(() => {
+    const set = new Set()
+    products.forEach(p => {
+      if (p.short_name && p.short_name.trim()) {
+        set.add(p.short_name.trim())
+      }
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [products])
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return uniqueSuppliers
+    return uniqueSuppliers.filter(s =>
+      s.toLowerCase().includes(search.toLowerCase())
+    )
+  }, [uniqueSuppliers, search])
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setIsOpen(false)
+        setShowManage(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleSelect = (supplier) => {
+    onChange(supplier)
+    setSearch('')
+    setIsOpen(false)
+    inputRef.current?.blur()
+  }
+
+  const handleInputChange = (val) => {
+    onChange(val)
+    setSearch(val)
+    if (!isOpen) setIsOpen(true)
+  }
+
+  const handleFocus = () => {
+    setSearch(value || '')
+    setIsOpen(true)
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      setIsOpen(false)
+      setShowManage(false)
+      inputRef.current?.blur()
+    }
+    if (e.key === 'Enter' && filtered.length === 1 && search.trim()) {
+      e.preventDefault()
+      handleSelect(filtered[0])
+    }
+    if (e.key === 'Tab') {
+      setIsOpen(false)
+    }
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      {/* ── Main Input ── */}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value || ''}
+          placeholder="Type or select..."
+          onChange={e => handleInputChange(e.target.value)}
+          onFocus={handleFocus}
+          onKeyDown={handleKeyDown}
+          className="input-field pr-8"
+        />
+        {/* Manage button (gear icon) */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowManage(m => !m)
+            setIsOpen(false)
+          }}
+          className={clsx(
+            "absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded transition-colors",
+            showManage
+              ? "bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400"
+              : "text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
+          )}
+          title="Manage supplier list"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      </div>
+
+      {/* ── Suggestions Dropdown ── */}
+      {isOpen && (
+        <div className="absolute z-30 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+          {filtered.length > 0 ? (
+            filtered.map(supplier => (
+              <button
+                key={supplier}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); handleSelect(supplier) }}
+                className={clsx(
+                  "w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between group",
+                  value === supplier
+                    ? "bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 font-medium"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                )}
+              >
+                <span>{supplier}</span>
+                {value === supplier && (
+                  <span className="text-[10px] text-primary-500">✓ selected</span>
+                )}
+              </button>
+            ))
+          ) : search.trim() ? (
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                handleSelect(search.trim())
+              }}
+              className="w-full text-left px-3 py-2.5 text-sm text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add "<span className="font-medium">{search.trim()}</span>"
+            </button>
+          ) : (
+            <div className="px-3 py-3 text-xs text-gray-400 text-center">No suppliers added yet</div>
+          )}
+          {search.trim() && filtered.length > 0 && (
+            <div className="border-t border-gray-100 dark:border-gray-700">
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  handleSelect(search.trim())
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors flex items-center gap-2"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add "<span className="font-medium">{search.trim()}</span>" as new
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Manage Panel (Remove suppliers) ── */}
+      {showManage && (
+        <div className="absolute z-40 right-0 top-full mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Manage Suppliers</h4>
+              <p className="text-[10px] text-gray-400 mt-0.5">{uniqueSuppliers.length} supplier(s) in list</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowManage(false)}
+              className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="max-h-60 overflow-y-auto p-2">
+            {uniqueSuppliers.length > 0 ? (
+              uniqueSuppliers.map(supplier => {
+                const count = products.filter(p => p.short_name?.trim() === supplier).length
+                return (
+                  <div
+                    key={supplier}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 group transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{supplier}</p>
+                      <p className="text-[10px] text-gray-400">{count} product(s)</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onRemoveSupplier) onRemoveSupplier(supplier, count)
+                      }}
+                      className="p-1.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 ml-2"
+                      title="Remove this supplier from all products"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="px-3 py-6 text-center text-xs text-gray-400">No suppliers to manage</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -603,6 +817,32 @@ export default function Inventory() {
       fetchProducts()
     } catch (err) {
       alert(err.message || 'Failed to delete product.')
+    }
+  }
+
+
+
+
+    const handleRemoveSupplier = async (supplierName, productCount) => {
+    if (!confirm(
+      `Remove "${supplierName}"?\n\nThis will clear the Company/Supplier field for ${productCount} product(s).`
+    )) return
+
+    const affectedProducts = products.filter(p => p.short_name?.trim() === supplierName)
+    let failCount = 0
+
+    for (const p of affectedProducts) {
+      try {
+        await updateProduct(p.id, { ...p, short_name: '' })
+      } catch (err) {
+        failCount++
+      }
+    }
+
+    fetchProducts() // Refresh
+
+    if (failCount > 0) {
+      alert(`Removed from most products, but ${failCount} update(s) failed.`)
     }
   }
 
@@ -1050,9 +1290,14 @@ export default function Inventory() {
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Product Name *</label>
                     <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
                   </div>
-                  <div>
+                              <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Company/Supplier</label>
-                    <input value={form.short_name} onChange={e => setForm(f => ({ ...f, short_name: e.target.value }))} className="input-field" />
+                    <CompanySupplierDropdown
+                      value={form.short_name}
+                      onChange={(val) => setForm(f => ({ ...f, short_name: val }))}
+                      products={products}
+                      onRemoveSupplier={handleRemoveSupplier}
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Brand Name</label>

@@ -346,6 +346,28 @@ function generatePurchaseNumber() {
 }
 
 function normalizeItem(item) {
+  const qty_cases = Number(item.qty_cases ?? item.qtyCases) || 0
+  const bottles_per_case = Number(item.bottles_per_case ?? item.bottlesPerCase) || 0
+  const purchase_rate_per_unit = Number(item.purchase_rate_per_unit ?? item.purchaseRatePerUnit) || 0
+  const stored_total_cost = Number(item.total_cost) || 0
+
+  // Get raw bottle quantities - NO cross-calculation
+  const raw_qty_bottles = Number(item.qty_bottles ?? item.qtyBottles) || 0
+  const raw_total_bottles = Number(item.total_bottles ?? item.totalBottles) || 0
+
+  // Just use raw values - don't calculate from cases
+  const total_bottles = raw_total_bottles || raw_qty_bottles
+
+  // Calculate total_cost
+  let total_cost
+  if (purchase_rate_per_unit > 0 && total_bottles > 0) {
+    total_cost = total_bottles * purchase_rate_per_unit
+  } else if (stored_total_cost > 0) {
+    total_cost = stored_total_cost
+  } else {
+    total_cost = 0
+  }
+
   return {
     id: item.id,
     purchase_id: item.purchase_id,
@@ -356,20 +378,20 @@ function normalizeItem(item) {
     barcode: item.barcode ?? '',
     bottle_size: item.bottle_size ?? '',
     traditional_name: item.traditional_name ?? '',
-    bottles_per_case: Number(item.bottles_per_case ?? item.bottlesPerCase) || 0,
+    bottles_per_case: bottles_per_case,
     mrp: Number(item.mrp) || 0,
     unit_cost: Number(item.unit_cost ?? item.purchaseRate) || 0,
-    purchase_rate_per_unit: Number(item.purchase_rate_per_unit ?? item.purchaseRatePerUnit) || 0,
+    purchase_rate_per_unit: purchase_rate_per_unit,
     selling_rate: Number(item.selling_rate ?? item.sellingRate) || 0,
-    qty_cases: Number(item.qty_cases ?? item.qtyCases) || 0,
-    qty_bottles: Number(item.qty_bottles ?? item.qtyBottles) || 0,
-    total_bottles: Number(item.total_bottles ?? item.totalBottles ?? item.qty_bottles ?? item.qtyBottles) || 0,
+    qty_cases: qty_cases,
+    qty_bottles: raw_qty_bottles,      // 0 when entered by cases
+    total_bottles: total_bottles,       // 0 when entered by cases
     qty_bulk_liters: Number(item.qty_bulk_liters ?? item.qtyBulkLiters) || 0,
     qty_lp_liters: Number(item.qty_lp_liters ?? item.qtyLPLiters) || 0,
     mger_value: Number(item.mger_value ?? item.mgerValue) || 0,
     opening_stock: Number(item.opening_stock ?? item.openingStock) || 0,
     min_stock: Number(item.min_stock ?? item.minStock) || 0,
-    total_cost: Number(item.total_cost) || 0,
+    total_cost: total_cost,
   }
 }
 
@@ -968,30 +990,34 @@ handling_other_amount: h(handlingOtherAmount),
   total_handling: totalHand,
   total_amount: subtotal + vatTotal + cessTotal + specialTotal + tcsTotal + totalHand,
   status: "RECEIVED",
-      items: items.map(item => {
-        const ratePerUnit = calcRatePerUnit(item)
-        return {
-          product_id: item.productId,
-          company_id: Number(companyId),
-          name: item.name, brand: item.brand, category: item.category,
-          barcode: item.barcode, bottle_size: item.bottleSize,
-          traditional_name: item.traditionalName,
-          bottles_per_case: Number(item.bottlesPerCase) || 0,
-          mrp: Number(item.mrp) || 0,
-          purchaseRate: Number(item.purchaseRatePerCase) || 0,
-          purchaseRatePerUnit: ratePerUnit,
-          sellingRate: Number(item.sellingRate) || 0,
-          qtyCases: Number(item.qtyCases) || 0,
-          qtyBottles: Number(item.totalQty) || 0,
-          totalBottles: Number(item.totalQty) || 0,
-          qtyBulkLiters: Number(item.qtyBulkLiters) || 0,
-          qtyLPLiters: Number(item.qtyLPLiters) || 0,
-          mgerValue: Number(item.mgerValue) || 0, // <--- ADD THIS
-          openingStock: Number(item.openingStock) || 0,
-          minStock: Number(item.minStock) || 0,
-          total_cost: calcLineTotal(item),
-        }
-      }),
+     items: items.map(item => {
+  const ratePerUnit = calcRatePerUnit(item)
+  const enteredByCases = Number(item.qtyCases) > 0  // ✅ Detect entry method
+  
+  return {
+    product_id: item.productId,
+    company_id: Number(companyId),
+    name: item.name, brand: item.brand, category: item.category,
+    barcode: item.barcode, bottle_size: item.bottleSize,
+    traditional_name: item.traditionalName,
+    bottles_per_case: Number(item.bottlesPerCase) || 0,
+    mrp: Number(item.mrp) || 0,
+    purchaseRate: Number(item.purchaseRatePerCase) || 0,
+    purchaseRatePerUnit: ratePerUnit,
+    sellingRate: Number(item.sellingRate) || 0,
+    qtyCases: Number(item.qtyCases) || 0,
+    // ✅ If entered by cases → send 0 for bottles
+    // ✅ If entered by bottles → send the bottle count
+    qtyBottles: enteredByCases ? 0 : (Number(item.totalQty) || 0),
+    totalBottles: enteredByCases ? 0 : (Number(item.totalQty) || 0),
+    qtyBulkLiters: Number(item.qtyBulkLiters) || 0,
+    qtyLPLiters: Number(item.qtyLPLiters) || 0,
+    mgerValue: Number(item.mgerValue) || 0,
+    openingStock: Number(item.openingStock) || 0,
+    minStock: Number(item.minStock) || 0,
+    total_cost: calcLineTotal(item),
+  }
+}),
     }
 
     try {
@@ -1906,106 +1932,106 @@ handling_other_amount: h(handlingOtherAmount),
                   </div>
                 </td>
               </tr>
-              {expandedId === p.id && expandedItems[p.id] && (
-                <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20">
-                  <td colSpan={12} className="px-6 py-3">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                          <th className="text-left py-1 font-medium">#</th>
-                          <th className="text-left py-1 font-medium">Product</th>
-                          <th className="text-center py-1 font-medium">Size</th>
-                          <th className="text-center py-1 font-medium">Cases</th>
-                          <th className="text-center py-1 font-medium font-bold text-green-500">Btls</th>
-                          <th className="text-center py-1 font-medium text-cyan-500">BL</th>
-                          <th className="text-center py-1 font-medium text-purple-500">LPL</th>
-                          <th className="text-center py-2 px-2 font-medium text-orange-500">MGER</th>
-                          <th className="text-right py-1 font-medium text-orange-500">Rate/Case</th>
-                          <th className="text-right py-1 font-medium text-green-500">Rate/Unit</th>
-                          <th className="text-right py-1 font-medium">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {expandedItems[p.id].map((item, idx) => {
-                          const cases = item.qty_cases || 0
-                          const totalBtls = item.total_bottles || 0
-                          const ratePerCase = item.unit_cost || 0
-                          const ratePerUnit = item.purchase_rate_per_unit > 0
-                            ? item.purchase_rate_per_unit
-                            : (totalBtls > 0 ? (ratePerCase * cases) / totalBtls : 0)
+             {expandedId === p.id && expandedItems[p.id] && (
+  <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20">
+    <td colSpan={12} className="px-6 py-3">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700">
+            <th className="text-left py-1 font-medium">#</th>
+            <th className="text-left py-1 font-medium">Product</th>
+            <th className="text-center py-1 font-medium">Size</th>
+            <th className="text-center py-1 font-medium">Cases</th>
+            <th className="text-center py-1 font-medium font-bold text-green-500">Btls</th>
+            <th className="text-center py-1 font-medium text-cyan-500">BL</th>
+            <th className="text-center py-1 font-medium text-purple-500">LPL</th>
+            <th className="text-center py-2 px-2 font-medium text-orange-500">MGER</th>
+            <th className="text-right py-1 font-medium text-orange-500">Rate/Case</th>
+            <th className="text-right py-1 font-medium text-green-500">Rate/Unit</th>
+            <th className="text-right py-1 font-medium">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {expandedItems[p.id].map((item, idx) => {
+            const cases = item.qty_cases || 0
+            const btls = item.qty_bottles || 0  // ✅ Use qty_bottles (0 when entered by cases)
+            const ratePerCase = item.unit_cost || 0
+            const ratePerUnit = item.purchase_rate_per_unit > 0
+              ? item.purchase_rate_per_unit
+              : (btls > 0 ? (ratePerCase * cases) / btls : 0)
 
-                          return (
-                            <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800">
-                              <td className="py-1.5 text-gray-400">{idx + 1}</td>
-                              <td className="py-1.5">
-                                <span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>
-                                {item.traditional_name && <span className="text-gray-400 ml-1">· {item.traditional_name}</span>}
-                              </td>
-                              <td className="text-center py-1.5 text-gray-500">{item.bottle_size || '-'}</td>
-                              <td className="text-center py-1.5 font-medium">{cases || '-'}</td>
-                              <td className="text-center py-1.5 font-bold text-green-600">{totalBtls || '-'}</td>
-                              <td className="text-center py-1.5 font-semibold text-cyan-600 dark:text-cyan-400">{item.qty_bulk_liters > 0 ? item.qty_bulk_liters.toFixed(3) : '-'}</td>
-                              <td className="text-center py-1.5 font-semibold text-purple-600 dark:text-purple-400">{item.qty_lp_liters > 0 ? item.qty_lp_liters.toFixed(3) : '-'}</td>
-                              <td className="px-2 py-2 text-center font-semibold text-orange-600">
-                                {item.mger_value || 0}
-                              </td>
-                              <td className="text-right py-1.5 font-semibold text-orange-600">₹{ratePerCase.toFixed(2)}</td>
-                              <td className="text-right py-1.5 font-semibold text-green-600">₹{ratePerUnit.toFixed(2)}</td>
-                              <td className="text-right py-1.5 font-medium">₹{item.total_cost.toFixed(2)}</td>
-                            </tr>
-                          )
-                        })}
-                        {expandedItems[expandedId]?.length > 0 && (() => {
-                          const t = expandedItems[expandedId].reduce((acc, item) => {
-                            acc.totalBottles += Number(item.total_bottles) || 0
-                            acc.totalCases += Number(item.qty_cases) || 0
-                            acc.totalBL += Number(item.qty_bulk_liters) || 0
-                            acc.totalLPL += Number(item.qty_lp_liters) || 0
-                            acc.totalMger += Number(item.mger_value) || 0
-                            acc.totalCost += Number(item.total_cost) || 0
-                            return acc
-                          }, { totalBottles: 0, totalCases: 0, totalBL: 0, totalLPL: 0, totalMger: 0, totalCost: 0 })
+            return (
+              <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800">
+                <td className="py-1.5 text-gray-400">{idx + 1}</td>
+                <td className="py-1.5">
+                  <span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>
+                  {item.traditional_name && <span className="text-gray-400 ml-1">· {item.traditional_name}</span>}
+                </td>
+                <td className="text-center py-1.5 text-gray-500">{item.bottle_size || '-'}</td>
+                <td className="text-center py-1.5 font-medium">{cases || '—'}</td>
+                <td className="text-center py-1.5 font-bold text-green-600">{btls || 0}</td>  {/* ✅ FIXED */}
+                <td className="text-center py-1.5 font-semibold text-cyan-600 dark:text-cyan-400">{item.qty_bulk_liters > 0 ? item.qty_bulk_liters.toFixed(3) : '-'}</td>
+                <td className="text-center py-1.5 font-semibold text-purple-600 dark:text-purple-400">{item.qty_lp_liters > 0 ? item.qty_lp_liters.toFixed(3) : '-'}</td>
+                <td className="px-2 py-2 text-center font-semibold text-orange-600">
+                  {item.mger_value || 0}
+                </td>
+                <td className="text-right py-1.5 font-semibold text-orange-600">₹{ratePerCase.toFixed(2)}</td>
+                <td className="text-right py-1.5 font-semibold text-green-600">₹{ratePerUnit.toFixed(2)}</td>
+                <td className="text-right py-1.5 font-medium">₹{item.total_cost.toFixed(2)}</td>
+              </tr>
+            )
+          })}
+          {expandedItems[expandedId]?.length > 0 && (() => {
+            const t = expandedItems[expandedId].reduce((acc, item) => {
+              acc.totalBottles += Number(item.qty_bottles) || 0  // ✅ Use qty_bottles
+              acc.totalCases += Number(item.qty_cases) || 0
+              acc.totalBL += Number(item.qty_bulk_liters) || 0
+              acc.totalLPL += Number(item.qty_lp_liters) || 0
+              acc.totalMger += Number(item.mger_value) || 0
+              acc.totalCost += Number(item.total_cost) || 0
+              return acc
+            }, { totalBottles: 0, totalCases: 0, totalBL: 0, totalLPL: 0, totalMger: 0, totalCost: 0 })
 
-                          return (
-                            <>
-                              {/* ── Items Subtotal (line items only, no taxes) ── */}
-                              <tr className="bg-blue-50 dark:bg-blue-900/15 border-t border-blue-200 dark:border-blue-800 text-xs">
-                                <td className="px-2 py-2 font-semibold text-blue-700 dark:text-blue-300" colSpan={10}>
-                                  Items Subtotal
-                                </td>
-                                <td className="px-2 py-2 text-right font-bold text-blue-700 dark:text-blue-300">
-                                  ₹{t.totalCost.toFixed(2)}
-                                </td>
-                              </tr>
-                              {/* ── Items Row Totals (qty summary) ── */}
-                              <tr className="bg-emerald-50 dark:bg-emerald-900/20 border-t-2 border-emerald-300 dark:border-emerald-700 font-bold text-xs">
-                                <td className="px-2 py-2 text-emerald-800 dark:text-emerald-300" colSpan={3}>TOTAL QTY</td>
-                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalCases}</td>
-                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBottles}</td>
-                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBL.toFixed(3)}</td>
-                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalLPL.toFixed(3)}</td>
-                                <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalMger.toFixed(2)}</td>
-                                <td colSpan={3}></td>
-                              </tr>
-                              {/* ── Purchase-level Total Cost vs Grand Total summary ── */}
-                              <tr className="bg-slate-100 dark:bg-slate-800/40 border-t border-slate-300 dark:border-slate-600 text-xs">
-                                <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400" colSpan={8}>
-                                  Taxes: VAT ₹{Number(p.vat_amount || 0).toFixed(2)}
-                                  {Number(p.cess_amount || 0) > 0 && <> · CESS ₹{Number(p.cess_amount).toFixed(2)}</>}
-                                  {Number(p.special_amount || 0) > 0 && <> · Special ₹{Number(p.special_amount).toFixed(2)}</>}
-                                  {Number(p.tcs_amount || 0) > 0 && <> · TCS ₹{Number(p.tcs_amount).toFixed(2)}</>}
-                                </td>
-                                <td className="px-2 py-1.5 text-right font-semibold text-blue-700 dark:text-blue-400">₹{totalCost.toFixed(2)}</td>
-                                <td className="px-2 py-1.5 text-right font-bold text-green-700 dark:text-green-400">₹{grandTotal.toFixed(2)}</td>
-                              </tr>
-                            </>
-                          )
-                        })()}
-                      </tbody>
-                    </table>
+            return (
+              <>
+                {/* ── Items Subtotal ── */}
+                <tr className="bg-blue-50 dark:bg-blue-900/15 border-t border-blue-200 dark:border-blue-800 text-xs">
+                  <td className="px-2 py-2 font-semibold text-blue-700 dark:text-blue-300" colSpan={10}>
+                    Items Subtotal
+                  </td>
+                  <td className="px-2 py-2 text-right font-bold text-blue-700 dark:text-blue-300">
+                    ₹{t.totalCost.toFixed(2)}
                   </td>
                 </tr>
-              )}
+                {/* ── Total QTY ── */}
+                <tr className="bg-emerald-50 dark:bg-emerald-900/20 border-t-2 border-emerald-300 dark:border-emerald-700 font-bold text-xs">
+                  <td className="px-2 py-2 text-emerald-800 dark:text-emerald-300" colSpan={3}>TOTAL QTY</td>
+                  <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalCases}</td>
+                  <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBottles}</td>
+                  <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalBL.toFixed(3)}</td>
+                  <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalLPL.toFixed(3)}</td>
+                  <td className="px-2 py-2 text-right text-emerald-800 dark:text-emerald-300">{t.totalMger.toFixed(2)}</td>
+                  <td colSpan={3}></td>
+                </tr>
+                {/* ── Taxes & Grand Total ── */}
+                <tr className="bg-slate-100 dark:bg-slate-800/40 border-t border-slate-300 dark:border-slate-600 text-xs">
+                  <td className="px-2 py-1.5 text-gray-500 dark:text-gray-400" colSpan={8}>
+                    Taxes: VAT ₹{Number(p.vat_amount || 0).toFixed(2)}
+                    {Number(p.cess_amount || 0) > 0 && <> · CESS ₹{Number(p.cess_amount).toFixed(2)}</>}
+                    {Number(p.special_amount || 0) > 0 && <> · Special ₹{Number(p.special_amount).toFixed(2)}</>}
+                    {Number(p.tcs_amount || 0) > 0 && <> · TCS ₹{Number(p.tcs_amount).toFixed(2)}</>}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-semibold text-blue-700 dark:text-blue-400">₹{t.totalCost.toFixed(2)}</td>
+                  <td className="px-2 py-1.5 text-right font-bold text-green-700 dark:text-green-400">₹{Number(p.total_amount || 0).toFixed(2)}</td>
+                </tr>
+              </>
+            )
+          })()}
+        </tbody>
+      </table>
+    </td>
+  </tr>
+)}
             </Fragment>
           )
         })}
