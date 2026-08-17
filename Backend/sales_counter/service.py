@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from .model import Sale, SaleItem
 from inventory.model import Product
 from .schema import SaleCreate
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from sqlalchemy.exc import IntegrityError  # ← ADD this import at the top
 
 def get_pos_products(db: Session, company_id: int | None = None, search: str = None):
@@ -57,15 +57,29 @@ def create_sale(db: Session, sale_data: SaleCreate):
     db.commit()
     db.refresh(db_sale)
     return db_sale
-def get_sales_report_service(db: Session, company_id: int | None = None, date_from: str = None, date_to: str = None):
+
+def get_sales_report_service(
+    db: Session,
+    company_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+):
     query = db.query(Sale)
+
     if company_id is not None:
         query = query.filter(Sale.company_id == company_id)
-    if date_from:
-        query = query.filter(Sale.created_at >= date_from)
-    if date_to:
-        end_date = (datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        query = query.filter(Sale.created_at < end_date)
+
+    if date_from is not None:
+        start_datetime = datetime.combine(date_from, time.min)
+        query = query.filter(Sale.created_at >= start_datetime)
+
+    if date_to is not None:
+        end_datetime = datetime.combine(
+            date_to + timedelta(days=1),
+            time.min,
+        )
+        query = query.filter(Sale.created_at < end_datetime)
+
     return query.order_by(Sale.created_at.desc()).all()
 
 def get_sale_by_id(db: Session, sale_id: int):

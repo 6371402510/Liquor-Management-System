@@ -10,6 +10,7 @@ def _clean_empty_strings(data: dict) -> dict:
 
 def get_companies(db: Session, owner_id: int = None, skip: int = 0, limit: int = 100):
     query = db.query(Company)
+    print("query:", query)
     if owner_id:
         query = query.filter(Company.owner_id == owner_id)
     return query.order_by(Company.created_at.desc()).offset(skip).limit(limit).all()

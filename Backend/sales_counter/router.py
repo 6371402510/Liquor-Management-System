@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
-from datetime import datetime, timedelta
+from typing import List, Optional
+from datetime import date, datetime, timedelta
 from database import get_db
 from .schema import SaleCreate, SaleResponse, UpdateMrpRequest
 from sqlalchemy.exc import IntegrityError  # ← ADD this import
@@ -45,12 +45,17 @@ def checkout(sale_data: SaleCreate, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=List[SaleResponse])
 def get_sales_report(
-    company_id: int | None = None,
-    date_from: str = Query(None, alias="date_from"),
-    date_to: str = Query(None, alias="date_to"),
-    db: Session = Depends(get_db)
+    company_id: Optional[int] = None,
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
 ):
-    return get_sales_report_service(db, company_id=company_id, date_from=date_from, date_to=date_to)
+    return get_sales_report_service(
+        db,
+        company_id=company_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @router.get("/{sale_id}", response_model=SaleResponse)
