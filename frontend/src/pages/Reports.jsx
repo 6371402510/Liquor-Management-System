@@ -198,6 +198,7 @@ export default function Reports() {
         category: productsMap[item.productId]?.category || 'Unknown',
         size: productsMap[item.productId]?.bottle_size || 'Unknown',
         mrp: productsMap[item.productId]?.mrp || 0,
+        item_code: productsMap[item.productId]?.item_code || '',
       }))
     }))
 
@@ -278,6 +279,7 @@ export default function Reports() {
 
           if (groupBy === 'item') {
             groups[key].mrp = item.mrp || 0
+            groups[key].item_code = item.item_code || ''
           }
         })
       } else {
@@ -320,6 +322,7 @@ export default function Reports() {
       customers: val.customers?.size || 0,
       qty: val.qty || 0,
       mrp: val.mrp || 0,
+       item_code: val.item_code || '',
       amount: val.amount,
       returns: val.returns || 0,
       discount: val.discount || 0,
@@ -381,9 +384,11 @@ export default function Reports() {
         'Cash': row.cash,
         'Card': row.card,
       }
-      if (groupBy === 'item') {
+            if (groupBy === 'item') {
+        base['Item Code'] = row.item_code || ''
         base['MRP'] = row.mrp || 0
       }
+      
       return base
     })
 
@@ -497,7 +502,7 @@ export default function Reports() {
 
   const billColSpan = 8
   const dateColSpan = 8
-  const itemColSpan = groupBy === 'item' ? 6 : 5
+    const itemColSpan = groupBy === 'item' ? 7 : 5
 
   return (
     <div className="space-y-6">
@@ -699,11 +704,14 @@ export default function Reports() {
                           <th className="p-3 text-right font-semibold text-gray-500">Returns ₹</th>
                         </>
                       )}
-                      {['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                                       {['item', 'brand', 'category', 'size'].includes(groupBy) && (
                         <>
                           <th className="p-3 text-center font-semibold text-gray-500">Qty</th>
                           {groupBy === 'item' && (
-                            <th className="p-3 text-right font-semibold text-amber-600 dark:text-amber-400">MRP ₹</th>
+                            <>
+                              <th className="p-3 text-left font-semibold text-gray-500">Item Code</th>
+                              <th className="p-3 text-right font-semibold text-amber-600 dark:text-amber-400">MRP ₹</th>
+                            </>
                           )}
                           <th className="p-3 text-right font-semibold text-gray-500">Disc. ₹</th>
                         </>
@@ -843,13 +851,18 @@ export default function Reports() {
                             <td className="p-3 text-right text-red-500 dark:text-red-400">₹{row.returns.toLocaleString()}</td>
                           </>
                         )}
-                        {['item', 'brand', 'category', 'size'].includes(groupBy) && (
+                                               {['item', 'brand', 'category', 'size'].includes(groupBy) && (
                           <>
                             <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">{row.qty}</td>
                             {groupBy === 'item' && (
-                              <td className="p-3 text-right font-medium text-amber-700 dark:text-amber-400">
-                                {row.mrp > 0 ? `₹${Number(row.mrp).toFixed(2)}` : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                              </td>
+                              <>
+                                <td className="p-3 text-left font-mono text-xs text-gray-500 dark:text-gray-400">
+                                  {row.item_code || <span className="text-gray-300 dark:text-gray-600">—</span>}
+                                </td>
+                                <td className="p-3 text-right font-medium text-amber-700 dark:text-amber-400">
+                                  {row.mrp > 0 ? `₹${Number(row.mrp).toFixed(2)}` : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                                </td>
+                              </>
                             )}
                             <td className={clsx("p-3 text-right", row.discount > 0 ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-600")}>
                               {row.discount > 0 ? `-₹${row.discount.toLocaleString()}` : '-'}
@@ -891,9 +904,11 @@ export default function Reports() {
                       <td className="p-3 text-right text-red-500 dark:text-red-400">₹{tableData.reduce((s, r) => s + r.returns, 0).toLocaleString()}</td>
                     </tr>
                   ) : (
+                                      
                     <tr className="font-bold text-xs">
                       <td className="p-3 text-right text-gray-700 dark:text-gray-300">Grand Total</td>
                       <td className="p-3 text-center text-blue-600 dark:text-blue-400">{tableData.reduce((s, r) => s + r.qty, 0)}</td>
+                      {groupBy === 'item' && <td></td>}
                       {groupBy === 'item' && <td></td>}
                       <td className="p-3 text-right text-rose-500 dark:text-rose-400">
                         -₹{tableData.reduce((s, r) => s + r.discount, 0).toLocaleString()}

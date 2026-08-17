@@ -414,7 +414,12 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" className="dark:stroke-gray-800" />
               <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false}
-                tickFormatter={v => `₹${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`} />
+  tickFormatter={(v) => {
+    if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;  // Crore (1,00,00,000+)
+    if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;       // Lakh (1,00,000+)
+    if (v >= 1000) return `₹${(v / 1000).toFixed(0)}k`;           // Thousand (1,000+)
+    return `₹${v}`;
+  }} />
               <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} formatter={v => [`₹${fmt(v)}`, 'Sales']} />
               <Area type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} fill="url(#salesGrad)" />
             </AreaChart>

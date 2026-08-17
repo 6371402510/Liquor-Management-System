@@ -50,6 +50,7 @@ function normalizeItem(item) {
     total_bottles: total_bottles,
     qty_bulk_liters: Number(item.qty_bulk_liters ?? item.qtyBulkLiters) || 0,
     qty_lp_liters: Number(item.qty_lp_liters ?? item.qtyLPLiters) || 0,
+     mger_value: Number(item.mger_value ?? item.mgerValue) || 0,  // ✅ ADD THIS LINE
     opening_stock: Number(item.opening_stock ?? item.openingStock) || 0,
     min_stock: Number(item.min_stock ?? item.minStock) || 0,
     total_cost: total_cost,
@@ -337,23 +338,31 @@ export default function PurchaseReport() {
   }, [filteredPurchases, expandedItems])
 
   // ─── Aggregation: By Supplier ───
-  const bySupplier = useMemo(() => {
-    const map = {}
-    filteredPurchases.forEach(p => {
-      const key = p.supplier_name || 'Unknown'
-      if (!map[key]) map[key] = { name: key, count: 0, subtotal: 0, vat: 0, cess: 0, special: 0, tcs: 0, handling: 0, total: 0 }
-      map[key].count++
-      map[key].subtotal += Number(p.subtotal) || 0
-      map[key].vat += Number(p.vat_amount) || 0
-      map[key].cess += Number(p.cess_amount) || 0
-      map[key].special += Number(p.special_amount) || 0
-      map[key].tcs += Number(p.tcs_amount) || 0
-      map[key].handling += Number(p.total_handling) || 0
-      map[key].total += Number(p.total_amount) || 0
-    })
-    return Object.values(map).sort((a, b) => b.total - a.total)
-  }, [filteredPurchases])
-
+ // ✅ REMOVED CESS & SPECIAL, ADDED MGER
+// ─── Aggregation: By Supplier ───
+const bySupplier = useMemo(() => {
+  const map = {}
+  filteredPurchases.forEach(p => {
+    const key = p.supplier_name || 'Unknown'
+    if (!map[key]) map[key] = { name: key, count: 0, subtotal: 0, vat: 0, tcs: 0, handling: 0, mger: 0, total: 0 }
+    map[key].count++
+    map[key].subtotal += Number(p.subtotal) || 0
+    map[key].vat += Number(p.vat_amount) || 0
+    map[key].tcs += Number(p.tcs_amount) || 0
+    map[key].handling += Number(p.total_handling) || 0
+    
+    // ✅ FIX: Sum MGER from ITEMS, not from purchase level
+    const pItems = expandedItems[p.id] || []
+    if (pItems.length > 0) {
+      pItems.forEach(item => {
+        map[key].mger += Number(item.mger_value) || 0
+      })
+    }
+    
+    map[key].total += Number(p.total_amount) || 0
+  })
+  return Object.values(map).sort((a, b) => b.total - a.total)
+}, [filteredPurchases, expandedItems])  // ✅ Added expandedItems to dependencies
   // ─── Aggregation: By Category ───
   const byCategory = useMemo(() => {
     const map = {}
@@ -411,28 +420,29 @@ export default function PurchaseReport() {
   }, [filteredPurchases, expandedItems])
 
   // ─── Load all items for aggregation tabs ───
-  useEffect(() => {
-    if ((activeTab === 'byCategory' || activeTab === 'byBrand' || activeTab === 'byProduct') && purchases.length > 0) {
-      const fetchAll = async () => {
-        const missing = purchases.filter(p => !expandedItems[p.id])
-        if (missing.length === 0) return
-        const promises = missing.map(async p => {
-          try {
-            const data = await getPurchaseItems(p.id)
-            return { id: p.id, data: (data || []).map(normalizeItem) }
-          } catch { return null }
-        })
-        const results = await Promise.all(promises)
-        setExpandedItems(prev => {
-          const next = { ...prev }
-          results.forEach(r => { if (r && r.data) next[r.id] = r.data })
-          return next
-        })
-      }
-      fetchAll()
+ // ─── Load all items for aggregation tabs ───
+useEffect(() => {
+  // ✅ Added 'bySupplier' here
+  if ((activeTab === 'bySupplier' || activeTab === 'byCategory' || activeTab === 'byBrand' || activeTab === 'byProduct') && purchases.length > 0) {
+    const fetchAll = async () => {
+      const missing = purchases.filter(p => !expandedItems[p.id])
+      if (missing.length === 0) return
+      const promises = missing.map(async p => {
+        try {
+          const data = await getPurchaseItems(p.id)
+          return { id: p.id, data: (data || []).map(normalizeItem) }
+        } catch { return null }
+      })
+      const results = await Promise.all(promises)
+      setExpandedItems(prev => {
+        const next = { ...prev }
+        results.forEach(r => { if (r && r.data) next[r.id] = r.data })
+        return next
+      })
     }
-  }, [activeTab, purchases])
-
+    fetchAll()
+  }
+}, [activeTab, purchases])
   // ─── Export to Excel ───
   const handleExportExcel = async () => {
     if (filteredPurchases.length === 0) { alert('No data to export'); return }
@@ -497,17 +507,17 @@ export default function PurchaseReport() {
     XLSX.utils.book_append_sheet(wb, ws2, 'Item Details')
 
     // ─── Sheet 3: By Supplier ───
-    const supplierData = bySupplier.map(s => ({
-      'Supplier': s.name,
-      'No. of Purchases': s.count,
-      'Subtotal': s.subtotal,
-      'VAT': s.vat,
-      'CESS': s.cess,
-      'Special': s.special,
-      'TCS': s.tcs,
-      'Handling': s.handling,
-      'Total Amount': s.total,
-    }))
+  // ✅ NEW - Removed CESS & Special, Added Total MGER
+const supplierData = bySupplier.map(s => ({
+  'Supplier': s.name,
+  'No. of Purchases': s.count,
+  'Subtotal': s.subtotal,
+  'VAT': s.vat,
+  'TCS': s.tcs,
+  'Handling': s.handling,
+  'Total MGER': s.mger,
+  'Total Amount': s.total,
+}))
     const ws3 = XLSX.utils.json_to_sheet(supplierData)
     XLSX.utils.book_append_sheet(wb, ws3, 'By Supplier')
 
@@ -634,7 +644,7 @@ export default function PurchaseReport() {
       )}
 
       {/* ─── Summary Cards ─── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-9 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-8 gap-3">
         <div className="card p-3 border dark:border-slate-700">
           <div className="flex items-center gap-2 mb-1"><ShoppingBag className="w-4 h-4 text-blue-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Purchases</span></div>
           <p className="text-lg font-bold text-gray-800 dark:text-gray-100">{summaryStats.totalPurchases}</p>
@@ -661,10 +671,10 @@ export default function PurchaseReport() {
           <div className="flex items-center gap-2 mb-1"><Truck className="w-4 h-4 text-orange-400" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Handling</span></div>
           <p className="text-lg font-bold text-orange-500 dark:text-orange-400">₹{summaryStats.totalHandling.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         </div>
-        <div className="card p-3 border dark:border-slate-700">
+        {/* <div className="card p-3 border dark:border-slate-700">
           <div className="flex items-center gap-2 mb-1"><Building2 className="w-4 h-4 text-purple-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Suppliers</span></div>
           <p className="text-lg font-bold text-purple-600 dark:text-purple-400">{summaryStats.uniqueSuppliers}</p>
-        </div>
+        </div> */}
         <div className="card p-3 border dark:border-slate-700">
           <div className="flex items-center gap-2 mb-1"><Package className="w-4 h-4 text-cyan-500" /><span className="text-[10px] uppercase font-semibold text-gray-400 dark:text-gray-500 tracking-wide">Bottles</span></div>
           <p className="text-lg font-bold text-cyan-600 dark:text-cyan-400">{summaryStats.totalBottles.toLocaleString()}</p>
@@ -958,58 +968,56 @@ export default function PurchaseReport() {
           {/* ═══════════════════════════════════════════════════════════════
               BY SUPPLIER TAB
           ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'bySupplier' && (
-            <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50">
-                      <th className="p-3 text-left font-semibold">Supplier</th>
-                      <th className="p-3 text-right font-semibold">Purchases</th>
-                      <th className="p-3 text-right font-semibold">Subtotal</th>
-                      <th className="p-3 text-right font-semibold">VAT</th>
-                      <th className="p-3 text-right font-semibold">CESS</th>
-                      <th className="p-3 text-right font-semibold">Special</th>
-                      <th className="p-3 text-right font-semibold">TCS</th>
-                      <th className="p-3 text-right font-semibold text-orange-500">Handling</th>
-                      <th className="p-3 text-right font-semibold text-blue-600 dark:text-blue-400">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                    {bySupplier.map(s => (
-                      <tr key={s.name} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
-                        <td className="p-3 font-medium text-gray-800 dark:text-gray-200">{s.name}</td>
-                        <td className="p-3 text-right text-gray-500">{s.count}</td>
-                        <td className="p-3 text-right">₹{s.subtotal.toFixed(2)}</td>
-                        <td className="p-3 text-right text-gray-500">₹{s.vat.toFixed(2)}</td>
-                        <td className="p-3 text-right text-gray-500">₹{s.cess.toFixed(2)}</td>
-                        <td className="p-3 text-right text-gray-500">₹{s.special.toFixed(2)}</td>
-                        <td className="p-3 text-right text-gray-500">₹{s.tcs.toFixed(2)}</td>
-                        <td className="p-3 text-right font-medium text-orange-600 dark:text-orange-400">
-                          {s.handling > 0 ? `₹${s.handling.toFixed(2)}` : '—'}
-                        </td>
-                        <td className="p-3 text-right font-bold text-blue-700 dark:text-blue-300">₹{s.total.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                    {/* Footer totals */}
-                    <tr className="font-bold bg-slate-50 dark:bg-slate-800/50 border-t-2 border-slate-200 dark:border-slate-600">
-                      <td className="p-3 text-gray-700 dark:text-gray-200">TOTAL</td>
-                      <td className="p-3 text-right">{bySupplier.reduce((s, x) => s + x.count, 0)}</td>
-                      <td className="p-3 text-right">₹{bySupplier.reduce((s, x) => s + x.subtotal, 0).toFixed(2)}</td>
-                      <td className="p-3 text-right">₹{bySupplier.reduce((s, x) => s + x.vat, 0).toFixed(2)}</td>
-                      <td className="p-3 text-right">₹{bySupplier.reduce((s, x) => s + x.cess, 0).toFixed(2)}</td>
-                      <td className="p-3 text-right">₹{bySupplier.reduce((s, x) => s + x.special, 0).toFixed(2)}</td>
-                      <td className="p-3 text-right">₹{bySupplier.reduce((s, x) => s + x.tcs, 0).toFixed(2)}</td>
-                      <td className="p-3 text-right text-orange-600 dark:text-orange-400">
-                        ₹{bySupplier.reduce((s, x) => s + x.handling, 0).toFixed(2)}
-                      </td>
-                      <td className="p-3 text-right text-blue-700 dark:text-blue-300">₹{bySupplier.reduce((s, x) => s + x.total, 0).toFixed(2)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+         {activeTab === 'bySupplier' && (
+  <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50">
+            <th className="p-2.5 text-left font-semibold">Supplier</th>
+            <th className="p-2.5 text-center font-semibold">Purchases</th>
+            <th className="p-2.5 text-right font-semibold">Subtotal</th>
+            <th className="p-2.5 text-right font-semibold">VAT</th>
+            <th className="p-2.5 text-right font-semibold">TCS</th>
+            <th className="p-2.5 text-right font-semibold">Handling</th>
+            <th className="p-2.5 text-right font-semibold text-emerald-600 dark:text-emerald-400">Total MGER</th>
+            <th className="p-2.5 text-right font-semibold">Total Amount</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+          {bySupplier.map((s, idx) => (
+            <tr key={s.name} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+              <td className="p-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-gray-400 w-5">{idx + 1}.</span>
+                  <span className="font-medium text-gray-800 dark:text-gray-200">{s.name}</span>
+                </div>
+              </td>
+              <td className="p-2.5 text-center text-gray-500">{s.count}</td>
+              <td className="p-2.5 text-right">₹{s.subtotal.toFixed(2)}</td>
+              <td className="p-2.5 text-right text-gray-500">₹{s.vat.toFixed(2)}</td>
+              <td className="p-2.5 text-right text-gray-500">₹{s.tcs.toFixed(2)}</td>
+              <td className="p-2.5 text-right text-orange-500">₹{s.handling.toFixed(2)}</td>
+              <td className="p-2.5 text-right font-bold text-emerald-600 dark:text-emerald-400">₹{s.mger.toFixed(2)}</td>
+              <td className="p-2.5 text-right font-bold text-blue-700 dark:text-blue-300">₹{s.total.toFixed(2)}</td>
+            </tr>
+          ))}
+          {/* Totals Row */}
+          <tr className="bg-slate-100 dark:bg-slate-800/60 font-bold">
+            <td className="p-2.5 text-gray-800 dark:text-gray-200">TOTAL</td>
+            <td className="p-2.5 text-center text-gray-800 dark:text-gray-200">{bySupplier.reduce((s, e) => s + e.count, 0)}</td>
+            <td className="p-2.5 text-right text-gray-800 dark:text-gray-200">₹{bySupplier.reduce((s, e) => s + e.subtotal, 0).toFixed(2)}</td>
+            <td className="p-2.5 text-right text-gray-800 dark:text-gray-200">₹{bySupplier.reduce((s, e) => s + e.vat, 0).toFixed(2)}</td>
+            <td className="p-2.5 text-right text-gray-800 dark:text-gray-200">₹{bySupplier.reduce((s, e) => s + e.tcs, 0).toFixed(2)}</td>
+            <td className="p-2.5 text-right text-orange-600">₹{bySupplier.reduce((s, e) => s + e.handling, 0).toFixed(2)}</td>
+            <td className="p-2.5 text-right text-emerald-600 dark:text-emerald-400">₹{bySupplier.reduce((s, e) => s + e.mger, 0).toFixed(2)}</td>
+            <td className="p-2.5 text-right text-blue-700 dark:text-blue-300">₹{bySupplier.reduce((s, e) => s + e.total, 0).toFixed(2)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
 
           {/* ═══════════════════════════════════════════════════════════════
               BY CATEGORY TAB
