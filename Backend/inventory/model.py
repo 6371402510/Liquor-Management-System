@@ -14,6 +14,7 @@ class Product(Base):
     item_code = Column(String, index=True, nullable=False)
     # ↓↓↓ barcode was not unique=True, but we'll constrain it per company below ↓↓↓
     barcode = Column(String, index=True, nullable=True)
+    sort_key = Column(String, index=True, nullable=True)
     
     name = Column(String, nullable=False, index=True)
     short_name = Column(String, nullable=True)
@@ -81,4 +82,5 @@ class Product(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "item_code", name="uq_product_company_item_code"),
         UniqueConstraint("company_id", "barcode", name="uq_product_company_barcode"),
+        UniqueConstraint("company_id", "sort_key", name="uq_product_company_sort_key"), 
     )

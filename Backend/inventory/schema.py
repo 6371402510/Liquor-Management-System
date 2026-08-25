@@ -7,6 +7,7 @@ class ProductBase(BaseModel):
     company_id: Optional[int] = None
     item_code: str
     barcode: Optional[str] = None
+    sort_key: Optional[str] = None
     name: str
     short_name: Optional[str] = None
     brand: Optional[str] = None
@@ -67,6 +68,7 @@ class ProductUpdate(ProductBase):
     name: Optional[str] = None
     category: Optional[str] = None
     product_type: Optional[str] = None
+    sort_key: Optional[str] = None
     unit: Optional[str] = None
 
 class ProductResponse(ProductBase):

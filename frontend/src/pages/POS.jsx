@@ -438,28 +438,44 @@ export default function POS() {
     .filter(item => selectedItems.includes(item.scanId))
     .reduce((sum, item) => sum + ((item.sale_price - (item.discount || 0)) * (item.quantity || 1)), 0);
 
-  const handleBarcodeInput = async () => {
-    const barcode = barcodeValue.trim();
-    if (!barcode) return;
+const handleBarcodeInput = async () => {
+  const input = barcodeValue.trim();
+  if (!input) return;
 
-    let product = products.find(p => p.barcode === barcode);
+  // ─── 1st: Try exact barcode match ───
+  let product = products.find(p => p.barcode === input);
 
-    if (!product) {
-      try {
-        product = await db.products.where('barcode').equals(barcode).first();
-      } catch (err) {
-        console.error("Local DB search failed:", err);
-      }
+  // ─── 2nd: Try exact sort_key match (the NEW feature) ───
+  if (!product) {
+    product = products.find(p => p.sort_key === input);
+  }
+
+  // ─── 3rd: Try local DB barcode ───
+  if (!product) {
+    try {
+      product = await db.products.where('barcode').equals(input).first();
+    } catch (err) {
+      console.error("Local DB search failed:", err);
     }
+  }
 
-    if (product) {
-      addToCart(product);
-    } else {
-      alert('Product not found or not in counter stock');
+  // ─── 4th: Try local DB sort_key ───
+  if (!product) {
+    try {
+      product = await db.products.where('sort_key').equals(input).first();
+    } catch (err) {
+      console.error("Local DB sort_key search failed:", err);
     }
+  }
 
-    setBarcodeValue('');
-  };
+  if (product) {
+    addToCart(product);
+  } else {
+    alert('Product not found or not in counter stock');
+  }
+
+  setBarcodeValue('');
+};
 
   const clearPersistedSale = () => {
     // ─── ADDED: Check if we need to restore backup ───

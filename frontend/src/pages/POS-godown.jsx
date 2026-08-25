@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { db } from '../db';
 import {
   Search, Barcode, Plus, Minus, Trash2, ShoppingCart,
   Printer, CheckCircle, X, Loader2, CreditCard, Banknote,
@@ -170,27 +171,28 @@ export default function POSGodown() {
     }
   };
 
-  useEffect(() => {
-    const availableProducts = products.filter(
-      p => Number(p.godown_stock) > 0
+useEffect(() => {
+  const availableProducts = products.filter(
+    p => Number(p.godown_stock) > 0
+  );
+
+  if (search.trim()) {
+    const q = search.toLowerCase();
+
+    setFilteredProducts(
+      availableProducts.filter(p =>
+        p.name.toLowerCase().includes(q) ||     // ✅ FIXED: added )
+        (p.barcode || '').includes(q) ||
+        (p.sort_key || '').includes(q) ||
+        (p.brand || '').toLowerCase().includes(q) ||
+        (p.item_code || '').toLowerCase().includes(q) ||
+        (p.traditional_name || '').toLowerCase().includes(q)
+      )
     );
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-
-      setFilteredProducts(
-        availableProducts.filter(p =>
-          p.name.toLowerCase().includes(q) ||
-          (p.barcode || '').includes(q) ||
-          (p.brand || '').toLowerCase().includes(q) ||
-          (p.item_code || '').toLowerCase().includes(q) ||
-          (p.traditional_name || '').toLowerCase().includes(q)
-        )
-      );
-    } else {
-      setFilteredProducts(availableProducts);
-    }
-  }, [products, search]);
+  } else {
+    setFilteredProducts(availableProducts);
+  }
+}, [products, search]);
 
   useEffect(() => {
     setSelectedItems(prev => prev.filter(scanId => cart.some(item => item.scanId === scanId)));
@@ -473,19 +475,64 @@ const updateItemMrp = async (scanId, newPrice) => {
     return cart.filter(i => i.productId === productId).reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
   };
 
-  const handleBarcodeInput = () => {
-    const barcode = barcodeValue.trim();
-    if (!barcode) return;
-    const product = products.find(p => p.barcode === barcode);
-    if (product) {
-      addToCart(product);
-    } else {
-      alert('Product not found or not in godown stock');
-      if (barcodeRef.current) barcodeRef.current.focus();
-    }
-    setBarcodeValue('');
-  };
+const handleBarcodeInput = async () => {
+  const input = barcodeValue.trim();
+  if (!input) return;
 
+  let product = null;
+  let fromLocalDB = false;
+
+  // ─── 1st: Try API barcode ───
+  product = products.find(p => p.barcode === input);
+
+  // ─── 2nd: Try API sort_key ───
+  if (!product) {
+    product = products.find(p => p.sort_key === input);
+  }
+
+  // ─── 3rd: Try Local DB barcode ───
+  if (!product) {
+    try {
+      product = await db.products.where('barcode').equals(input).first();
+      fromLocalDB = true;
+    } catch (err) {
+      console.warn('Local DB barcode search failed:', err.message);
+    }
+  }
+
+  // ─── 4th: Try Local DB sort_key ───
+  if (!product) {
+    try {
+      product = await db.products.where('sort_key').equals(input).first();
+      fromLocalDB = true;
+    } catch (err) {
+      console.warn('Local DB sort_key search failed:', err.message);
+    }
+  }
+
+  if (product) {
+    // ─── KEY FIX: If found from local DB, try to get fresh API data ───
+    if (fromLocalDB) {
+      const apiVersion = products.find(p => p.id === product.id);
+      if (apiVersion) {
+        product = apiVersion;  // Use API version (has correct godown_stock)
+      } else {
+        // Product not in API list at all — it might be inactive or different company
+        alert('Product not found in current stock list');
+        setBarcodeValue('');
+        if (barcodeRef.current) barcodeRef.current.focus();
+        return;
+      }
+    }
+
+    addToCart(product);
+  } else {
+    alert('Product not found or not in godown stock');
+    if (barcodeRef.current) barcodeRef.current.focus();
+  }
+
+  setBarcodeValue('');
+};
   const clearPersistedSale = () => {
     setCart([]);
     setCustomerName('Walk-in Customer');

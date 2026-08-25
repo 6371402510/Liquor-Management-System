@@ -13,7 +13,7 @@ def get_product(db: Session, product_id: int):
     return db.query(Product).filter(Product.id == product_id).first()
 
 
-def _check_duplicates(db: Session, company_id, item_code, barcode, exclude_id=None):
+def _check_duplicates(db: Session, company_id, item_code, barcode, sort_key=None, exclude_id=None):
     """Helper to safely check duplicates, ignoring NULL values"""
     if not company_id:
         return
@@ -27,6 +27,8 @@ def _check_duplicates(db: Session, company_id, item_code, barcode, exclude_id=No
         conditions.append(Product.item_code == item_code)
     if barcode:
         conditions.append(Product.barcode == barcode)
+    if sort_key:                                    # ← NEW
+        conditions.append(Product.sort_key == sort_key)  # ← NEW
 
     if not conditions:
         return
@@ -38,6 +40,9 @@ def _check_duplicates(db: Session, company_id, item_code, barcode, exclude_id=No
             raise ValueError(f"Item Code '{item_code}' already exists for this company.")
         if barcode and existing.barcode == barcode:
             raise ValueError(f"Barcode '{barcode}' already exists for this company.")
+        if sort_key and existing.sort_key == sort_key:               # ← NEW
+            raise ValueError(f"Sort Key '{sort_key}' already exists for this company.")  # ← NEW
+
 
 
 def create_product(db: Session, product_data: ProductCreate):
@@ -46,8 +51,9 @@ def create_product(db: Session, product_data: ProductCreate):
     company_id = product_dict.get('company_id')
     item_code = product_dict.get('item_code')
     barcode = product_dict.get('barcode')
+    sort_key = product_dict.get('sort_key')              # ← NEW
 
-    _check_duplicates(db, company_id, item_code, barcode)
+    _check_duplicates(db, company_id, item_code, barcode, sort_key)  # ← NEW param
 
     db_product = Product(**product_dict)
 
@@ -61,6 +67,7 @@ def create_product(db: Session, product_data: ProductCreate):
         raise ValueError(f"Database constraint failed: {e.orig}")
 
 
+
 def update_product(db: Session, product_id: int, product_data: ProductUpdate):
     db_product = get_product(db, product_id)
     if not db_product:
@@ -68,12 +75,12 @@ def update_product(db: Session, product_id: int, product_data: ProductUpdate):
 
     update_data = product_data.model_dump(exclude_unset=True, by_alias=False)
 
-    # Use new values if provided, otherwise fall back to existing
     company_id = update_data.get('company_id', db_product.company_id)
     item_code = update_data.get('item_code', db_product.item_code)
     barcode = update_data.get('barcode', db_product.barcode)
+    sort_key = update_data.get('sort_key', db_product.sort_key)      # ← NEW
 
-    _check_duplicates(db, company_id, item_code, barcode, exclude_id=product_id)
+    _check_duplicates(db, company_id, item_code, barcode, sort_key, exclude_id=product_id)  # ← NEW
 
     for key, value in update_data.items():
         setattr(db_product, key, value)

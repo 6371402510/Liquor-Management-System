@@ -1788,11 +1788,14 @@ handling_other_amount: h(handlingOtherAmount),
 
     {/* ─── GRAND TOTAL ─── */}
     <div className="flex justify-between text-base font-bold border-t-2 border-gray-300 dark:border-gray-600 pt-2">
-      <span>Grand Total</span>
-      <span className="text-green-600 dark:text-green-400 tabular-nums">
-        ₹ {total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-      </span>
-    </div>
+  <span>Grand Total</span>
+  <span className="text-green-600 dark:text-green-400 tabular-nums">
+    ₹ {Number(total).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}
+  </span>
+</div>
   </div>
 
   {/* ─── SUBMIT BUTTON ─── */}

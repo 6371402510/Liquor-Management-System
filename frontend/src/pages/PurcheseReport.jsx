@@ -421,28 +421,52 @@ const bySupplier = useMemo(() => {
 
   // ─── Load all items for aggregation tabs ───
  // ─── Load all items for aggregation tabs ───
-useEffect(() => {
-  // ✅ Added 'bySupplier' here
-  if ((activeTab === 'bySupplier' || activeTab === 'byCategory' || activeTab === 'byBrand' || activeTab === 'byProduct') && purchases.length > 0) {
-    const fetchAll = async () => {
-      const missing = purchases.filter(p => !expandedItems[p.id])
-      if (missing.length === 0) return
-      const promises = missing.map(async p => {
-        try {
-          const data = await getPurchaseItems(p.id)
-          return { id: p.id, data: (data || []).map(normalizeItem) }
-        } catch { return null }
-      })
-      const results = await Promise.all(promises)
-      setExpandedItems(prev => {
-        const next = { ...prev }
-        results.forEach(r => { if (r && r.data) next[r.id] = r.data })
-        return next
-      })
+// useEffect(() => {
+//   // ✅ Added 'bySupplier' here
+//   if ((activeTab === 'bySupplier' || activeTab === 'byCategory' || activeTab === 'byBrand' || activeTab === 'byProduct') && purchases.length > 0) {
+//     const fetchAll = async () => {
+//       const missing = purchases.filter(p => !expandedItems[p.id])
+//       if (missing.length === 0) return
+//       const promises = missing.map(async p => {
+//         try {
+//           const data = await getPurchaseItems(p.id)
+//           return { id: p.id, data: (data || []).map(normalizeItem) }
+//         } catch { return null }
+//       })
+//       const results = await Promise.all(promises)
+//       setExpandedItems(prev => {
+//         const next = { ...prev }
+//         results.forEach(r => { if (r && r.data) next[r.id] = r.data })
+//         return next
+//       })
+//     }
+//     fetchAll()
+//   }
+// }, [activeTab, purchases])
+
+
+  // ─── Load all items for summary stats & aggregation tabs ───
+  useEffect(() => {
+    if ((activeTab === 'detail' || activeTab === 'bySupplier' || activeTab === 'byCategory' || activeTab === 'byBrand' || activeTab === 'byProduct') && purchases.length > 0) {
+      const fetchAll = async () => {
+        const missing = purchases.filter(p => !expandedItems[p.id])
+        if (missing.length === 0) return
+        const promises = missing.map(async p => {
+          try {
+            const data = await getPurchaseItems(p.id)
+            return { id: p.id, data: (data || []).map(normalizeItem) }
+          } catch { return null }
+        })
+        const results = await Promise.all(promises)
+        setExpandedItems(prev => {
+          const next = { ...prev }
+          results.forEach(r => { if (r && r.data) next[r.id] = r.data })
+          return next
+        })
+      }
+      fetchAll()
     }
-    fetchAll()
-  }
-}, [activeTab, purchases])
+  }, [activeTab, purchases])
   // ─── Export to Excel ───
   const handleExportExcel = async () => {
     if (filteredPurchases.length === 0) { alert('No data to export'); return }
@@ -450,25 +474,32 @@ useEffect(() => {
     const wb = XLSX.utils.book_new()
 
     // ─── Sheet 1: Purchase Summary ───
-    const summaryData = filteredPurchases.map(p => ({
-      'Invoice No.': p.invoice_number || '',
-      'Billing Date': p.billing_date || p.purchase_date || '',
-      'Invoice Date': p.invoice_date || '',
-      'Supplier': p.supplier_name || '',
-      'Stock To': p.stock_destination || 'GODOWN',
-      'Transport Pass': p.notes || '',
-      'Vehicle Number': p.vehicle_number || '',
-      'Subtotal': Number(p.subtotal) || 0,
-      'VAT Amount': Number(p.vat_amount) || 0,
-      'CESS Amount': Number(p.cess_amount) || 0,
-      'Special Amount': Number(p.special_amount) || 0,
-      'TCS Amount': Number(p.tcs_amount) || 0,
-      'Handling Expenses': Number(p.total_handling) || 0,
-      'Total Amount': Number(p.total_amount) || 0,
-      'Status': p.status || '',
-    }))
+       // ─── Sheet 1: Purchase Summary ───
+    const summaryData = filteredPurchases.map(p => {
+      // ✅ Calculate total MGER from items for this purchase
+      const pItems = expandedItems[p.id] || []
+      const totalMger = pItems.reduce((s, i) => s + (Number(i.mger_value) || 0), 0)
+
+      return {
+        'Invoice No.': p.invoice_number || '',
+        'Billing Date': p.billing_date || p.purchase_date || '',
+        'Invoice Date': p.invoice_date || '',
+        'Supplier': p.supplier_name || '',
+        'Stock To': p.stock_destination || 'GODOWN',
+        'Transport Pass': p.notes || '',
+        'Vehicle Number': p.vehicle_number || '',
+        'Total MGER': totalMger,
+        'Subtotal': Number(p.subtotal) || 0,
+        'VAT Amount': Number(p.vat_amount) || 0,
+        'TCS Amount': Number(p.tcs_amount) || 0,
+        'Handling Expenses': Number(p.total_handling) || 0,
+        'Total Amount': Number(p.total_amount) || 0,
+        'Status': p.status || '',
+      }
+    })
     const ws1 = XLSX.utils.json_to_sheet(summaryData)
     XLSX.utils.book_append_sheet(wb, ws1, 'Purchase Summary')
+   
 
     // ─── Sheet 2: Item Details ───
     const itemData = []
@@ -498,6 +529,7 @@ useEffect(() => {
             'MRP': item.mrp || 0,
             'Rate/Case': item.unit_cost || 0,
             'Rate/Unit': item.purchase_rate_per_unit || 0,
+            'MGER': item.mger_value || 0,
             'Total Cost': item.total_cost || 0,
           })
         })
@@ -786,6 +818,7 @@ const supplierData = bySupplier.map(s => ({
                         </th>
                         <th className="p-2.5 text-center font-semibold">Stock To</th>
                         <th className="p-2.5 text-center font-semibold">Vehicle</th>
+                         <th className="p-2.5 text-right font-semibold text-emerald-600 dark:text-emerald-400">Total MGER</th>
                         <th className="p-2.5 text-right font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('subtotal')}>
                           <div className="flex items-center justify-end gap-1">Subtotal {getSortIcon(sortField === 'subtotal' ? sortDir : '')}</div>
                         </th>
@@ -833,6 +866,14 @@ const supplierData = bySupplier.map(s => ({
                               </span>
                             </td>
                             <td className="p-2.5 text-center text-gray-500 text-[11px]">{p.vehicle_number || '—'}</td>
+                             <td className="p-2.5 text-right">
+                              {(() => {
+                                const totalMger = (expandedItems[p.id] || []).reduce((s, i) => s + (Number(i.mger_value) || 0), 0)
+                                return totalMger > 0
+                                  ? <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{totalMger.toFixed(2)}</span>
+                                  : <span className="text-gray-300 dark:text-gray-600">—</span>
+                              })()}
+                            </td>
                             <td className="p-2.5 text-right font-medium">₹{Number(p.subtotal).toFixed(2)}</td>
                             <td className="p-2.5 text-right text-gray-500">₹{Number(p.vat_amount).toFixed(2)}</td>
                             <td className="p-2.5 text-right">
@@ -864,60 +905,73 @@ const supplierData = bySupplier.map(s => ({
                           </tr>
 
                           {/* ─── Expanded Items ─── */}
+                                                   {/* ─── Expanded Items ─── */}
                           {expandedId === p.id && expandedItems[p.id] && (
                             <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20">
-                              <td colSpan={11} className="px-6 py-3">
+                              <td colSpan={12} className="px-6 py-3">
                                 <table className="w-full text-xs">
                                   <thead>
                                     <tr className="text-gray-400 border-b border-gray-200 dark:border-gray-700">
                                       <th className="text-left py-1.5 font-medium w-6">#</th>
                                       <th className="text-left py-1.5 font-medium">Product</th>
                                       <th className="text-center py-1.5 font-medium w-16">Size</th>
-                                      <th className="text-center py-1.5 font-medium w-12">MRP</th>
                                       <th className="text-center py-1.5 font-medium w-14">Cases</th>
-                                      <th className="text-center py-1.5 font-medium w-16 font-bold text-green-500">Bottles</th>
-                                      <th className="text-center py-1.5 font-medium w-14">Bulk L</th>
-                                      <th className="text-right py-1.5 font-medium w-18 text-orange-500">Rate/Case</th>
-                                      <th className="text-right py-1.5 font-medium w-18 text-green-500">Rate/Unit</th>
-                                      <th className="text-right py-1.5 font-medium w-20">Total</th>
+                                      <th className="text-center py-1.5 font-medium w-16">Bottles</th>
+                                      <th className="text-center py-1.5 font-medium w-16">Bulk Ltr</th>
+                                      <th className="text-center py-1.5 font-medium w-14">MRP</th>
+                                      <th className="text-right py-1.5 font-medium w-20">Rate/Case</th>
+                                      <th className="text-right py-1.5 font-medium w-20">Rate/Unit</th>
+                                      {/* ✅ NEW: MGER Column */}
+                                      <th className="text-right py-1.5 font-medium w-20 text-emerald-600 dark:text-emerald-400">MGER</th>
+                                      <th className="text-right py-1.5 font-medium w-24">Total Cost</th>
                                     </tr>
                                   </thead>
-                                  <tbody>
-                                    {expandedItems[p.id].map((item, idx) => {
-                                      const cases = item.qty_cases || 0
-                                      const totalBtls = item.total_bottles || 0
-                                      const ratePerCase = item.unit_cost || 0
-                                      const ratePerUnit = item.purchase_rate_per_unit > 0
-                                        ? item.purchase_rate_per_unit
-                                        : (totalBtls > 0 ? (ratePerCase * cases) / totalBtls : 0)
-
+                                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                    {(expandedItems[p.id] || []).map((item, idx) => (
+                                      <tr key={item.id || idx} className="hover:bg-white dark:hover:bg-gray-800/50 transition-colors">
+                                        <td className="py-1.5 text-gray-400">{idx + 1}</td>
+                                        <td className="py-1.5">
+                                          <div className="font-medium text-gray-700 dark:text-gray-300">{item.product_name}</div>
+                                          <div className="text-[10px] text-gray-400">{item.brand} {item.category ? `• ${item.category}` : ''}</div>
+                                        </td>
+                                        <td className="py-1.5 text-center text-gray-500">{item.bottle_size || '—'}</td>
+                                        <td className="py-1.5 text-center text-gray-600 dark:text-gray-400">{item.qty_cases || 0}</td>
+                                        <td className="py-1.5 text-center font-medium text-gray-700 dark:text-gray-300">{item.total_bottles || 0}</td>
+                                        <td className="py-1.5 text-center text-gray-500">{item.qty_bulk_liters || '—'}</td>
+                                        <td className="py-1.5 text-center text-gray-500">₹{(item.mrp || 0).toFixed(2)}</td>
+                                        <td className="py-1.5 text-right text-gray-600 dark:text-gray-400">₹{(item.unit_cost || 0).toFixed(2)}</td>
+                                        <td className="py-1.5 text-right text-gray-600 dark:text-gray-400">₹{(item.purchase_rate_per_unit || 0).toFixed(2)}</td>
+                                        {/* ✅ NEW: MGER Cell */}
+                                        <td className="py-1.5 text-right">
+                                          {Number(item.mger_value) > 0
+                                            ? <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{Number(item.mger_value).toFixed(2)}</span>
+                                            : <span className="text-gray-300 dark:text-gray-600">—</span>
+                                          }
+                                        </td>
+                                        <td className="py-1.5 text-right font-semibold text-blue-700 dark:text-blue-300">₹{(item.total_cost || 0).toFixed(2)}</td>
+                                      </tr>
+                                    ))}
+                                    {/* ✅ NEW: MGER Subtotal Row */}
+                                    {(() => {
+                                      const items = expandedItems[p.id] || []
+                                      const subCases = items.reduce((s, i) => s + (i.qty_cases || 0), 0)
+                                      const subBottles = items.reduce((s, i) => s + (i.total_bottles || 0), 0)
+                                      const subBulk = items.reduce((s, i) => s + (i.qty_bulk_liters || 0), 0)
+                                      const subCost = items.reduce((s, i) => s + (i.total_cost || 0), 0)
+                                      const subMger = items.reduce((s, i) => s + (Number(i.mger_value) || 0), 0)
                                       return (
-                                        <tr key={item.id} className="border-b border-gray-100 dark:border-gray-800/50 hover:bg-white/50 dark:hover:bg-gray-800/30">
-                                          <td className="py-1.5 text-gray-400">{idx + 1}</td>
-                                          <td className="py-1.5">
-                                            <span className="font-medium text-gray-800 dark:text-gray-200">{item.product_name}</span>
-                                            {item.traditional_name && <span className="text-gray-400 ml-1">· {item.traditional_name}</span>}
-                                            {item.brand && <div className="text-[10px] text-gray-400">{item.brand}</div>}
-                                          </td>
-                                          <td className="text-center py-1.5 text-gray-500">{item.bottle_size || '-'}</td>
-                                          <td className="text-center py-1.5">₹{item.mrp}</td>
-                                          <td className="text-center py-1.5 font-medium">{cases || '-'}</td>
-                                          <td className="text-center py-1.5 font-bold text-green-600 dark:text-green-400">{totalBtls || '-'}</td>
-                                          <td className="text-center py-1.5 text-gray-500">{item.qty_bulk_liters || '-'}</td>
-                                          <td className="text-right py-1.5 font-semibold text-orange-600 dark:text-orange-400">₹{ratePerCase.toFixed(2)}</td>
-                                          <td className="text-right py-1.5 font-semibold text-green-600 dark:text-green-400">₹{ratePerUnit.toFixed(2)}</td>
-                                          <td className="text-right py-1.5 font-medium text-blue-700 dark:text-blue-300">₹{item.total_cost.toFixed(2)}</td>
+                                        <tr className="bg-blue-50/50 dark:bg-blue-900/10 border-t-2 border-blue-200 dark:border-blue-800">
+                                          <td colSpan={3} className="py-2 text-right font-bold text-gray-600 dark:text-gray-300 pr-3">Subtotal →</td>
+                                          <td className="py-2 text-center font-bold text-gray-700 dark:text-gray-300">{subCases}</td>
+                                          <td className="py-2 text-center font-bold text-gray-700 dark:text-gray-300">{subBottles}</td>
+                                          <td className="py-2 text-center font-bold text-gray-500">{subBulk > 0 ? subBulk : '—'}</td>
+                                          <td colSpan={3}></td>
+                                          {/* ✅ NEW: MGER Subtotal */}
+                                          <td className="py-2 text-right font-bold text-emerald-600 dark:text-emerald-400">₹{subMger.toFixed(2)}</td>
+                                          <td className="py-2 text-right font-bold text-blue-700 dark:text-blue-300">₹{subCost.toFixed(2)}</td>
                                         </tr>
                                       )
-                                    })}
-                                    <tr className="bg-slate-100/50 dark:bg-slate-800/50 font-semibold">
-                                      <td colSpan={4} className="py-1.5 text-right text-gray-500">Item Total</td>
-                                      <td className="py-1.5 text-center">{expandedItems[p.id].reduce((s, i) => s + (i.qty_cases || 0), 0)}</td>
-                                      <td className="py-1.5 text-center text-green-600">{expandedItems[p.id].reduce((s, i) => s + (i.total_bottles || 0), 0)}</td>
-                                      <td className="py-1.5 text-center">{expandedItems[p.id].reduce((s, i) => s + (i.qty_bulk_liters || 0), 0).toFixed(1)}</td>
-                                      <td colSpan={2}></td>
-                                      <td className="py-1.5 text-right text-blue-700 dark:text-blue-300">₹{expandedItems[p.id].reduce((s, i) => s + (i.total_cost || 0), 0).toFixed(2)}</td>
-                                    </tr>
+                                    })()}
                                   </tbody>
                                 </table>
                               </td>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo,useRef } from 'react'
-import { Plus, Search, CreditCard as Edit2, Trash2, X, Loader as Loader2, TriangleAlert as AlertTriangle, Package, ChevronUp, ShieldAlert, ChevronDown, Upload, Download, FileDown, AlertCircle, TrendingDown, Clock3, TrendingUp, Warehouse, Store, Printer, Minus } from 'lucide-react'
+import { Plus, Search, CreditCard as Edit2, Trash2, X, Loader as Loader2, TriangleAlert as AlertTriangle, Package,Hash, ChevronUp, ShieldAlert, ChevronDown, Upload, Download, FileDown, AlertCircle, TrendingDown, Clock3, TrendingUp, Warehouse, Store, Printer, Minus } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../context/AuthContext'
@@ -29,10 +29,10 @@ const DEFAULT_SUB_CATEGORIES = ['PREMIUM', 'SUPER PREMIUM', 'ULTRA PREMIUM', 'RE
 const PRODUCT_TYPES = ['IMFL', 'BEER', 'WINE','FMFL']
 
 const BOTTLE_SIZES_BY_TYPE = {
-  'IMFL': ['90ml', '180ml','200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
+  'IMFL': ['90ml','150ml','180ml','200ml', '250ml', '330ml', '375ml', '500ml', '750ml', '1000ml'],
   'BEER': ['275ml', '330ml', '500ml', '650ml'],
   'WINE': ['180ml', '375ml', '500ml', '750ml', '1000ml', '2000ml'],
-  'FMFL':['50ml','60ml','90ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '700ml','750ml', '1000ml'],
+  'FMFL':['50ml','60ml','90ml','150ml', '180ml', '200ml', '250ml', '330ml', '375ml', '500ml', '700ml','750ml', '1000ml'],
   
 }
 const DEFAULT_SIZES = BOTTLE_SIZES_BY_TYPE['IMFL']
@@ -41,6 +41,7 @@ const SIZE_TRADITIONAL_MAP = {
   '50ml':   { traditionalName: 'Mini / Chota Peg',       bottlesPerCase: 150 },
   '60ml':   { traditionalName: 'Chhota Peg / 60ml Peg',  bottlesPerCase: 150 },
   '90ml':   { traditionalName: 'Peg / Miniature', bottlesPerCase: 96 },
+  '150ml':  { traditionalName: 'Mini / Chota Peg',       bottlesPerCase: 60 },
   '180ml':  { traditionalName: 'Nip / Quarter',   bottlesPerCase: 48 },
   '200ml':  { traditionalName: 'Nip + / Quarter+',bottlesPerCase: 24 },
   '250ml':  { traditionalName: 'Quarter Plus',    bottlesPerCase: 36 },
@@ -62,7 +63,7 @@ const BARCODE_TYPES = ['EAN13', 'CODE128', 'UPC', 'QR']
 const ITEM_STATUSES = ['ACTIVE', 'INACTIVE']
 
 const emptyForm = {
-  item_code: '', barcode: '', name: '', short_name: '', brand: '', category: 'WHISKY',
+  item_code: '', barcode: '',sort_key: '',  name: '', short_name: '', brand: '', category: 'WHISKY',
   sub_category: 'PREMIUM', product_type: 'IMFL', bottle_size: '750ml',
   traditional_name: 'Quart / Bottle',
   bottles_per_case: '12',
@@ -585,7 +586,7 @@ export default function Inventory() {
 
   const openEdit = (product) => {
     setForm({
-      item_code: product.item_code || '', barcode: product.barcode || '', name: product.name || '',
+      item_code: product.item_code || '', barcode: product.barcode || '',sort_key: product.sort_key || '', name: product.name || '',
       short_name: product.short_name || '', brand: product.brand || '', category: product.category || 'WHISKY',
       sub_category: product.sub_category || 'PREMIUM', product_type: product.product_type || 'IMFL',
       bottle_size: product.bottle_size || '750ml',
@@ -1286,6 +1287,25 @@ export default function Inventory() {
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Barcode</label>
                     <input value={form.barcode} onChange={e => setForm(f => ({ ...f, barcode: e.target.value }))} className="input-field font-mono" />
                   </div>
+
+                  {/* ─── Sort Key ─── */}
+<div className="col-span-2 sm:col-span-1">
+  <label className="form-label">Sort Key <span className="text-[10px] text-gray-400 font-normal">(Quick scan code for POS)</span></label>
+  <input
+    type="text"
+    value={form.sort_key || ''}
+    onChange={e => setForm(f => ({ ...f, sort_key: e.target.value }))}
+    placeholder="e.g. 1, 2, 3..."
+    className="input-field"
+    maxLength={10}
+  />
+  {form.sort_key && (
+    <p className="mt-1 text-[10px] text-indigo-500 flex items-center gap-1">
+      <Hash className="w-3 h-3" />
+      POS: Scan <strong>"{form.sort_key}"</strong> → directly adds this product
+    </p>
+  )}
+</div>
                   <div className="md:col-span-2">
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Product Name *</label>
                     <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
