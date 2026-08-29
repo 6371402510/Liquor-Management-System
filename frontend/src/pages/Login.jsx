@@ -675,7 +675,8 @@ export default function Login() {
               <input
                 type="text"
                 value={licenseKey}
-                onChange={e => setLicenseKey(e.target.value.toUpperCase())}
+                // onChange={e => setLicenseKey(e.target.value.toUpperCase())}
+                onChange={e => setLicenseKey(e.target.value)}
                 placeholder="XXXXXX-XXXXXX-XXX"
                 className="w-full px-3.5 py-3 rounded-lg bg-white/5 border border-white/10 text-white placeholder-gray-600 text-sm font-mono tracking-widest focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 disabled={activating}

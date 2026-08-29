@@ -6,23 +6,19 @@ from sqlalchemy.orm import Session
 from .model import License
 
 
-# ═══════════════════════════════════════════════════════════
-# Supported license durations
-# ═══════════════════════════════════════════════════════════
 DAY_OPTIONS = {15, 30}
 MONTH_OPTIONS = {3, 6, 12, 24, 36}
 
+# Pre-compute all valid encodings (handles both MzY and MZY)
+VALID_ENCODINGS = {}
+for _v in DAY_OPTIONS | MONTH_OPTIONS:
+    _raw = base64.urlsafe_b64encode(str(_v).encode()).decode()
+    _stripped = _raw.rstrip('=')
+    for _ver in (_stripped, _raw, _stripped.upper(), _raw.upper()):
+        VALID_ENCODINGS[_ver] = _v
+
 
 def generate_license_key(duration: int, duration_type: str = 'months') -> str:
-    """
-    Generate a license key for a given duration.
-    
-    Usage:
-        generate_license_key(15, 'days')   → 'A1B2C3-D4E5F6-MTU'
-        generate_license_key(30, 'days')   → 'A1B2C3-D4E5F6-MZ A'
-        generate_license_key(3, 'months')  → 'A1B2C3-D4E5F6-MW'
-        generate_license_key(12, 'months') → 'A1B2C3-D4E5F6-MTI'
-    """
     if duration_type == 'days' and duration not in DAY_OPTIONS:
         raise ValueError(f"Invalid day duration. Allowed: {DAY_OPTIONS}")
     if duration_type == 'months' and duration not in MONTH_OPTIONS:
@@ -32,15 +28,11 @@ def generate_license_key(duration: int, duration_type: str = 'months') -> str:
     encoded = base64.urlsafe_b64encode(value_str.encode()).decode().rstrip('=')
     random_part = secrets.token_hex(6).upper()
 
-    key = f"{random_part[:6]}-{random_part[6:]}-{encoded.upper()}"
+    key = f"{random_part[:6]}-{random_part[6:]}-{encoded}"
     return key
 
 
 def initialize_license(db: Session):
-    """
-    Creates a 7-day trial license only if no license exists.
-    Called automatically after customer registration.
-    """
     existing_license = db.query(License).first()
 
     if existing_license:
@@ -61,9 +53,6 @@ def initialize_license(db: Session):
 
 
 def get_active_license(db: Session):
-    """
-    Returns the currently active license.
-    """
     return (
         db.query(License)
         .filter(License.is_active == True)
@@ -72,35 +61,27 @@ def get_active_license(db: Session):
 
 
 def activate_license(db: Session, license_key: str):
-    """
-    Activate a license.
-    
-    Supported durations:
-      Days:   15, 30
-      Months: 3, 6, 12, 24, 36
-    """
+    # Strip VICHAAR- prefix if present
+    parts = license_key.split('-')
+    if len(parts) == 4:
+        license_key = '-'.join(parts[1:])
+
+    # Extract encoded part (after last dash)
+    encoded_part = license_key.rsplit('-', 1)[-1]
+
+    # Look up in pre-computed valid encodings
+    value = VALID_ENCODINGS.get(encoded_part)
+
+    if value is None:
+        raise ValueError("Invalid license key")
+
     days = None
     months = None
 
-    for size in (4, 3, 2):
-        try:
-            encoded = license_key[-size:]
-            encoded += "=" * (-len(encoded) % 4)
-            value = int(base64.urlsafe_b64decode(encoded).decode())
-
-            # Check day options FIRST (before month options)
-            # to avoid 30 being skipped if it ever conflicted
-            if value in DAY_OPTIONS:
-                days = value
-                break
-            elif value in MONTH_OPTIONS:
-                months = value
-                break
-        except Exception:
-            continue
-
-    if days is None and months is None:
-        raise ValueError("Invalid license key")
+    if value in DAY_OPTIONS:
+        days = value
+    elif value in MONTH_OPTIONS:
+        months = value
 
     start_date = date.today()
 
@@ -109,13 +90,12 @@ def activate_license(db: Session, license_key: str):
     else:
         end_date = start_date + relativedelta(months=months)
 
-    # Deactivate any existing active license
+    # Deactivate existing
     active_license = (
         db.query(License)
         .filter(License.is_active == True)
         .first()
     )
-
     if active_license:
         active_license.is_active = False
 

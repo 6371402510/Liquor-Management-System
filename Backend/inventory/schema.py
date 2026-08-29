@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional
 from datetime import datetime
 
@@ -20,7 +20,6 @@ class ProductBase(BaseModel):
     unit: str
     packing_type: Optional[str] = None
     
-    # ─── FIX: Optional[str] → Optional[float] ───
     purchase_rate: Optional[float] = None
     landing_cost: float = 0.0
     mrp: float = 0.0
@@ -59,6 +58,15 @@ class ProductBase(BaseModel):
     transfer_allowed: bool = False
     
     status: str = 'ACTIVE'
+
+    # ← NEW: Convert empty strings to None for fields with unique constraints
+    @field_validator('barcode', 'sort_key', mode='before')
+    @classmethod
+    def empty_string_to_none(cls, v):
+        if isinstance(v, str) and v.strip() == '':
+            return None
+        return v
+
 
 class ProductCreate(ProductBase):
     pass
