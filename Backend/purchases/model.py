@@ -18,7 +18,7 @@ class Purchase(Base):
 
     # ─── NEW: COUNTER or GODOWN ───
     stock_destination = Column(String, default="GODOWN", nullable=False)
-    purchase_side = Column(String, default="LIQUOR", nullable=False)
+    # purchase_side = Column(String, default="LIQUOR", nullable=False)
 
     subtotal = Column(Float, default=0.0)
     vat_amount = Column(Float, default=0.0)
