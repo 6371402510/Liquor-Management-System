@@ -37,14 +37,35 @@ def get_godown_sales_report(
     db: Session = Depends(get_db)
 ):
     query = db.query(GodownSale)
+
     if company_id is not None:
-        query = query.filter(GodownSale.company_id == company_id)
+        query = query.filter(
+            GodownSale.company_id == company_id
+        )
+
     if date_from:
-        query = query.filter(GodownSale.created_at >= date_from)
+        start_date = datetime.strptime(
+            date_from,
+            "%Y-%m-%d"
+        )
+
+        query = query.filter(
+            GodownSale.created_at >= start_date
+        )
+
     if date_to:
-        end_date = (datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        query = query.filter(GodownSale.created_at < end_date)
-    return query.order_by(GodownSale.created_at.desc()).all()
+        end_date = datetime.strptime(
+            date_to,
+            "%Y-%m-%d"
+        ) + timedelta(days=1)
+
+        query = query.filter(
+            GodownSale.created_at < end_date
+        )
+
+    return query.order_by(
+        GodownSale.created_at.desc()
+    ).all()
 
 # ═══════════════════════════════════════════════════════════════
 # NEW: Get single godown sale by ID
