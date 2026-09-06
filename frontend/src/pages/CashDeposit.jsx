@@ -115,16 +115,16 @@ export default function CashDeposit() {
         getCashSummary(Number(companyId), selectedDate)
       ])
       setPreviousCounterCash(
-          Number(cashSummary?.previous_counter_cash) || 0
-        )
+        Number(cashSummary?.previous_counter_cash) || 0
+      )
 
-        setPreviousGodownCash(
-          Number(cashSummary?.previous_godown_cash) || 0
-        )
+      setPreviousGodownCash(
+        Number(cashSummary?.previous_godown_cash) || 0
+      )
 
-        setPreviousCashExpenses(
-          Number(cashSummary?.previous_cash_expenses) || 0
-        )
+      setPreviousCashExpenses(
+        Number(cashSummary?.previous_cash_expenses) || 0
+      )
       const cc = (counterData || []).filter(s => s.payment_mode === 'CASH').reduce((s, r) => s + (r.total_amount || 0), 0)
       const gc = (godownData || []).filter(s => s.payment_mode === 'CASH').reduce((s, r) => s + (r.total_amount || 0), 0)
       setCounterCash(cc)
@@ -147,8 +147,8 @@ export default function CashDeposit() {
       setApiExpenses([])
 
       setPreviousCounterCash(0)
-    setPreviousGodownCash(0)
-    setPreviousCashExpenses(0)
+      setPreviousGodownCash(0)
+      setPreviousCashExpenses(0)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -181,7 +181,7 @@ export default function CashDeposit() {
   //   return records[lastDate]?.closingBalance ?? initialBalance
   // }, [selectedDate, records, initialBalance])
 
-  const openingBalance =previousCounterCash + previousGodownCash - previousCashExpenses
+  const openingBalance = previousCounterCash + previousGodownCash - previousCashExpenses
 
   // ─── Derived Calculations ───
   const bankDeposits = records[selectedDate]?.bankDeposits || []
@@ -369,7 +369,7 @@ export default function CashDeposit() {
   const SlipThumbnail = ({ slip, size = 'sm' }) => {
     if (!slip || !slip.base64) return null
     const isPdf = slip.name?.toLowerCase().endsWith('.pdf')
-    
+
     if (isPdf) {
       return (
         <button
