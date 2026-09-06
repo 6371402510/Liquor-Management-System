@@ -8,7 +8,7 @@ from .service import (
     get_godown_sale_by_id, update_godown_sale  # ← NEW imports
 )
 from .model import GodownSale
-
+from sqlalchemy import func
 router = APIRouter(
     prefix="/api/godown",
     tags=["Godown POS"]
@@ -29,6 +29,44 @@ def process_checkout(
 ):
     return process_godown_checkout(db, checkout_data)
 
+# @router.get("/sales", response_model=list[GodownSaleResponse])
+# def get_godown_sales_report(
+#     company_id: int | None = None,
+#     date_from: str = Query(None, alias="date_from"),
+#     date_to: str = Query(None, alias="date_to"),
+#     db: Session = Depends(get_db)
+# ):
+#     query = db.query(GodownSale)
+
+#     if company_id is not None:
+#         query = query.filter(
+#             GodownSale.company_id == company_id
+#         )
+
+#     if date_from:
+#         start_date = datetime.strptime(
+#             date_from,
+#             "%Y-%m-%d"
+#         )
+
+#         query = query.filter(
+#             GodownSale.created_at >= start_date
+#         )
+
+#     if date_to:
+#         end_date = datetime.strptime(
+#             date_to,
+#             "%Y-%m-%d"
+#         ) + timedelta(days=1)
+
+#         query = query.filter(
+#             GodownSale.created_at < end_date
+#         )
+
+#     return query.order_by(
+#         GodownSale.created_at.desc()
+#     ).all()
+
 @router.get("/sales", response_model=list[GodownSaleResponse])
 def get_godown_sales_report(
     company_id: int | None = None,
@@ -38,10 +76,10 @@ def get_godown_sales_report(
 ):
     query = db.query(GodownSale)
 
-    if company_id is not None:
-        query = query.filter(
-            GodownSale.company_id == company_id
-        )
+    # ---------------------------------------------------------
+    # Previous sales total
+    # ---------------------------------------------------------
+    previous_sales_total = 0.0
 
     if date_from:
         start_date = datetime.strptime(
@@ -49,10 +87,44 @@ def get_godown_sales_report(
             "%Y-%m-%d"
         )
 
+        # Sum ALL sales before date_from
+        previous_sales_query = db.query(
+            func.coalesce(
+                func.sum(GodownSale.total_amount),
+                0
+            )
+        ).filter(
+            GodownSale.created_at < start_date
+        )
+
+        if company_id is not None:
+            previous_sales_query = previous_sales_query.filter(
+                GodownSale.company_id == company_id
+            )
+
+        previous_sales_total = float(
+            previous_sales_query.scalar() or 0
+        )
+
+    # ---------------------------------------------------------
+    # Existing company filter
+    # ---------------------------------------------------------
+    if company_id is not None:
+        query = query.filter(
+            GodownSale.company_id == company_id
+        )
+
+    # ---------------------------------------------------------
+    # Existing date_from filter
+    # ---------------------------------------------------------
+    if date_from:
         query = query.filter(
             GodownSale.created_at >= start_date
         )
 
+    # ---------------------------------------------------------
+    # Existing date_to filter
+    # ---------------------------------------------------------
     if date_to:
         end_date = datetime.strptime(
             date_to,
@@ -63,9 +135,17 @@ def get_godown_sales_report(
             GodownSale.created_at < end_date
         )
 
-    return query.order_by(
+    sales = query.order_by(
         GodownSale.created_at.desc()
     ).all()
+
+    # ---------------------------------------------------------
+    # Add previous sales total
+    # ---------------------------------------------------------
+    for sale in sales:
+        sale.previous_sales_total = previous_sales_total
+
+    return sales
 
 # ═══════════════════════════════════════════════════════════════
 # NEW: Get single godown sale by ID
