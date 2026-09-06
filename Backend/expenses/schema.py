@@ -52,7 +52,6 @@ class ExpenseResponse(BaseModel):
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    previous_expenses_total: float = 0.0
 
     model_config = ConfigDict(from_attributes=True)
 

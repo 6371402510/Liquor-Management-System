@@ -37,7 +37,6 @@ class SaleResponse(SaleBase):
     status: str
     created_at: Optional[datetime] = None
     items: List[SaleItemResponse] = []
-    previous_sales_total: float = 0.0
     class Config:
         from_attributes = True
 

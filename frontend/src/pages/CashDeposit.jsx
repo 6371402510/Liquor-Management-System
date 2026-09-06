@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx'
 import { getCounterSales } from '../apiservices/sales-counter'
 import { getGodownSales } from '../apiservices/godown-counter'
 import { getExpenses } from '../apiservices/expensesapi'
+import { getCashSummary } from '../apiservices/cashsummary'
 
 // ─── LocalStorage Helpers ───
 const recordsKey = (cid) => `cashRecords_${cid}`
@@ -42,6 +43,11 @@ export default function CashDeposit() {
   const [counterCash, setCounterCash] = useState(0)
   const [godownCash, setGodownCash] = useState(0)
   const [apiExpenses, setApiExpenses] = useState([])
+
+  // ─── Cash Summary from API ───
+  const [previousCounterCash, setPreviousCounterCash] = useState(0)
+  const [previousGodownCash, setPreviousGodownCash] = useState(0)
+  const [previousCashExpenses, setPreviousCashExpenses] = useState(0)
 
   // ─── Deposit Form State ───
   const [depositMethod, setDepositMethod] = useState('bank')
@@ -102,12 +108,23 @@ export default function CashDeposit() {
   const fetchCashData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true)
     try {
-      const [counterData, godownData, expenseData] = await Promise.all([
+      const [counterData, godownData, expenseData, cashSummary] = await Promise.all([
         getCounterSales(Number(companyId), selectedDate, selectedDate),
         getGodownSales(Number(companyId), selectedDate, selectedDate),
-        getExpenses(Number(companyId), selectedDate, selectedDate)
+        getExpenses(Number(companyId), selectedDate, selectedDate),
+        getCashSummary(Number(companyId), selectedDate)
       ])
+      setPreviousCounterCash(
+          Number(cashSummary?.previous_counter_cash) || 0
+        )
 
+        setPreviousGodownCash(
+          Number(cashSummary?.previous_godown_cash) || 0
+        )
+
+        setPreviousCashExpenses(
+          Number(cashSummary?.previous_cash_expenses) || 0
+        )
       const cc = (counterData || []).filter(s => s.payment_mode === 'CASH').reduce((s, r) => s + (r.total_amount || 0), 0)
       const gc = (godownData || []).filter(s => s.payment_mode === 'CASH').reduce((s, r) => s + (r.total_amount || 0), 0)
       setCounterCash(cc)
@@ -128,6 +145,10 @@ export default function CashDeposit() {
       setCounterCash(0)
       setGodownCash(0)
       setApiExpenses([])
+
+      setPreviousCounterCash(0)
+    setPreviousGodownCash(0)
+    setPreviousCashExpenses(0)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -152,13 +173,15 @@ export default function CashDeposit() {
   }, [selectedDate, records])
 
   // ─── Opening Balance ───
-  const openingBalance = useMemo(() => {
-    const sorted = Object.keys(records).sort()
-    const earlier = sorted.filter(d => d < selectedDate)
-    if (earlier.length === 0) return initialBalance
-    const lastDate = earlier[earlier.length - 1]
-    return records[lastDate]?.closingBalance ?? initialBalance
-  }, [selectedDate, records, initialBalance])
+  // const openingBalance = useMemo(() => {
+  //   const sorted = Object.keys(records).sort()
+  //   const earlier = sorted.filter(d => d < selectedDate)
+  //   if (earlier.length === 0) return initialBalance
+  //   const lastDate = earlier[earlier.length - 1]
+  //   return records[lastDate]?.closingBalance ?? initialBalance
+  // }, [selectedDate, records, initialBalance])
+
+  const openingBalance =previousCounterCash + previousGodownCash - previousCashExpenses
 
   // ─── Derived Calculations ───
   const bankDeposits = records[selectedDate]?.bankDeposits || []
@@ -477,7 +500,7 @@ export default function CashDeposit() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
         <div className="card p-4 border-l-4 border-violet-500 relative group">
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Wallet className="w-3.5 h-3.5" /> Opening Balance</div>
-          {loading ? <Loader2 className="w-5 h-5 animate-spin text-violet-400 mt-1" /> : <p className="text-xl font-bold text-violet-600 dark:text-violet-400">₹{closingBalance.toLocaleString()}</p>}
+          {loading ? <Loader2 className="w-5 h-5 animate-spin text-violet-400 mt-1" /> : <p className="text-xl font-bold text-violet-600 dark:text-violet-400">₹{openingBalance.toLocaleString()}</p>}
           <button onClick={() => { setShowInitBalModal(true); setTempInitBal(String(initialBalance)) }} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-violet-100 dark:hover:bg-violet-900/30" title="Set initial balance">
             <Edit3 className="w-3 h-3 text-violet-400" />
           </button>

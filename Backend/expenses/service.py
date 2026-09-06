@@ -1,5 +1,4 @@
 # expenses/service.py
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
@@ -10,80 +9,26 @@ from .schema import ExpenseCreate, ExpenseUpdate, CategoryCreate
 
 DEFAULT_CATEGORIES = ['SALARY_PAYOUT', 'ADVANCE_SALARY']
 # --- Expense Services ---
-# def get_expenses(
-#     db: Session, 
-#     company_id: int,  # ← ADDED
-#     skip: int = 0, 
-#     limit: int = 1000,
-#     start_date: Optional[date] = None,
-#     end_date: Optional[date] = None
-# ):
-#     """Fetch expenses filtered by company and optional date range"""
-#     query = db.query(Expense).filter(Expense.company_id == company_id)  # ← ADDED FILTER
-    
-#     if start_date:
-#         query = query.filter(Expense.expense_date >= start_date)
-#     if end_date:
-#         query = query.filter(Expense.expense_date <= end_date)
-        
-#     return query.order_by(Expense.expense_date.desc()).offset(skip).limit(limit).all()
-
-# def get_expense(db: Session, expense_id: int, company_id: int):  # ← ADDED company_id
-#     return db.query(Expense).filter(Expense.id == expense_id, Expense.company_id == company_id).first()
-
 def get_expenses(
-    db: Session,
-    company_id: int,
-    skip: int = 0,
+    db: Session, 
+    company_id: int,  # ← ADDED
+    skip: int = 0, 
     limit: int = 1000,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None
 ):
     """Fetch expenses filtered by company and optional date range"""
+    query = db.query(Expense).filter(Expense.company_id == company_id)  # ← ADDED FILTER
+    
+    if start_date:
+        query = query.filter(Expense.expense_date >= start_date)
+    if end_date:
+        query = query.filter(Expense.expense_date <= end_date)
+        
+    return query.order_by(Expense.expense_date.desc()).offset(skip).limit(limit).all()
 
-    query = db.query(Expense).filter(
-        Expense.company_id == company_id
-    )
-
-    # Calculate total of ALL previous expenses
-    previous_expenses_total = 0.0
-
-    if start_date is not None:
-
-        previous_expenses_query = db.query(
-            func.coalesce(
-                func.sum(Expense.amount),
-                0
-            )
-        ).filter(
-            Expense.company_id == company_id,
-            Expense.expense_date < start_date
-        )
-
-        previous_expenses_total = float(
-            previous_expenses_query.scalar() or 0
-        )
-
-        # Current date-range filter
-        query = query.filter(
-            Expense.expense_date >= start_date
-        )
-
-    if end_date is not None:
-        query = query.filter(
-            Expense.expense_date <= end_date
-        )
-
-    expenses = query.order_by(
-        Expense.expense_date.desc()
-    ).offset(skip).limit(limit).all()
-
-    # Add calculated value to every response object
-    for expense in expenses:
-        expense.previous_expenses_total = previous_expenses_total
-
-    return expenses
-
+def get_expense(db: Session, expense_id: int, company_id: int):  # ← ADDED company_id
+    return db.query(Expense).filter(Expense.id == expense_id, Expense.company_id == company_id).first()
 
 def get_expense(
     db: Session,

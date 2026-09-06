@@ -53,7 +53,7 @@ from dashboard.router import router as dashboard_router
 from admin_dashboard.router import router as admin_dashboard_router
 from damage.router import router as damage_router
 from license.router import router as license_router
-
+from cash_summary.router import router as cash_summary_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -85,7 +85,7 @@ app.include_router(admin_dashboard_router, prefix="/api")
 app.include_router(counter_to_godown_router, prefix="/api")
 app.include_router(damage_router, prefix="/api")
 app.include_router(license_router, prefix="/api")
-    
+app.include_router(cash_summary_router, prefix="/api")
 
 
 # ─── ENSURE UPLOAD DIRECTORY EXISTS ───
