@@ -477,7 +477,7 @@ export default function CashDeposit() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
         <div className="card p-4 border-l-4 border-violet-500 relative group">
           <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs mb-1"><Wallet className="w-3.5 h-3.5" /> Opening Balance</div>
-          {loading ? <Loader2 className="w-5 h-5 animate-spin text-violet-400 mt-1" /> : <p className="text-xl font-bold text-violet-600 dark:text-violet-400">₹{openingBalance.toLocaleString()}</p>}
+          {loading ? <Loader2 className="w-5 h-5 animate-spin text-violet-400 mt-1" /> : <p className="text-xl font-bold text-violet-600 dark:text-violet-400">₹{closingBalance.toLocaleString()}</p>}
           <button onClick={() => { setShowInitBalModal(true); setTempInitBal(String(initialBalance)) }} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-violet-100 dark:hover:bg-violet-900/30" title="Set initial balance">
             <Edit3 className="w-3 h-3 text-violet-400" />
           </button>
