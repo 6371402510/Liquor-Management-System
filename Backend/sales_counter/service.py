@@ -4,7 +4,7 @@ from inventory.model import Product
 from .schema import SaleCreate
 from datetime import date, datetime, time, timedelta
 from sqlalchemy.exc import IntegrityError  # ← ADD this import at the top
-
+from sqlalchemy import func
 def get_pos_products(db: Session, company_id: int | None = None, search: str = None):
     query = db.query(Product).filter(Product.is_active == True, Product.counter_stock > 0)
     if company_id is not None:
@@ -58,6 +58,30 @@ def create_sale(db: Session, sale_data: SaleCreate):
     db.refresh(db_sale)
     return db_sale
 
+# def get_sales_report_service(
+#     db: Session,
+#     company_id: int | None = None,
+#     date_from: date | None = None,
+#     date_to: date | None = None,
+# ):
+#     query = db.query(Sale)
+
+#     if company_id is not None:
+#         query = query.filter(Sale.company_id == company_id)
+
+#     if date_from is not None:
+#         start_datetime = datetime.combine(date_from, time.min)
+#         query = query.filter(Sale.created_at >= start_datetime)
+
+#     if date_to is not None:
+#         end_datetime = datetime.combine(
+#             date_to + timedelta(days=1),
+#             time.min,
+#         )
+#         query = query.filter(Sale.created_at < end_datetime)
+
+#     return query.order_by(Sale.created_at.desc()).all()
+
 def get_sales_report_service(
     db: Session,
     company_id: int | None = None,
@@ -66,21 +90,76 @@ def get_sales_report_service(
 ):
     query = db.query(Sale)
 
-    if company_id is not None:
-        query = query.filter(Sale.company_id == company_id)
+    # =========================================================
+    # Calculate total of ALL sales before date_from
+    # =========================================================
+    previous_sales_total = 0.0
 
     if date_from is not None:
-        start_datetime = datetime.combine(date_from, time.min)
-        query = query.filter(Sale.created_at >= start_datetime)
+        start_datetime = datetime.combine(
+            date_from,
+            time.min,
+        )
 
+        previous_sales_query = db.query(
+            func.coalesce(
+                func.sum(Sale.total_amount),
+                0,
+            )
+        ).filter(
+            Sale.created_at < start_datetime
+        )
+
+        # Apply company filter to previous sales also
+        if company_id is not None:
+            previous_sales_query = previous_sales_query.filter(
+                Sale.company_id == company_id
+            )
+
+        previous_sales_total = float(
+            previous_sales_query.scalar() or 0
+        )
+
+        # Existing date filter
+        query = query.filter(
+            Sale.created_at >= start_datetime
+        )
+
+    # =========================================================
+    # Existing company filter
+    # =========================================================
+    if company_id is not None:
+        query = query.filter(
+            Sale.company_id == company_id
+        )
+
+    # =========================================================
+    # Existing date_to filter
+    # =========================================================
     if date_to is not None:
         end_datetime = datetime.combine(
             date_to + timedelta(days=1),
             time.min,
         )
-        query = query.filter(Sale.created_at < end_datetime)
 
-    return query.order_by(Sale.created_at.desc()).all()
+        query = query.filter(
+            Sale.created_at < end_datetime
+        )
+
+    # =========================================================
+    # Get current sales
+    # =========================================================
+    sales = query.order_by(
+        Sale.created_at.desc()
+    ).all()
+
+    # =========================================================
+    # Add previous sales total to response
+    # =========================================================
+    for sale in sales:
+        sale.previous_sales_total = previous_sales_total
+
+    return sales
 
 def get_sale_by_id(db: Session, sale_id: int):
     sale = db.query(Sale).filter(Sale.id == sale_id).first()
