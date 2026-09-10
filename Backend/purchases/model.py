@@ -18,7 +18,7 @@ class Purchase(Base):
 
     # ─── NEW: COUNTER or GODOWN ───
     stock_destination = Column(String, default="GODOWN", nullable=False)
-    # purchase_side = Column(String, default="LIQUOR", nullable=False)
+    purchase_side = Column(String, default="LIQUOR", nullable=False)  # "LIQUOR" or "BEER"
 
     subtotal = Column(Float, default=0.0)
     vat_amount = Column(Float, default=0.0)
@@ -41,6 +41,7 @@ class Purchase(Base):
 
     notes = Column(Text, nullable=True)              
     vehicle_number = Column(String, nullable=True)   
+    token_number = Column(String, nullable=True)
     status = Column(String, default="RECEIVED")
 
     created_at = Column(Date, server_default=func.current_date())
@@ -68,6 +69,8 @@ class PurchaseItem(Base):
     bottles_per_case = Column(Integer, default=0)
 
     mrp = Column(Float, default=0.0)
+
+    
 
     unit_cost = Column(Float, default=0.0)
     purchase_rate_per_unit = Column(Float, default=0.0)

@@ -7,7 +7,7 @@ class PurchaseItemBase(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     product_id: Optional[int] = None
-    company_id: Optional[int] = None # ─── ADDED
+    company_id: Optional[int] = None
     product_name: str = Field(alias="name")
     brand: Optional[str] = None
     category: Optional[str] = None
@@ -57,12 +57,16 @@ class PurchaseBase(BaseModel):
 
     # ─── NEW ───
     stock_destination: str = "GODOWN"
+    purchase_side: str = "LIQUOR"  # "LIQUOR" or "BEER"
 
     subtotal: float = 0.0
     vat_amount: float = 0.0
     cess_amount: float = 0.0
     special_amount: float = 0.0
     tcs_amount: float = 0.0
+
+    # ─── ADD THESE ───
+    
 
     # ─── HANDLING EXPENSES ───
     handling_transport: float = 0.0
@@ -75,8 +79,10 @@ class PurchaseBase(BaseModel):
     
     total_amount: float = 0.0
     notes: Optional[str] = None
-    vehicle_number: Optional[str] = None      
+    vehicle_number: Optional[str] = None   
+    token_number: Optional[str] = None   
     status: str = "RECEIVED"
+
 
 class PurchaseCreate(PurchaseBase):
     items: List[PurchaseItemCreate]
@@ -90,8 +96,6 @@ class PurchaseResponse(PurchaseBase):
     class Config:
         from_attributes = True
 
-
-# Add this after PurchaseCreate class
 
 class PurchaseUpdate(PurchaseBase):
     """Same as PurchaseCreate — used for editing"""

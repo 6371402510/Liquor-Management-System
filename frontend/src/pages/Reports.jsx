@@ -4,7 +4,7 @@ import {
   Store, Warehouse, TrendingUp, CreditCard, Banknote, Smartphone,
   Users, Receipt, RotateCcw, Filter, FileDown, Clock3, Calendar,
   Tag, Package, BarChart3, ArrowUpDown, AlertCircle, Loader as Loader2,
-  Pencil, SplitSquareHorizontal
+  Pencil, SplitSquareHorizontal,User,X
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
@@ -26,6 +26,7 @@ const GROUP_BY_OPTIONS = [
   { value: 'brand', label: 'Brand Wise' },
   { value: 'category', label: 'Category Wise' },
   { value: 'size', label: 'Size Wise' },
+  { value: 'short_name', label: 'company/supplier' },  // ← ADD THIS
   { value: 'discount', label: 'Discount Wise' },
 ]
 
@@ -84,6 +85,12 @@ export default function Reports() {
   const [salesType, setSalesType] = useState('ALL')
   const [paymentMode, setPaymentMode] = useState('ALL')
   const [discountFilter, setDiscountFilter] = useState('ALL')
+
+
+   // ─── NEW: Customer Name Filter ───
+  const [customerNameFilter, setCustomerNameFilter] = useState('')
+  const [uniqueCustomers, setUniqueCustomers] = useState([])
+
 
   // ─── Listen for company changes ───
   useEffect(() => {
@@ -183,6 +190,21 @@ export default function Reports() {
     }
   }
 
+
+   useEffect(() => {
+    if (rawData.length > 0) {
+      const customers = new Set()
+      rawData.forEach(row => {
+        if (row.customerName && row.customerName !== 'Walk-in Customer') {
+          customers.add(row.customerName)
+        }
+        if (row.customerId && row.customerId !== '') {
+          customers.add(row.customerId)
+        }
+      })
+      setUniqueCustomers(Array.from(customers).sort())
+    }
+  }, [rawData])
   // ═══════════════════════════════════════════════════════════
   // FIXED: Added productsMap to dependency array
   // Enrichment (brand, category, size, mrp) happens HERE,
@@ -197,6 +219,7 @@ export default function Reports() {
         brand: productsMap[item.productId]?.brand || 'Unknown',
         category: productsMap[item.productId]?.category || 'Unknown',
         size: productsMap[item.productId]?.bottle_size || 'Unknown',
+        short_name: productsMap[item.productId]?.short_name || '',  // ← ADD THIS
         mrp: productsMap[item.productId]?.mrp || 0,
         item_code: productsMap[item.productId]?.item_code || '',
       }))
@@ -207,6 +230,20 @@ export default function Reports() {
       const rowDate = format(new Date(row.date), 'yyyy-MM-dd')
       if (rowDate < dateFrom || rowDate > dateTo) return false
       if (salesType !== 'ALL' && row.transactionType !== salesType) return false
+
+
+
+            if (customerNameFilter.trim()) {
+        const customerName = row.customerName || ''
+        const customerPhone = row.customerId || ''
+        const filterLower = customerNameFilter.trim().toLowerCase()
+        const nameMatch = customerName.toLowerCase().includes(filterLower)
+        const phoneMatch = customerPhone.toLowerCase().includes(filterLower)
+        if (!nameMatch && !phoneMatch) return false
+      }
+
+
+
 
       if (paymentMode !== 'ALL') {
         if (paymentMode === 'CASH' && row.cashAmount <= 0) return false
@@ -259,6 +296,7 @@ export default function Reports() {
         case 'brand': return item?.brand || 'Unknown'
         case 'category': return item?.category || 'Unknown'
         case 'size': return item?.size || 'Unknown'
+        case 'short_name': return item?.short_name || 'Unknown'
         case 'discount': {
           const disc = row.discount || 0
           return disc > 0 ? `₹${disc.toFixed(2)}` : 'No Discount'
@@ -268,10 +306,10 @@ export default function Reports() {
     }
 
     filtered.forEach(row => {
-      if (['item', 'brand', 'category', 'size'].includes(groupBy)) {
+      if (['item', 'brand', 'category', 'size', 'short_name' ].includes(groupBy)) {
         row.items.forEach(item => {
           const key = getGroupKey(row, item)
-          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, mrp: 0, bills: new Set() }
+          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, mrp: 0, bills: new Set(),short_name: item.short_name || ''  }
           groups[key].qty += item.qty * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].amount += item.amount * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].discount += (item.discount || 0) * (row.transactionType === 'RETURN' ? -1 : 1)
@@ -281,6 +319,10 @@ export default function Reports() {
             groups[key].mrp = item.mrp || 0
             groups[key].item_code = item.item_code || ''
           }
+
+          if (groupBy === 'short_name') {
+        groups[key].short_name = item.short_name || ''
+      }
         })
       } else {
         const key = getGroupKey(row)
@@ -323,6 +365,7 @@ export default function Reports() {
       qty: val.qty || 0,
       mrp: val.mrp || 0,
        item_code: val.item_code || '',
+       short_name: val.short_name || '',  // ← ADD THIS
       amount: val.amount,
       returns: val.returns || 0,
       discount: val.discount || 0,
@@ -366,7 +409,7 @@ export default function Reports() {
 
     return { summary, tableData, topSelling }
     // ↑↑↑ FIXED: added productsMap to deps — re-runs when products load
-  }, [rawData, productsMap, dateFrom, dateTo, groupBy, salesType, paymentMode, discountFilter])
+  }, [rawData, productsMap, dateFrom, dateTo, groupBy, salesType, paymentMode, discountFilter,customerNameFilter])
 
   const handleExport = async () => {
     if (tableData.length === 0) return alert('No data to export')
@@ -388,7 +431,10 @@ export default function Reports() {
         base['Item Code'] = row.item_code || ''
         base['MRP'] = row.mrp || 0
       }
-      
+      if (groupBy === 'short_name') {
+        base['Company/Supplier'] = row.short_name || ''
+      }
+
       return base
     })
 
@@ -502,7 +548,7 @@ export default function Reports() {
 
   const billColSpan = 8
   const dateColSpan = 8
-    const itemColSpan = groupBy === 'item' ? 7 : 5
+const itemColSpan = ['item', 'brand', 'category', 'size', 'short_name'].includes(groupBy) ? 7 : 5
 
   return (
     <div className="space-y-6">
@@ -620,6 +666,41 @@ export default function Reports() {
               <option value="RETURN">Returns Only</option>
             </select>
           </div>
+
+
+
+
+           <div className="col-span-2 md:col-span-1">
+            <label className="block text-xs text-gray-500 mb-1">Customer Name / Phone</label>
+            <div className="relative">
+              <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="text"
+                value={customerNameFilter}
+                onChange={e => setCustomerNameFilter(e.target.value)}
+                placeholder="Search customer..."
+                className="input-field text-xs pl-8"
+                list="customer-list"
+              />
+              {customerNameFilter && (
+                <button
+                  type="button"
+                  onClick={() => setCustomerNameFilter('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <datalist id="customer-list">
+                {uniqueCustomers.map(name => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+          
+
+
           <div>
             <label className="block text-xs text-gray-500 mb-1">Payment Mode</label>
             <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)} className="input-field text-xs">
@@ -711,8 +792,12 @@ export default function Reports() {
                             <>
                               <th className="p-3 text-left font-semibold text-gray-500">Item Code</th>
                               <th className="p-3 text-right font-semibold text-amber-600 dark:text-amber-400">MRP ₹</th>
-                            </>
-                          )}
+                             </>
+            )}
+            {groupBy === 'short_name' && (
+              <th className="p-3 text-left font-semibold text-gray-500">Company/Supplier</th>
+            )}
+                          
                           <th className="p-3 text-right font-semibold text-gray-500">Disc. ₹</th>
                         </>
                       )}
@@ -863,7 +948,14 @@ export default function Reports() {
                                   {row.mrp > 0 ? `₹${Number(row.mrp).toFixed(2)}` : <span className="text-gray-300 dark:text-gray-600">—</span>}
                                 </td>
                               </>
-                            )}
+
+                              )}
+    {groupBy === 'short_name' && (
+      <td className="p-3 text-left font-medium text-purple-600 dark:text-purple-400">
+        {row.short_name || <span className="text-gray-300 dark:text-gray-600">—</span>}
+      </td>
+    )}
+                            
                             <td className={clsx("p-3 text-right", row.discount > 0 ? "text-rose-500 dark:text-rose-400 font-medium" : "text-gray-400 dark:text-gray-600")}>
                               {row.discount > 0 ? `-₹${row.discount.toLocaleString()}` : '-'}
                             </td>
@@ -910,6 +1002,7 @@ export default function Reports() {
                       <td className="p-3 text-center text-blue-600 dark:text-blue-400">{tableData.reduce((s, r) => s + r.qty, 0)}</td>
                       {groupBy === 'item' && <td></td>}
                       {groupBy === 'item' && <td></td>}
+                      {groupBy === 'short_name' && <td></td>}  {/* ← ADD THIS */}
                       <td className="p-3 text-right text-rose-500 dark:text-rose-400">
                         -₹{tableData.reduce((s, r) => s + r.discount, 0).toLocaleString()}
                       </td>

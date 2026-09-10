@@ -9,7 +9,7 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API functions
-import { getPurchases, createPurchase, getPurchaseItems, updatePurchase } from '../apiservices/purchasesapi'
+import { getPurchases, createPurchase, getPurchaseItems, updatePurchase,checkInvoiceExists} from '../apiservices/purchasesapi'
 // import { getSuppliers,createSupplier } from '../apiservices/supplierapi'
 import { searchProducts, createProduct, updateProduct, getProductById } from '../apiservices/inventoryapi'
 import { getSuppliers } from '../apiservices/supplierapi'
@@ -421,12 +421,16 @@ const EMPTY_ITEM = {
 }
 
 export default function Purchases() {
+
+  // After successful purchase creation/update
+
   const { user } = useAuth()
   const isAdmin = user?.role?.toUpperCase() === 'ADMIN' // <-- ADD THIS LINE
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
   const companyName = localStorage.getItem('selectedCompanyName') || 'Unknown Company'
 
   const [purchases, setPurchases] = useState([])
+  const [purchaseSide, setPurchaseSide] = useState('LIQUOR') // 'LIQUOR' or 'BEER'
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
@@ -453,12 +457,13 @@ export default function Purchases() {
   const [purchaseVat, setPurchaseVat] = useState(35)
   const [purchaseCess, setPurchaseCess] = useState(0)
   const [purchaseSpecial, setPurchaseSpecial] = useState(0)
-  const [purchaseTcs, setPurchaseTcs] = useState(2.7)
+  const [purchaseTcs, setPurchaseTcs] = useState(2)
 
   const [invoiceDate, setInvoiceDate] = useState('')
   const [billingDate, setBillingDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [transportPass, setTransportPass] = useState('')
   const [vehicleNumber, setVehicleNumber] = useState('')
+  const [tokenNumber, setTokenNumber]=useState('')
 
   const [expandedId, setExpandedId] = useState(null)
   const [expandedItems, setExpandedItems] = useState({})
@@ -475,6 +480,9 @@ export default function Purchases() {
   const [editingItemIndex, setEditingItemIndex] = useState(null)
   // ─── NEW: Stock destination state ───
 const [stockDestination, setStockDestination] = useState('GODOWN')
+
+
+
 
 
 // ─── HANDLING EXPENSES STATE ───
@@ -571,7 +579,9 @@ const resetHandlingState = () => {
       setInvoiceDate(purchase.invoice_date || '')
       setTransportPass(purchase.notes || '')
       setVehicleNumber(purchase.vehicle_number || '')
+      setTokenNumber(purchase.token_number || '')
       setStockDestination(purchase.stock_destination || 'GODOWN')
+      setPurchaseSide(purchase.purchase_side || 'LIQUOR')  // ← ADD THIS
       // Add after: setStockDestination(purchase.stock_destination || 'GODOWN')
 setHandlingTransport(purchase.handling_transport || '')
 setHandlingDepotExp(purchase.handling_depot_exp || '')
@@ -589,7 +599,7 @@ setShowHandling(
       setPurchaseVat(purchase.subtotal > 0 ? ((purchase.vat_amount / purchase.subtotal) * 100).toFixed(1) : 35)
       setPurchaseCess(purchase.subtotal > 0 ? ((purchase.cess_amount / purchase.subtotal) * 100).toFixed(1) : 0)
       setPurchaseSpecial(purchase.subtotal > 0 ? ((purchase.special_amount / purchase.subtotal) * 100).toFixed(1) : 0)
-      setPurchaseTcs(purchase.subtotal > 0 ? ((purchase.tcs_amount / purchase.subtotal) * 100).toFixed(1) : 2.7)
+      setPurchaseTcs(purchase.subtotal > 0 ? ((purchase.tcs_amount / purchase.subtotal) * 100).toFixed(1) : 2)
 
       const mappedItems = normalizedItems.map((item, idx) => {
         const bpc = Number(item.bottles_per_case) || 0
@@ -902,13 +912,15 @@ setShowHandling(
     }
   }
 
-
 const calcTotals = () => {
   const subtotal = items.reduce((s, i) => s + calcLineTotal(i), 0)
   const vatTotal = subtotal * Number(purchaseVat) / 100
   const cessTotal = subtotal * Number(purchaseCess) / 100
   const specialTotal = subtotal * Number(purchaseSpecial) / 100
-  const tcsTotal = subtotal * Number(purchaseTcs) / 100
+  
+  // ─── FIX: TCS = 2% of (Subtotal + VAT) ───
+  const tcsTotal = (subtotal + vatTotal) * Number(purchaseTcs) / 100
+  
   const handlingTotal = calcTotalHandling()
   const totalWithoutHandling = subtotal + vatTotal + cessTotal + specialTotal + tcsTotal
   return {
@@ -918,7 +930,6 @@ const calcTotals = () => {
     total: totalWithoutHandling + handlingTotal
   }
 }
-
 
 
   const calcItemTableTotals = () => {
@@ -944,13 +955,14 @@ const calcTotals = () => {
 
 
 const roundTaxAmount = () => {
-  const { subtotal } = calcTotals();
+  const { subtotal, vatTotal } = calcTotals();
 
   if (subtotal <= 0) return;
 
-  const roundedAmount = Math.round((subtotal * Number(purchaseTcs)) / 100);
+  // ─── FIX: Round TCS based on (Subtotal + VAT) ───
+  const roundedAmount = Math.round((subtotal + vatTotal) * Number(purchaseTcs) / 100);
 
-  const newPercent = (roundedAmount * 100) / subtotal;
+  const newPercent = (roundedAmount * 100) / (subtotal + vatTotal);
 
   setPurchaseTcs(newPercent.toFixed(6)); // keep more precision
 };
@@ -958,110 +970,208 @@ const roundTaxAmount = () => {
 
 
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (!selectedSupplier) return alert('Please select a supplier')
-    if (items.length === 0) return alert('Please add at least one item')
+ const handleSubmit = async (e) => {
+  e.preventDefault()
+  if (!selectedSupplier) return alert('Please select a supplier')
+  if (items.length === 0) return alert('Please add at least one item')
 
-    setSaving(true); setError('')
-    const supplier = suppliers.find(s => s.id === Number(selectedSupplier))
-    const { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total } = calcTotals()
-    const finalInvoiceNumber = invoiceNumber.trim() || generatePurchaseNumber()
-    const totalHand = calcTotalHandling()
-    const payload = {
-      invoice_number: finalInvoiceNumber,
-      company_id: Number(companyId),
-      supplier_id: Number(selectedSupplier),
-      supplier_name: supplier?.name || '',
-      purchase_date: billingDate || format(new Date(), 'yyyy-MM-dd'),
-      invoice_date: invoiceDate || null,
-      billing_date: billingDate,
-      stock_destination: stockDestination,   // ← NEW
-      notes: transportPass,
-      vehicle_number: vehicleNumber,
-      subtotal, vat_amount: vatTotal, cess_amount: cessTotal,
-      special_amount: specialTotal, tcs_amount: tcsTotal,
-handling_transport: h(handlingTransport),
-handling_depot_exp: h(handlingDepotExp),
-handling_pass_fees: h(handlingPassFees),
-handling_unloading: h(handlingUnloading),
-handling_other_name: handlingOtherName || null,
-handling_other_amount: h(handlingOtherAmount),
+  // ─── FINAL DUPLICATE CHECK BEFORE SUBMIT ───
+  const finalInvoiceNumber = invoiceNumber.trim() || generatePurchaseNumber()
+  setInvoiceNumber(finalInvoiceNumber)
+  
+  const exists = await checkInvoiceExists(
+    finalInvoiceNumber,
+    Number(companyId),
+    editingPurchaseId || null
+  )
+  
+  if (exists) {
+    setInvoiceError(`❌ Invoice number "${finalInvoiceNumber}" already exists! Please use a different number.`)
+    setSaving(false)
+    return alert(`❌ Invoice number "${finalInvoiceNumber}" already exists! Please use a different number.`)
+  }
+
+  setSaving(true)
+  setError('')
+  
+  const supplier = suppliers.find(s => s.id === Number(selectedSupplier))
+  const { subtotal, vatTotal, cessTotal, specialTotal, tcsTotal, total } = calcTotals()
+  const totalHand = calcTotalHandling()
+  
+ const payload = {
+  invoice_number: finalInvoiceNumber,
+  company_id: Number(companyId),
+  supplier_id: Number(selectedSupplier),
+  supplier_name: supplier?.name || '',
+  purchase_date: billingDate || format(new Date(), 'yyyy-MM-dd'),
+  invoice_date: invoiceDate || null,
+  billing_date: billingDate,
+  stock_destination: stockDestination,
+  purchase_side: purchaseSide,
+  notes: transportPass,
+  vehicle_number: vehicleNumber,
+  token_number: tokenNumber,
+  subtotal, 
+  vat_amount: vatTotal, 
+  cess_amount: cessTotal,
+  special_amount: specialTotal, 
+  tcs_amount: tcsTotal,
+  
+  // ─── ADD THESE TWO LINES ───
+  
+  
+  handling_transport: h(handlingTransport),
+  handling_depot_exp: h(handlingDepotExp),
+  handling_pass_fees: h(handlingPassFees),
+  handling_unloading: h(handlingUnloading),
+  handling_other_name: handlingOtherName || null,
+  handling_other_amount: h(handlingOtherAmount),
   total_handling: totalHand,
   total_amount: subtotal + vatTotal + cessTotal + specialTotal + tcsTotal + totalHand,
   status: "RECEIVED",
-     items: items.map(item => {
-  const ratePerUnit = calcRatePerUnit(item)
-  const enteredByCases = Number(item.qtyCases) > 0  // ✅ Detect entry method
-  
-  return {
-    product_id: item.productId,
-    company_id: Number(companyId),
-    name: item.name, brand: item.brand, category: item.category,
-    barcode: item.barcode, bottle_size: item.bottleSize,
-    traditional_name: item.traditionalName,
-    bottles_per_case: Number(item.bottlesPerCase) || 0,
-    mrp: Number(item.mrp) || 0,
-    purchaseRate: Number(item.purchaseRatePerCase) || 0,
-    purchaseRatePerUnit: ratePerUnit,
-    sellingRate: Number(item.sellingRate) || 0,
-    qtyCases: Number(item.qtyCases) || 0,
-    // ✅ If entered by cases → send 0 for bottles
-    // ✅ If entered by bottles → send the bottle count
-    qtyBottles: enteredByCases ? 0 : (Number(item.totalQty) || 0),
-    totalBottles: enteredByCases ? 0 : (Number(item.totalQty) || 0),
-    qtyBulkLiters: Number(item.qtyBulkLiters) || 0,
-    qtyLPLiters: Number(item.qtyLPLiters) || 0,
-    mgerValue: Number(item.mgerValue) || 0,
-    openingStock: Number(item.openingStock) || 0,
-    minStock: Number(item.minStock) || 0,
-    total_cost: calcLineTotal(item),
-  }
-}),
+  items: items.map(item => {
+    const ratePerUnit = calcRatePerUnit(item)
+    const enteredByCases = Number(item.qtyCases) > 0
+    
+    return {
+      product_id: item.productId,
+      company_id: Number(companyId),
+      name: item.name, 
+      brand: item.brand, 
+      category: item.category,
+      barcode: item.barcode, 
+      bottle_size: item.bottleSize,
+      traditional_name: item.traditionalName,
+      bottles_per_case: Number(item.bottlesPerCase) || 0,
+      mrp: Number(item.mrp) || 0,
+      purchaseRate: Number(item.purchaseRatePerCase) || 0,
+      purchaseRatePerUnit: ratePerUnit,
+      sellingRate: Number(item.sellingRate) || 0,
+      qtyCases: Number(item.qtyCases) || 0,
+      qtyBottles: enteredByCases ? 0 : (Number(item.totalQty) || 0),
+      totalBottles: enteredByCases ? 0 : (Number(item.totalQty) || 0),
+      qtyBulkLiters: Number(item.qtyBulkLiters) || 0,
+      qtyLPLiters: Number(item.qtyLPLiters) || 0,
+      mgerValue: Number(item.mgerValue) || 0,
+      openingStock: Number(item.openingStock) || 0,
+      minStock: Number(item.minStock) || 0,
+      total_cost: calcLineTotal(item),
+    }
+  }),
+}
+
+  try {
+    // ─── SAVE PURCHASE ───
+    if (editingPurchaseId) {
+      if (!isAdmin) {
+        return alert("Permission denied: Only admins can update purchases.")
+      }
+      await updatePurchase(editingPurchaseId, payload)
+    } else {
+      await createPurchase(payload)
     }
 
-    try {
-      if (editingPurchaseId) {
-        // ─── PREVENT NON-ADMINS FROM UPDATING ───
-        if (!isAdmin) {
-          return alert("Permission denied: Only admins can update purchases.")
+    // ─── STORE LAST PURCHASE DATA FOR LANDING COST CALCULATION ───
+    localStorage.setItem('lastPurchaseData', JSON.stringify({
+      total_handling: totalHand,
+      vat_rate: Number(purchaseVat),
+      tcs_rate: Number(purchaseTcs),
+      subtotal: subtotal,
+      timestamp: new Date().toISOString()
+    }))
+
+    // ─── RESET FORM ───
+    setShowForm(false)
+    setEditingPurchaseId(null)
+    setEditingItemIndex(null)
+    setSelectedSupplier('')
+    setInvoiceNumber('')
+    setItems([])
+    setNotes('')
+    setInvoiceDate('')
+    setBillingDate(format(new Date(), 'yyyy-MM-dd'))
+    setTransportPass('')
+    setVehicleNumber('')
+    setTokenNumber('')
+    setStockDestination('GODOWN')
+    setInvoiceError('')
+    resetHandlingState()
+    fetchPurchases()
+    
+  } catch (err) {
+    if (err.message && err.message.includes('already exists')) {
+      setInvoiceError(`❌ Invoice number "${finalInvoiceNumber}" already exists. Please use a different invoice number.`)
+      alert(`❌ Invoice number "${finalInvoiceNumber}" already exists. Please use a different invoice number.`)
+    } else {
+      setError(err.message || 'Failed to save purchase')
+    }
+  } finally {
+    setSaving(false)
+  }
+}
+const handleInvoiceNumberChange = async (value) => {
+    setInvoiceNumber(value)
+    setInvoiceError('')
+    setIsCheckingInvoice(false)
+    
+    // Clear previous timeout
+    clearTimeout(window.invoiceCheckTimeout)
+    
+    // Don't check if value is empty or too short
+    if (value.trim().length < 2) {
+        return
+    }
+    
+    // Wait 500ms after user stops typing
+    window.invoiceCheckTimeout = setTimeout(async () => {
+        setIsCheckingInvoice(true)
+        try {
+            const exists = await checkInvoiceExists(
+                value.trim(),
+                Number(companyId),
+                editingPurchaseId || null
+            )
+            
+            if (exists) {
+                setInvoiceError(`⚠️ Invoice number "${value}" already exists in the system! Please use a different number.`)
+            } else {
+                setInvoiceError('')
+            }
+        } catch (err) {
+            // Silent fail - we'll validate on submit
+            console.error('Invoice check failed:', err)
+        } finally {
+            setIsCheckingInvoice(false)
         }
-        await updatePurchase(editingPurchaseId, payload)
-      } else {
-        // Anyone can create a new purchase
-        await createPurchase(payload)
-      }
+    }, 500)
+}
+// Add state for invoice error
+const [invoiceError, setInvoiceError] = useState('')
+const [isCheckingInvoice, setIsCheckingInvoice] = useState(false)
 
-      setShowForm(false)
-      setEditingPurchaseId(null)
-      setEditingItemIndex(null)
-      setSelectedSupplier(''); setInvoiceNumber(''); setItems([])
-      setNotes(''); setInvoiceDate('')
-      setBillingDate(format(new Date(), 'yyyy-MM-dd'))
-      setTransportPass(''); setVehicleNumber('')
-      setStockDestination('GODOWN')
-      resetHandlingState()  // ← ADD THIS
-      fetchPurchases()
-    } catch (err) { setError(err.message || 'Failed to save purchase') }
-    finally { setSaving(false) }
-  }
-
-  const loadItems = async (id) => {
-    if (expandedId === id) { setExpandedId(null); return }
-    try {
-      if (!expandedItems[id]) {
-        const data = await getPurchaseItems(id)
-        const normalized = (data || []).map(normalizeItem)
-        setExpandedItems(prev => ({ ...prev, [id]: normalized }))
-      }
-      setExpandedId(id)
-    } catch (err) { alert('Failed to load items') }
-  }
 
   const clearFilters = () => {
     setFilterProduct(''); setFilterBrand(''); setFilterCategory('')
     setFilterMrp(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterType('ALL')
   }
+
+
+  const loadItems = async (id) => {
+  if (expandedId === id) { 
+    setExpandedId(null); 
+    return; 
+  }
+  try {
+    if (!expandedItems[id]) {
+      const data = await getPurchaseItems(id);
+      const normalized = (data || []).map(normalizeItem);
+      setExpandedItems(prev => ({ ...prev, [id]: normalized }));
+    }
+    setExpandedId(id);
+  } catch (err) {
+    alert('Failed to load items');
+  }
+};
 
   const filteredPurchases = purchases.filter(p => {
     const pDate = p.billing_date || p.purchase_date || ''
@@ -1190,13 +1300,15 @@ handling_other_amount: h(handlingOtherAmount),
                 setBillingDate(format(new Date(), 'yyyy-MM-dd'))
                 setTransportPass('')
                 setVehicleNumber('')
+                setTokenNumber('')
                 setCurrentItem(EMPTY_ITEM)
                 setSearchQuery('')
                 setPurchaseVat(35)
                 setPurchaseCess(0)
                 setPurchaseSpecial(0)
-                setPurchaseTcs(2.7)
+                setPurchaseTcs(2)
                 setStockDestination('GODOWN') 
+                setPurchaseSide('LIQUOR')  // ← ADD THIS
                 resetHandlingState()  // ← ADD THIS
               } else {
                 setEditingPurchaseId(null)
@@ -1242,69 +1354,142 @@ handling_other_amount: h(handlingOtherAmount),
             {editingPurchaseId ? '✏️ Edit Purchase' : 'New Purchase Entry'}
           </h3>
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-              <div>
-                <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Date</label>
-                <input type="date" value={billingDate} onChange={e => setBillingDate(e.target.value)} className="input-field bg-green-50 dark:bg-green-900/10" />
-              </div>
-              <div>
-                <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Supplier *</label>
-                <select value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)} required className="input-field">
-                  <option value="">Select supplier</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div>
-  <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Stock To *</label>
-  <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-    <button
-      type="button"
-      onClick={() => setStockDestination('GODOWN')}
-      className={clsx(
-        "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors border-r border-gray-200 dark:border-gray-700",
-        stockDestination === 'GODOWN'
-          ? "bg-blue-600 text-white"
-          : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-      )}
-    >
-      <Warehouse className="w-4 h-4" />
-      Godown
-    </button>
-    <button
-      type="button"
-      onClick={() => setStockDestination('COUNTER')}
-      className={clsx(
-        "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors",
-        stockDestination === 'COUNTER'
-          ? "bg-emerald-600 text-white"
-          : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-      )}
-    >
-      <Store className="w-4 h-4" />
-      Counter
-    </button>
+            <div className="grid grid-cols-1 md:grid-cols-8 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+  <div className="col-span-1">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Date</label>
+    <input type="date" value={billingDate} onChange={e => setBillingDate(e.target.value)} className="input-field bg-green-50 dark:bg-green-900/10" />
+  </div>
+  
+  <div className="col-span-2">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Supplier *</label>
+    <select value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)} required className="input-field">
+      <option value="">Select supplier</option>
+      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+    </select>
+  </div>
+  
+  {/* ─── PURCHASE TYPE ─── */}
+  <div className="col-span-2">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">
+Description *</label>
+    <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+      <button
+        type="button"
+        onClick={() => setPurchaseSide('LIQUOR')}
+        className={clsx(
+          "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors border-r border-gray-200 dark:border-gray-700",
+          purchaseSide === 'LIQUOR'
+            ? "bg-blue-600 text-white"
+            : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+        )}
+      >
+        <span className="text-base">🥃</span>
+        Liquor
+      </button>
+      <button
+        type="button"
+        onClick={() => setPurchaseSide('BEER')}
+        className={clsx(
+          "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors",
+          purchaseSide === 'BEER'
+            ? "bg-amber-600 text-white"
+            : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+        )}
+      >
+        <span className="text-base">🍺</span>
+        Beer
+      </button>
+    </div>
+  </div>
+  
+  <div className="col-span-2">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Stock To *</label>
+    <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+      <button
+        type="button"
+        onClick={() => setStockDestination('GODOWN')}
+        className={clsx(
+          "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors border-r border-gray-200 dark:border-gray-700",
+          stockDestination === 'GODOWN'
+            ? "bg-blue-600 text-white"
+            : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+        )}
+      >
+        <Warehouse className="w-4 h-4" />
+        Godown
+      </button>
+      <button
+        type="button"
+        onClick={() => setStockDestination('COUNTER')}
+        className={clsx(
+          "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors",
+          stockDestination === 'COUNTER'
+            ? "bg-emerald-600 text-white"
+            : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+        )}
+      >
+        <Store className="w-4 h-4" />
+        Counter
+      </button>
+    </div>
+  </div>
+  
+  <div className="col-span-2">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">
+        Invoice Number *
+    </label>
+    <div className="relative">
+        <input 
+            type="text" 
+            value={invoiceNumber} 
+            onChange={e => handleInvoiceNumberChange(e.target.value)} 
+            placeholder="e.g. INV-20250101-001" 
+            className={clsx(
+                "input-field pr-20",
+                invoiceError && "border-red-500 ring-2 ring-red-200 dark:ring-red-800",
+                isCheckingInvoice && "border-amber-500 ring-2 ring-amber-200 dark:ring-amber-800"
+            )}
+        />
+        {isCheckingInvoice && (
+            <Loader2 className="absolute right-16 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />
+        )}
+        <button 
+            type="button" 
+            onClick={() => setInvoiceNumber(generatePurchaseNumber())} 
+            className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] font-medium px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors"
+        >
+            Auto
+        </button>
+    </div>
+    {invoiceError && (
+        <div className="flex items-center gap-1 mt-1 text-xs text-red-500 dark:text-red-400">
+            <AlertCircle className="w-3 h-3" />
+            <span>{invoiceError}</span>
+        </div>
+    )}
+</div>
+  
+  <div className="col-span-1">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice Date</label>
+    <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} className="input-field" />
+  </div>
+  
+  <div className="col-span-1">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Transport Pass</label>
+    <input type="text" value={transportPass} onChange={e => setTransportPass(e.target.value)} placeholder="Optional" className="input-field" />
+  </div>
+  
+  <div className="col-span-1">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Vehicle No.</label>
+    <input type="text" value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value.toUpperCase())} placeholder="e.g. MH12AB1234" className="input-field" />
+  </div>
+  
+  <div className="col-span-1">
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Token No.</label>
+    <input type="text" value={tokenNumber} onChange={e => setTokenNumber(e.target.value)} placeholder="Optional" className="input-field" />
   </div>
 </div>
-              <div>
-                <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice Number *</label>
-                <div className="relative">
-                  <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g. INV-20250101-001" className="input-field pr-20" />
-                  <button type="button" onClick={() => setInvoiceNumber(generatePurchaseNumber())} className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] font-medium px-2 py-1 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors">Auto</button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice Date</label>
-                <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} className="input-field" />
-              </div>
-              <div>
-                <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Transport Pass No.</label>
-                <input type="text" value={transportPass} onChange={e => setTransportPass(e.target.value)} placeholder="Optional" className="input-field" />
-              </div>
-              <div>
-                <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Vehicle Number</label>
-                <input type="text" value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value.toUpperCase())} placeholder="e.g. MH12AB1234" className="input-field" />
-              </div>
-            </div>
+    
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left: Item Entry Form */}
@@ -1833,6 +2018,7 @@ handling_other_amount: h(handlingOtherAmount),
           <th className="table-header text-left">Date</th>
           <th className="table-header text-left">Supplier</th>
           <th className="table-header text-left">Stock To</th>
+          <th className="table-header text-left">Description</th>  {/* ← ADD THIS */}
           <th className="table-header text-right">VAT</th>
           <th className="table-header text-right">TCS</th>
           <th className="table-header text-right text-blue-600 dark:text-blue-400">Subtotal</th>
@@ -1885,6 +2071,28 @@ handling_other_amount: h(handlingOtherAmount),
                     )}
                   </span>
                 </td>
+
+                
+<td className="table-cell text-center">
+  <div className="flex items-center justify-center gap-1.5">
+    <span className={clsx(
+      "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
+      p.purchase_side === 'BEER' 
+        ? "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400"
+        : "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
+    )}>
+      {p.purchase_side === 'BEER' ? '🍺 Beer' : '🥃 Liquor'}
+    </span>
+    {/* <span className={clsx(
+      "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
+      p.status === 'RETURN' 
+        ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400" 
+        : "bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400"
+    )}>
+      {p.status}
+    </span> */}
+  </div>
+</td>
                 <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
                 <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
 

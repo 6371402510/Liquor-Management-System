@@ -44,7 +44,7 @@ def _apply_stock(product, total_bottles, destination, is_add=True):
 
 
 # ─── HELPER: Update purchase rate on product ───
-def _update_product_rate(product, item_data, total_bottles):
+def _update_product_rate(product, item_data, total_bottles, purchase_data=None):
     rate_per_unit = 0.0
 
     if item_data.purchase_rate_per_unit and item_data.purchase_rate_per_unit > 0:
@@ -58,7 +58,24 @@ def _update_product_rate(product, item_data, total_bottles):
 
     if rate_per_unit > 0:
         product.purchase_rate = rate_per_unit
-        product.landing_cost = rate_per_unit
+        
+        # ─── CALCULATE LANDING COST USING THE FORMULA ───
+        # landing_cost = rate + (rate × (handling ÷ (VAT_amount + TCS_amount + subtotal)))
+        if purchase_data:
+            handling = purchase_data.total_handling or 0
+            vat_amount = purchase_data.vat_amount or 0
+            tcs_amount = purchase_data.tcs_amount or 0
+            subtotal = purchase_data.subtotal or 0
+            
+            denominator = vat_amount + tcs_amount + subtotal
+            
+            if denominator > 0 and rate_per_unit > 0:
+                landing_cost = rate_per_unit + (rate_per_unit * (handling / denominator))
+                product.landing_cost = round(landing_cost, 2)
+            else:
+                product.landing_cost = rate_per_unit
+        else:
+            product.landing_cost = rate_per_unit
 
 
 # ─── HELPER: Calculate total bottles from item ───
@@ -70,6 +87,9 @@ def _calc_total_bottles(item):
 
 
 def create_purchase(db: Session, purchase_data: PurchaseCreate):
+    if check_invoice_number_exists(db, purchase_data.invoice_number):
+        raise ValueError(f"Invoice number '{purchase_data.invoice_number}' already exists")
+
     purchase_dict = purchase_data.model_dump(exclude={"items"}, by_alias=False)
 
     if not purchase_dict.get("purchase_date"):
@@ -105,7 +125,8 @@ def create_purchase(db: Session, purchase_data: PurchaseCreate):
                     if (product.opening_stock or 0) == 0:
                         product.opening_stock = total_bottles
 
-                    _update_product_rate(product, item_data, total_bottles)
+                    # ─── UPDATE PRODUCT RATE AND LANDING COST ───
+                    _update_product_rate(product, item_data, total_bottles, db_purchase)
 
         db.commit()
         db.refresh(db_purchase)
@@ -145,6 +166,10 @@ def update_purchase(db: Session, purchase_id: int, purchase_data: PurchaseCreate
     db_purchase = get_purchase(db, purchase_id)
     if not db_purchase:
         return None
+
+    # ─── CHECK FOR DUPLICATE INVOICE NUMBER (EXCLUDE CURRENT PURCHASE) ───
+    if check_invoice_number_exists(db, purchase_data.invoice_number, exclude_purchase_id=purchase_id):
+        raise ValueError(f"Invoice number '{purchase_data.invoice_number}' already exists")
 
     # ─── SAVE OLD DESTINATION BEFORE OVERWRITING ───
     old_destination = db_purchase.stock_destination or "GODOWN"
@@ -195,7 +220,8 @@ def update_purchase(db: Session, purchase_id: int, purchase_data: PurchaseCreate
                 # ─── ADD STOCK TO NEW LOCATION ───
                 _apply_stock(product, total_bottles, new_destination, is_add=True)
 
-                _update_product_rate(product, item_data, total_bottles)
+                # ─── UPDATE PRODUCT RATE AND LANDING COST ───
+                _update_product_rate(product, item_data, total_bottles, db_purchase)
 
     try:
         db.commit()
@@ -204,3 +230,18 @@ def update_purchase(db: Session, purchase_id: int, purchase_data: PurchaseCreate
     except Exception as e:
         db.rollback()
         raise e
+
+
+# ─── CHECK INVOICE NUMBER EXISTS ───
+def check_invoice_number_exists(db: Session, invoice_number: str, exclude_purchase_id: int = None):
+    """
+    Check if an invoice number already exists in the database.
+    If exclude_purchase_id is provided, exclude that purchase from the check (for updates).
+    """
+    query = db.query(Purchase).filter(Purchase.invoice_number == invoice_number)
+    
+    # If updating, exclude the current purchase from the check
+    if exclude_purchase_id is not None:
+        query = query.filter(Purchase.id != exclude_purchase_id)
+    
+    return query.first() is not None

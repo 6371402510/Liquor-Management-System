@@ -19,7 +19,7 @@ class DashboardStats(BaseModel):
     # ═══════════════════════════════════════════════════════════
     # MGR STATUS FIELDS
     # ═══════════════════════════════════════════════════════════
-    monthly_mgr_target: float = 30890000.0  # Fixed Monthly Target
+    monthly_mgr_target: float = 30890000.0  # Total target (base + carryover)
     achieved_mgr: float = 0                 # MGR achieved this month
     to_be_achieved_mgr: float = 0           # Remaining MGR to achieve
     mgr_percentage: float = 0               # Achievement percentage
@@ -91,14 +91,18 @@ class ExciseSummary(BaseModel):
     sold_lpl: float
 
 # ═══════════════════════════════════════════════════════════
-# NEW: MGR STATUS SCHEMA (Separate for detailed view)
+# UPDATED: MGR STATUS SCHEMA with carryover fields
 # ═══════════════════════════════════════════════════════════
 class MGRStatus(BaseModel):
-    monthly_target: float
-    achieved: float
-    to_be_achieved: float
-    percentage: float
-    percentage_display: str  # "45.5%"
+    monthly_target: float          # Total target (base + carryover)
+    base_target: float             # Original monthly target without carryover
+    previous_month_carryover: float # Amount carried over from previous month
+    achieved: float                # Achieved this month
+    to_be_achieved: float          # Remaining to achieve
+    percentage: float              # Achievement percentage
+    percentage_display: str        # "45.5%"
+    days_left: Optional[int] = None # Days left in month
+    daily_target_needed: Optional[float] = None # Daily target to achieve remaining
 
 class DashboardResponse(BaseModel):
     stats: DashboardStats

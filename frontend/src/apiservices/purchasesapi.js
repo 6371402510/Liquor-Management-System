@@ -74,3 +74,28 @@ export async function updatePurchase(purchaseId, payload) {
   }
   return res.json()
 }
+
+
+// ─── CHECK INVOICE NUMBER EXISTS ───
+export const checkInvoiceExists = async (invoiceNumber, companyId, excludePurchaseId = null) => {
+  const token = localStorage.getItem('token')
+  
+  const params = new URLSearchParams()
+  params.append('invoice_number', invoiceNumber)
+  params.append('company_id', companyId)
+  if (excludePurchaseId) params.append('exclude_purchase_id', excludePurchaseId)
+  
+  const url = `${API_BASE}/purchases/check-invoice/?${params.toString()}`
+  
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  
+  if (!res.ok) throw new Error('Failed to check invoice')
+  const data = await res.json()
+  return data.exists
+}

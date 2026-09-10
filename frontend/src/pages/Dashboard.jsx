@@ -261,142 +261,188 @@ export default function Dashboard() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* ═══              MGR STATUS CARD (NEW)                 ═══ */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      <div className="card p-5">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0">
-              <Target className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">MGR Status — Monthly Target</h3>
-              <p className="text-[11px] text-gray-400 dark:text-gray-500">Monitored by Excise Department</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={clsx(
-              "text-xs font-semibold px-2.5 py-1 rounded-full",
-              mgrPct >= 100 
-                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                : mgrPct >= 50
-                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                  : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-            )}>
-              {getMGRStatusText()}
-            </span>
-            {getMGRStatusIcon()}
-          </div>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="mb-5">
-          <div className="flex justify-between items-end mb-2">
-            <div>
-              <span className={clsx(
-                "text-3xl font-extrabold tracking-tight",
-                mgrPct >= 100 ? "text-green-600 dark:text-green-400" :
-                mgrPct >= 50 ? "text-blue-600 dark:text-blue-400" :
-                "text-red-600 dark:text-red-400"
-              )}>
-                {mgrPct.toFixed(2)}%
-              </span>
-              <span className="text-xs text-gray-400 ml-2">achieved</span>
-            </div>
-            <span className="text-xs text-gray-400">
-              {fmtCurrency(mgrAchieved)} / {fmtCurrency(mgrTarget)}
-            </span>
-          </div>
-          <div className={clsx("h-5 w-full rounded-full overflow-hidden", getMGRProgressBg())}>
-            <div 
-              className={clsx("h-full rounded-full transition-all duration-700 ease-out", getMGRProgressColor())}
-              style={{ width: `${Math.min(mgrPct, 100)}%` }}
-            />
-          </div>
-        </div>
-
-        {/* 3 Column Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Monthly Target */}
-          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-100 dark:border-gray-700/50">
-            <div className="flex items-center gap-2 mb-2">
-              <Target className="w-4 h-4 text-gray-400" />
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Monthly Target</p>
-            </div>
-            <p className="text-2xl font-bold text-gray-800 dark:text-gray-100">
-              {fmtCurrency(mgrTarget)}
-            </p>
-            <p className="text-[11px] text-gray-400 mt-1">Fixed monthly MGR quota</p>
-          </div>
-
-          {/* Achieved MGR */}
-          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-800/50">
-            <div className="flex items-center gap-2 mb-2">
-              <TrendingUp className="w-4 h-4 text-blue-500" />
-              <p className="text-[11px] font-semibold text-blue-500 uppercase tracking-wider">Achieved MGR</p>
-            </div>
-            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
-              {fmtCurrency(mgrAchieved)}
-            </p>
-            <p className="text-[11px] text-blue-400 mt-1">From purchases this month</p>
-          </div>
-
-          {/* To Be Achieved */}
-          <div className={clsx(
-            "rounded-xl p-4 border",
-            mgrToBe > 0 
-              ? "bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800/50"
-              : "bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/50"
-          )}>
-            <div className="flex items-center gap-2 mb-2">
-              {mgrToBe > 0 
-                ? <AlertTriangle className="w-4 h-4 text-red-500" />
-                : <CheckCircle className="w-4 h-4 text-green-500" />
-              }
-              <p className={clsx(
-                "text-[11px] font-semibold uppercase tracking-wider",
-                mgrToBe > 0 ? "text-red-500" : "text-green-500"
-              )}>To Be Achieved</p>
-            </div>
-            <p className={clsx(
-              "text-2xl font-bold",
-              mgrToBe > 0 ? "text-red-700 dark:text-red-300" : "text-green-700 dark:text-green-300"
-            )}>
-              {fmtCurrency(mgrToBe)}
-            </p>
-            <p className={clsx(
-              "text-[11px] mt-1",
-              mgrToBe > 0 ? "text-red-400" : "text-green-400"
-            )}>
-              {mgrToBe > 0 ? 'Remaining to reach target' : 'Target fully achieved!'}
-            </p>
-          </div>
-        </div>
-
-        {/* Bottom Info Row */}
-        <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center gap-x-8 gap-y-2">
-          <div className="flex items-center gap-2">
-            <Clock className="w-3.5 h-3.5 text-gray-400" />
-            <span className="text-xs text-gray-500 dark:text-gray-400">Days Left:</span>
-            <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{daysLeft} days</span>
-          </div>
-          {mgrToBe > 0 && daysLeft > 0 && (
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
-              <span className="text-xs text-gray-500 dark:text-gray-400">Daily Target Needed:</span>
-              <span className="text-xs font-bold text-orange-600 dark:text-orange-400">{fmtCurrency(dailyTargetNeeded)}/day</span>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <div className={clsx(
-              "w-2 h-2 rounded-full",
-              mgrPct >= 100 ? "bg-green-500" : mgrPct >= 50 ? "bg-blue-500" : "bg-red-500"
-            )} />
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {mgrPct >= 100 ? 'On target' : `${(100 - mgrPct).toFixed(2)}% more needed`}
-            </span>
-          </div>
-        </div>
+      {/* ─── MGR Status Card with Carryover Info ─── */}
+<div className="card p-5">
+  {/* Header */}
+  <div className="flex items-center justify-between mb-4">
+    <div className="flex items-center gap-2.5">
+      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0">
+        <Target className="w-5 h-5 text-white" />
       </div>
+      <div>
+        <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">MGR Status — Monthly Target</h3>
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">Monitored by Excise Department</p>
+      </div>
+    </div>
+    <div className="flex items-center gap-3">
+      <span className={clsx(
+        "text-xs font-semibold px-2.5 py-1 rounded-full",
+        mgrPct >= 100 
+          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+          : mgrPct >= 50
+            ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+            : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+      )}>
+        {getMGRStatusText()}
+      </span>
+      {getMGRStatusIcon()}
+    </div>
+  </div>
+
+  {/* Progress Bar */}
+  <div className="mb-5">
+    <div className="flex justify-between items-end mb-2">
+      <div>
+        <span className={clsx(
+          "text-3xl font-extrabold tracking-tight",
+          mgrPct >= 100 ? "text-green-600 dark:text-green-400" :
+          mgrPct >= 50 ? "text-blue-600 dark:text-blue-400" :
+          "text-red-600 dark:text-red-400"
+        )}>
+          {mgrPct.toFixed(2)}%
+        </span>
+        <span className="text-xs text-gray-400 ml-2">achieved</span>
+      </div>
+      <span className="text-xs text-gray-400">
+        {fmtCurrency(mgrAchieved)} / {fmtCurrency(mgrTarget)}
+      </span>
+    </div>
+    <div className={clsx("h-5 w-full rounded-full overflow-hidden", getMGRProgressBg())}>
+      <div 
+        className={clsx("h-full rounded-full transition-all duration-700 ease-out", getMGRProgressColor())}
+        style={{ width: `${Math.min(mgrPct, 100)}%` }}
+      />
+    </div>
+  </div>
+
+  {/* 4 Column Stats (Added Carryover info) */}
+  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+    {/* Monthly Target */}
+    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-100 dark:border-gray-700/50">
+      <div className="flex items-center gap-2 mb-2">
+        <Target className="w-4 h-4 text-gray-400" />
+        <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">This Month Target</p>
+      </div>
+      <p className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+        {fmtCurrency(mgrTarget)}
+      </p>
+      <div className="flex flex-col gap-0.5 mt-1">
+        <p className="text-[10px] text-gray-400">
+          Base: {fmtCurrency(mgr_status?.base_target || 0)}
+        </p>
+        {mgr_status?.previous_month_carryover > 0 && (
+          <p className="text-[10px] text-amber-500 font-medium">
+            + Carryover: {fmtCurrency(mgr_status.previous_month_carryover)}
+          </p>
+        )}
+      </div>
+    </div>
+
+    {/* Achieved MGR */}
+    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-800/50">
+      <div className="flex items-center gap-2 mb-2">
+        <TrendingUp className="w-4 h-4 text-blue-500" />
+        <p className="text-[11px] font-semibold text-blue-500 uppercase tracking-wider">Achieved MGR</p>
+      </div>
+      <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+        {fmtCurrency(mgrAchieved)}
+      </p>
+      <p className="text-[11px] text-blue-400 mt-1">From purchases this month</p>
+    </div>
+
+    {/* To Be Achieved */}
+    <div className={clsx(
+      "rounded-xl p-4 border",
+      mgrToBe > 0 
+        ? "bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800/50"
+        : "bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/50"
+    )}>
+      <div className="flex items-center gap-2 mb-2">
+        {mgrToBe > 0 
+          ? <AlertTriangle className="w-4 h-4 text-red-500" />
+          : <CheckCircle className="w-4 h-4 text-green-500" />
+        }
+        <p className={clsx(
+          "text-[11px] font-semibold uppercase tracking-wider",
+          mgrToBe > 0 ? "text-red-500" : "text-green-500"
+        )}>Remaining Needed</p>
+      </div>
+      <p className={clsx(
+        "text-2xl font-bold",
+        mgrToBe > 0 ? "text-red-700 dark:text-red-300" : "text-green-700 dark:text-green-300"
+      )}>
+        {fmtCurrency(mgrToBe)}
+      </p>
+      <p className={clsx(
+        "text-[11px] mt-1",
+        mgrToBe > 0 ? "text-red-400" : "text-green-400"
+      )}>
+        {mgrToBe > 0 ? 'Will carry over to next month' : 'Target fully achieved!'}
+      </p>
+    </div>
+
+    {/* Carryover Info */}
+    <div className={clsx(
+      "rounded-xl p-4 border",
+      mgr_status?.previous_month_carryover > 0
+        ? "bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/50"
+        : "bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/50"
+    )}>
+      <div className="flex items-center gap-2 mb-2">
+        <Clock className="w-4 h-4 text-amber-500" />
+        <p className={clsx(
+          "text-[11px] font-semibold uppercase tracking-wider",
+          mgr_status?.previous_month_carryover > 0 ? "text-amber-500" : "text-green-500"
+        )}>Previous Month Carryover</p>
+      </div>
+      <p className={clsx(
+        "text-2xl font-bold",
+        mgr_status?.previous_month_carryover > 0
+          ? "text-amber-700 dark:text-amber-300"
+          : "text-green-700 dark:text-green-300"
+      )}>
+        {fmtCurrency(mgr_status?.previous_month_carryover || 0)}
+      </p>
+      <p className="text-[11px] text-gray-400 mt-1">
+        {mgr_status?.previous_month_carryover > 0 
+          ? 'Added to this month\'s target'
+          : 'No carryover from last month'}
+      </p>
+    </div>
+  </div>
+
+  {/* Bottom Info Row */}
+  <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center gap-x-8 gap-y-2">
+    <div className="flex items-center gap-2">
+      <Clock className="w-3.5 h-3.5 text-gray-400" />
+      <span className="text-xs text-gray-500 dark:text-gray-400">Days Left:</span>
+      <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{daysLeft} days</span>
+    </div>
+    {mgrToBe > 0 && daysLeft > 0 && (
+      <div className="flex items-center gap-2">
+        <TrendingUp className="w-3.5 h-3.5 text-orange-500" />
+        <span className="text-xs text-gray-500 dark:text-gray-400">Daily Target Needed:</span>
+        <span className="text-xs font-bold text-orange-600 dark:text-orange-400">{fmtCurrency(dailyTargetNeeded)}/day</span>
+      </div>
+    )}
+    <div className="flex items-center gap-2">
+      <div className={clsx(
+        "w-2 h-2 rounded-full",
+        mgrPct >= 100 ? "bg-green-500" : mgrPct >= 50 ? "bg-blue-500" : "bg-red-500"
+      )} />
+      <span className="text-xs text-gray-500 dark:text-gray-400">
+        {mgrPct >= 100 ? 'On target' : `${(100 - mgrPct).toFixed(2)}% more needed`}
+      </span>
+    </div>
+    {mgr_status?.previous_month_carryover > 0 && (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-amber-500 font-medium">
+          ⚡ {fmtCurrency(mgr_status.previous_month_carryover)} carried over from last month
+        </span>
+      </div>
+    )}
+  </div>
+</div>
 
       {/* ─── Charts Row 1 ─── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

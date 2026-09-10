@@ -22,6 +22,55 @@ def parse_size_ml(size_str):
     return int(digits) if digits else 0
 
 
+
+def get_previous_month_remaining_mgr(db: Session, company_id: int, current_date: datetime.date) -> float:
+    """Calculate remaining MGR from previous month that should be carried forward"""
+    # Get the first day of current month
+    current_month_start = datetime(current_date.year, current_date.month, 1).date()
+    
+    # Get the last day of previous month
+    if current_date.month == 1:
+        previous_month_start = datetime(current_date.year - 1, 12, 1).date()
+        previous_month_end = datetime(current_date.year - 1, 12, 31).date()
+    else:
+        previous_month_start = datetime(current_date.year, current_date.month - 1, 1).date()
+        previous_month_end = datetime(current_date.year, current_date.month - 1, 1).replace(
+            day=1
+        ) - timedelta(days=1)
+        previous_month_end = previous_month_end.date() if hasattr(previous_month_end, 'date') else previous_month_end
+
+    # Get previous month's target from company
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        return 0.0
+    
+    # Previous month's target (could be stored in company table or a separate MGR tracking table)
+    previous_month_target = float(company.mger_targeted_value or 30890000.0)
+    
+    # Calculate previous month's achieved MGR
+    previous_month_achieved = float(
+        db.query(func.coalesce(func.sum(PurchaseItem.mger_value), 0))
+        .join(Purchase, PurchaseItem.purchase_id == Purchase.id)
+        .filter(
+            and_(
+                Purchase.company_id == company_id,
+                Purchase.created_at >= previous_month_start,
+                Purchase.created_at <= previous_month_end
+            )
+        )
+        .scalar() or 0
+    )
+    
+    # Calculate remaining MGR from previous month
+    remaining_mgr = max(0, previous_month_target - previous_month_achieved)
+    
+    # Optional: Store previous month's remaining in a separate table for tracking
+    # You might want to create a MGRTracking table to store this history
+    
+    return remaining_mgr
+
+
+
 def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_date_str: Optional[str] = None):
     # ═══════════════════════════════════════
     # DYNAMIC DATE LOGIC
@@ -44,7 +93,7 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
         return True
 
     # ═══════════════════════════════════════════════════════════════════════
-    # FETCH COMPANY'S MGR TARGET (Instead of hardcoded static value)
+    # FETCH COMPANY'S MGR TARGET WITH CARRYOVER LOGIC
     # ═══════════════════════════════════════════════════════════════════════
     DEFAULT_MGR_TARGET = 30890000.0  # Fallback if company not found or value is 0
     
@@ -52,11 +101,17 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     if company_id:
         company = db.query(Company).filter(Company.id == company_id).first()
     
-    # Use company's mger_targeted_value, fall back to default if not set
+    # Get previous month's remaining MGR to carry forward
+    previous_month_remaining = get_previous_month_remaining_mgr(db, company_id, today_date) if company_id else 0
+    
+    # Use company's mger_targeted_value + previous month's remaining
     if company and company.mger_targeted_value and company.mger_targeted_value > 0:
-        MONTHLY_MGR_TARGET = float(company.mger_targeted_value)
+        BASE_MONTHLY_TARGET = float(company.mger_targeted_value)
     else:
-        MONTHLY_MGR_TARGET = DEFAULT_MGR_TARGET
+        BASE_MONTHLY_TARGET = DEFAULT_MGR_TARGET
+    
+    # Current month's target = Base target + Previous month's remaining (carryover)
+    MONTHLY_MGR_TARGET = BASE_MONTHLY_TARGET + previous_month_remaining
 
     # ═══════════════════════════════════════
     # 1. STATS
@@ -87,7 +142,7 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     total_bottles_purchased = db.query(func.coalesce(func.sum(PurchaseItem.total_bottles), 0)).join(Purchase, PurchaseItem.purchase_id == Purchase.id).filter(and_(Purchase.created_at >= month_start, Purchase.created_at <= today_start + timedelta(days=1), company_filter(Purchase))).scalar() or 0
 
     # ═══════════════════════════════════════════════════════════════════════
-    # MGR STATUS CALCULATION (Uses dynamic target from company)
+    # MGR STATUS CALCULATION (Uses dynamic target with carryover)
     # ═══════════════════════════════════════════════════════════════════════
     # Pulling total MGER value (same query as excise_summary.stock_mger)
     achieved_mgr = float(
@@ -112,8 +167,10 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
         monthly_mgr_target=MONTHLY_MGR_TARGET,
         achieved_mgr=achieved_mgr,
         to_be_achieved_mgr=to_be_achieved_mgr,
-        mgr_percentage=round(mgr_percentage, 2)
+        mgr_percentage=round(mgr_percentage, 2),
+        previous_month_carryover=previous_month_remaining  # Add this field to schema
     )
+
 
     # ═══════════════════════════════════════
     # 2. CHARTS
@@ -220,6 +277,8 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     # ═══════════════════════════════════════════════════════════════════════
     mgr_status = schema.MGRStatus(
         monthly_target=MONTHLY_MGR_TARGET,
+        base_target=BASE_MONTHLY_TARGET,  # Add to schema
+        previous_month_carryover=previous_month_remaining,  # Add to schema
         achieved=achieved_mgr,
         to_be_achieved=to_be_achieved_mgr,
         percentage=round(mgr_percentage, 2),

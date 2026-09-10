@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo,useRef } from 'react'
-import { Plus, Search, CreditCard as Edit2, Trash2, X, Loader as Loader2, TriangleAlert as AlertTriangle, Package,Hash, ChevronUp, ShieldAlert, ChevronDown, Upload, Download, FileDown, AlertCircle, TrendingDown, Clock3, TrendingUp, Warehouse, Store, Printer, Minus } from 'lucide-react'
+// Add RotateCcw to your imports at the top of the file
+import { Plus, Search, CreditCard as Edit2, Trash2, X, Loader as Loader2, TriangleAlert as AlertTriangle, Package,Hash, ChevronUp, ShieldAlert, ChevronDown, Upload, Download, FileDown, AlertCircle, TrendingDown, Clock3, TrendingUp, Warehouse, Store, Printer, Minus, RotateCcw } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../context/AuthContext'
@@ -419,6 +420,15 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+
+
+  // Add these state variables near your other state declarations
+const [lastPurchaseHandling, setLastPurchaseHandling] = useState(0)
+const [lastPurchaseVAT, setLastPurchaseVAT] = useState(35)
+const [lastPurchaseTCS, setLastPurchaseTCS] = useState(2)
+const [lastPurchaseSubtotal, setLastPurchaseSubtotal] = useState(0)
+const [lastPurchaseRate, setLastPurchaseRate] = useState(0)
+
   // const [sortField, setSortField] = useState('name')
   // const [sortDir, setSortDir] = useState('asc')
 
@@ -451,6 +461,27 @@ export default function Inventory() {
     }
   }, [companyId])
 
+
+
+
+  // Add this useEffect near your other useEffects
+useEffect(() => {
+  const lastPurchase = localStorage.getItem('lastPurchaseData')
+  if (lastPurchase) {
+    try {
+      const data = JSON.parse(lastPurchase)
+      setLastPurchaseHandling(data.total_handling || 0)
+      setLastPurchaseVAT(data.vat_rate || 35)
+      setLastPurchaseTCS(data.tcs_rate || 2)
+      setLastPurchaseSubtotal(data.subtotal || 0)
+      setLastPurchaseRate(data.purchase_rate || 0)
+    } catch (e) {
+      console.error('Failed to parse last purchase data:', e)
+    }
+  }
+}, [])
+
+
   const getVolumeStandard = () => {
     const sizeInMl = parseInt(form.bottle_size) || 0
     const unit = form.unit.toUpperCase()
@@ -479,6 +510,139 @@ export default function Inventory() {
       setLoading(false)
     }
   }
+
+// Add this function with your other helper functions
+const calculateLandingCostFromPurchase = (purchaseRate, handlingTotal, vatRate, tcsRate, subtotal, quantity) => {
+  const rate = Number(purchaseRate) || 0
+  const handling = Number(handlingTotal) || 0
+  const vat = Number(vatRate) || 0
+  const tcs = Number(tcsRate) || 0
+  const sub = Number(subtotal) || 0
+  const qty = Number(quantity) || 1
+  
+  // If no purchase rate, return 0
+  if (rate === 0) return 0
+  
+  // Calculate VAT and TCS amounts
+  const vatAmount = sub * (vat / 100)
+  const tcsAmount = (sub + vatAmount) * (tcs / 100)
+  
+  // Denominator: VAT + TCS + Subtotal
+  const denominator = vatAmount + tcsAmount + sub
+  
+  // If denominator is 0, just return the purchase rate
+  if (denominator === 0) return rate
+  
+  // Calculate: rate + (rate × (handling ÷ denominator))
+  const landingCost = rate + (rate * (handling / denominator))
+  
+  return Math.round(landingCost * 100) / 100
+}
+
+
+
+
+// Add this function to update product landing cost from purchase
+const updateProductLandingCostFromPurchase = async (productId, purchaseData) => {
+  try {
+    // Get the current product to get its purchase rate
+    const product = products.find(p => p.id === productId)
+    if (!product) return
+    
+    // Get the purchase rate from the product (or from the purchase item)
+    const purchaseRate = product.purchase_rate || 0
+    
+    // Calculate new landing cost
+    const newLandingCost = calculateLandingCostFromPurchase(
+      purchaseRate,
+      purchaseData.total_handling || 0,
+      purchaseData.vat_rate || 35,
+      purchaseData.tcs_rate || 2,
+      purchaseData.subtotal || 0,
+      1 // Quantity per bottle
+    )
+    
+    // Only update if different
+    if (newLandingCost !== Number(product.landing_cost)) {
+      // Update the product with new landing cost
+      const updatedProduct = {
+        ...product,
+        landing_cost: newLandingCost
+      }
+      
+      await updateProduct(productId, updatedProduct)
+      
+      // Update local state
+      setProducts(prev => prev.map(p => 
+        p.id === productId ? updatedProduct : p
+      ))
+    }
+  } catch (err) {
+    console.error('Failed to update product landing cost:', err)
+  }
+}
+
+
+
+// In the Inventory component toolbar
+// In the Inventory component toolbar
+const updateLandingCostsFromLastPurchase = async () => {
+  // Get the most recent purchase with handling costs
+  const lastPurchaseData = JSON.parse(localStorage.getItem('lastPurchaseData') || 'null')
+  if (!lastPurchaseData) {
+    alert('No recent purchase data found. Please create a purchase first.')
+    return
+  }
+  
+  if (products.length === 0) {
+    alert('No products to update.')
+    return
+  }
+  
+  let updatedCount = 0
+  let skippedCount = 0
+  
+  for (const product of products) {
+    const purchaseRate = Number(product.purchase_rate) || 0
+    
+    if (purchaseRate <= 0) {
+      skippedCount++
+      continue
+    }
+    
+    const newLandingCost = calculateLandingCostFromPurchase(
+      purchaseRate,
+      lastPurchaseData.total_handling || 0,
+      lastPurchaseData.vat_rate || 35,
+      lastPurchaseData.tcs_rate || 2.7,
+      lastPurchaseData.subtotal || 0,
+      1
+    )
+    
+    // Only update if different (allow small floating point difference)
+    const currentLanding = Number(product.landing_cost) || 0
+    if (Math.abs(newLandingCost - currentLanding) > 0.01) {
+      try {
+        const updatedProduct = {
+          ...product,
+          landing_cost: newLandingCost
+        }
+        await updateProduct(product.id, updatedProduct)
+        updatedCount++
+      } catch (err) {
+        console.error(`Failed to update product ${product.id}:`, err)
+      }
+    }
+  }
+  
+  fetchProducts()
+  
+  if (updatedCount === 0 && skippedCount > 0) {
+    alert(`No landing costs updated.\n\n${skippedCount} product(s) skipped because they have no purchase rate.\n\nTo update landing costs, first set purchase rates on products.`)
+  } else {
+    alert(`✅ Updated landing costs for ${updatedCount} products\n⏭️ Skipped ${skippedCount} products (no purchase rate)`)
+  }
+}
 
   const generateItemCode = () => {
     const prefix = 'ITM'
@@ -1059,6 +1223,14 @@ export default function Inventory() {
             <Store className="w-3.5 h-3.5 text-primary-500" />
             <span className="text-xs font-semibold text-primary-700 dark:text-primary-300">{companyName}</span>
           </div>
+
+          <button 
+  type="button" 
+  onClick={updateLandingCostsFromLastPurchase}
+  className="btn-secondary bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+>
+  <RotateCcw className="w-4 h-4" /> Update Landing
+</button>
 
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />

@@ -405,7 +405,7 @@ const bySupplier = useMemo(() => {
         const key = `${item.product_name}|${item.bottle_size}|${item.brand}`
         if (!map[key]) map[key] = {
           name: item.product_name || 'Unknown', brand: item.brand || '', category: item.category || '',
-          bottle_size: item.bottle_size || '', mrp: item.mrp, count: 0, bottles: 0, cases: 0,
+          bottle_size: item.bottle_size || '',  bottles_per_case: item.bottles_per_case || 0,  mrp: item.mrp, count: 0, bottles: 0, cases: 0,
           cost: 0, bulkLiters: 0, lpLiters: 0
         }
         map[key].count++
@@ -559,6 +559,7 @@ const supplierData = bySupplier.map(s => ({
       'Brand': p.brand,
       'Category': p.category,
       'Bottle Size': p.bottle_size,
+      'Bottles/Case': p.bottles_per_case || 0,  // ← NEW
       'MRP': p.mrp,
       'Times Purchased': p.count,
       'Total Cases': p.cases,
@@ -915,6 +916,7 @@ const supplierData = bySupplier.map(s => ({
                                       <th className="text-left py-1.5 font-medium w-6">#</th>
                                       <th className="text-left py-1.5 font-medium">Product</th>
                                       <th className="text-center py-1.5 font-medium w-16">Size</th>
+                                      <th className="text-center py-1.5 font-medium w-16">Bottles/Case</th>  {/* ← NEW */}
                                       <th className="text-center py-1.5 font-medium w-14">Cases</th>
                                       <th className="text-center py-1.5 font-medium w-16">Bottles</th>
                                       <th className="text-center py-1.5 font-medium w-16">Bulk Ltr</th>
@@ -935,6 +937,10 @@ const supplierData = bySupplier.map(s => ({
                                           <div className="text-[10px] text-gray-400">{item.brand} {item.category ? `• ${item.category}` : ''}</div>
                                         </td>
                                         <td className="py-1.5 text-center text-gray-500">{item.bottle_size || '—'}</td>
+
+                                        <td className="py-1.5 text-center font-medium text-blue-600 dark:text-blue-400">
+      {item.bottles_per_case ? `${item.bottles_per_case}/case` : '—'}
+    </td>  {/* ← NEW */}
                                         <td className="py-1.5 text-center text-gray-600 dark:text-gray-400">{item.qty_cases || 0}</td>
                                         <td className="py-1.5 text-center font-medium text-gray-700 dark:text-gray-300">{item.total_bottles || 0}</td>
                                         <td className="py-1.5 text-center text-gray-500">{item.qty_bulk_liters || '—'}</td>
@@ -962,6 +968,7 @@ const supplierData = bySupplier.map(s => ({
                                       return (
                                         <tr className="bg-blue-50/50 dark:bg-blue-900/10 border-t-2 border-blue-200 dark:border-blue-800">
                                           <td colSpan={3} className="py-2 text-right font-bold text-gray-600 dark:text-gray-300 pr-3">Subtotal →</td>
+                                          <td className="py-2 text-center font-bold text-gray-400">—</td>  {/* Skip Bottles/Case */}
                                           <td className="py-2 text-center font-bold text-gray-700 dark:text-gray-300">{subCases}</td>
                                           <td className="py-2 text-center font-bold text-gray-700 dark:text-gray-300">{subBottles}</td>
                                           <td className="py-2 text-center font-bold text-gray-500">{subBulk > 0 ? subBulk : '—'}</td>
@@ -1170,6 +1177,7 @@ const supplierData = bySupplier.map(s => ({
                       <th className="p-3 text-left font-semibold">Brand</th>
                       <th className="p-3 text-left font-semibold">Category</th>
                       <th className="p-3 text-center font-semibold">Size</th>
+                      <th className="p-3 text-center font-semibold">Bottles/Case</th>  {/* ← NEW */}
                       <th className="p-3 text-right font-semibold">MRP</th>
                       <th className="p-3 text-right font-semibold">Times</th>
                       <th className="p-3 text-right font-semibold">Cases</th>
@@ -1186,6 +1194,9 @@ const supplierData = bySupplier.map(s => ({
                         <td className="p-3 text-gray-500">{p.brand || '—'}</td>
                         <td className="p-3 text-gray-500">{p.category || '—'}</td>
                         <td className="p-3 text-center text-gray-500">{p.bottle_size || '—'}</td>
+                        <td className="p-3 text-center font-medium text-blue-600 dark:text-blue-400">
+      {p.bottles_per_case ? `${p.bottles_per_case}/case` : '—'}
+    </td>  {/* ← NEW */}
                         <td className="p-3 text-right">₹{p.mrp || 0}</td>
                         <td className="p-3 text-right text-gray-500">{p.count}</td>
                         <td className="p-3 text-right">{p.cases}</td>
@@ -1196,7 +1207,7 @@ const supplierData = bySupplier.map(s => ({
                       </tr>
                     ))}
                     <tr className="font-bold bg-slate-50 dark:bg-slate-800/50 border-t-2 border-slate-200 dark:border-slate-600">
-                      <td className="p-3 text-gray-700 dark:text-gray-200" colSpan={5}>TOTAL</td>
+                      <td className="p-3 text-gray-700 dark:text-gray-200" colSpan={6}>TOTAL</td>
                       <td className="p-3 text-right">{byProduct.reduce((s, x) => s + x.count, 0)}</td>
                       <td className="p-3 text-right">{byProduct.reduce((s, x) => s + x.cases, 0)}</td>
                       <td className="p-3 text-right text-green-600 dark:text-green-400">{byProduct.reduce((s, x) => s + x.bottles, 0).toLocaleString()}</td>
