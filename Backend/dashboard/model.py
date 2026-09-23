@@ -18,4 +18,4 @@ class MGRTracking(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    company = relationship("Company", back_populates="mgr_tracking")
+    # company = relationship("Company", back_populates="mgr_tracking")

@@ -37,6 +37,9 @@ import CounterToGodownReport  from './pages/CounterToGodownTransferReport.jsx'
 import ItemWiseSellReport from './pages/Daywisesalereport.jsx'
 import ItemWisePurchaseReport from './pages/PurchesItemwiseReport.jsx'
 import CashBankReport from './pages/CashBankReport.jsx'
+import  CompanyStockTransfer from './pages/CompanyStockTransfer.jsx'  
+import MGRReport from './pages/MGRReport.jsx'
+import CompanyTransferReport from './pages/CompanyTransferReport.jsx'
 // ══════════════════════════════════════════════════
 // 👇 NEW: Component to wait for FastAPI to start
 // ══════════════════════════════════════════════════
@@ -135,6 +138,9 @@ function AppRoutes() {
         <Route path="/item-wise-sell-report" element={<ItemWiseSellReport />} />
         <Route path="/item-wise-purchase-report" element={<ItemWisePurchaseReport />} />
         <Route path="/cash-bank-report" element={<CashBankReport />} />
+        <Route path="/company-stock-transfer" element={<CompanyStockTransfer />} />
+        <Route path="/mgr-report" element={<MGRReport />} />  
+        <Route path="/company-transfer-report" element={<CompanyTransferReport />} />
         {/* ─── ADMIN ROUTES ─── */}
       </Route>
 

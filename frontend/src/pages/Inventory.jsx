@@ -511,31 +511,47 @@ useEffect(() => {
     }
   }
 
+
+  // ─── MARGIN CALCULATION ───
+const calculateMarginPercent = (mrp, landingCost) => {
+  const m = Number(mrp) || 0
+  const lc = Number(landingCost) || 0
+  if (lc <= 0) return 0
+  return Math.round(((m - lc) / lc) * 100 * 100) / 100
+}
+
+const calculateMarginAmount = (mrp, landingCost) => {
+  const m = Number(mrp) || 0
+  const lc = Number(landingCost) || 0
+  return Math.round((m - lc) * 100) / 100
+}
 // Add this function with your other helper functions
 const calculateLandingCostFromPurchase = (purchaseRate, handlingTotal, vatRate, tcsRate, subtotal, quantity) => {
-  const rate = Number(purchaseRate) || 0
+  const rate     = Number(purchaseRate) || 0
   const handling = Number(handlingTotal) || 0
-  const vat = Number(vatRate) || 0
-  const tcs = Number(tcsRate) || 0
-  const sub = Number(subtotal) || 0
-  const qty = Number(quantity) || 1
-  
-  // If no purchase rate, return 0
+  const vat      = Number(vatRate) || 0
+  const tcs      = Number(tcsRate) || 0
+  const sub      = Number(subtotal) || 0
+
   if (rate === 0) return 0
-  
-  // Calculate VAT and TCS amounts
+
+  // ─── STEP 1: Apply VAT (35%) on rate ───
+  const baseWithVat = rate + (rate * (vat / 100))
+
+  // ─── STEP 2: Apply TCS (2%) on top of base + VAT ───
+  const baseWithTcs = baseWithVat + (baseWithVat * (tcs / 100))
+
+  // ─── STEP 3: Compute VAT & TCS rupee amounts from subtotal (for denominator only) ───
   const vatAmount = sub * (vat / 100)
   const tcsAmount = (sub + vatAmount) * (tcs / 100)
-  
-  // Denominator: VAT + TCS + Subtotal
+
   const denominator = vatAmount + tcsAmount + sub
-  
-  // If denominator is 0, just return the purchase rate
-  if (denominator === 0) return rate
-  
-  // Calculate: rate + (rate × (handling ÷ denominator))
-  const landingCost = rate + (rate * (handling / denominator))
-  
+
+  if (denominator === 0) return Math.round(baseWithTcs * 100) / 100
+
+  // ─── STEP 4: Apply handling ratio on top of baseWithTcs ───
+  const landingCost = baseWithTcs + (baseWithTcs * (handling / denominator))
+
   return Math.round(landingCost * 100) / 100
 }
 
@@ -1602,10 +1618,26 @@ const updateLandingCostsFromLastPurchase = async () => {
                       <option value="0">35%</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Margin %</label>
-                    <input type="number" min="0" step="0.01" value={form.margin_percent} onChange={e => setForm(f => ({ ...f, margin_percent: e.target.value }))} className="input-field" />
-                  </div>
+                    {/* ─── MARGIN % (AUTO-CALCULATED) ─── */}
+    <div>
+      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+        Margin %
+        <span className="ml-1 text-[10px] text-emerald-500 font-normal">(auto = (MRP - Landing) / Landing × 100)</span>
+      </label>
+      <input 
+        type="number" 
+        min="0" 
+        step="0.01" 
+        value={form.margin_percent} 
+        readOnly
+        className="input-field bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 font-semibold cursor-not-allowed border-emerald-200 dark:border-emerald-800" 
+      />
+      {Number(form.landing_cost) > 0 && Number(form.mrp) > 0 && (
+        <p className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+          Margin Amount: ₹{calculateMarginAmount(form.mrp, form.landing_cost)}
+        </p>
+      )}
+    </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">HSN Code</label>
                     <input value={form.hsn_code} onChange={e => setForm(f => ({ ...f, hsn_code: e.target.value }))} className="input-field" />

@@ -58,25 +58,29 @@ def _update_product_rate(product, item_data, total_bottles, purchase_data=None):
 
     if rate_per_unit > 0:
         product.purchase_rate = rate_per_unit
-        
-        # ─── CALCULATE LANDING COST USING THE FORMULA ───
-        # landing_cost = rate + (rate × (handling ÷ (VAT_amount + TCS_amount + subtotal)))
+
+        # ─── NEW LANDING COST FORMULA ───
+        # Base = Rate + 35% of Rate
+        # BaseWithTCS = Base + 2% of Base
+        # Landing = BaseWithTCS + (BaseWithTCS × (Handling / (VAT + TCS + Subtotal)))
+        base = rate_per_unit + (rate_per_unit * 0.35)
+        base_with_tcs = base + (base * 0.02)
+
         if purchase_data:
-            handling = purchase_data.total_handling or 0
+            handling   = purchase_data.total_handling or 0
             vat_amount = purchase_data.vat_amount or 0
             tcs_amount = purchase_data.tcs_amount or 0
-            subtotal = purchase_data.subtotal or 0
-            
+            subtotal   = purchase_data.subtotal or 0
+
             denominator = vat_amount + tcs_amount + subtotal
-            
-            if denominator > 0 and rate_per_unit > 0:
-                landing_cost = rate_per_unit + (rate_per_unit * (handling / denominator))
+
+            if denominator > 0:
+                landing_cost = base_with_tcs + (base_with_tcs * (handling / denominator))
                 product.landing_cost = round(landing_cost, 2)
             else:
-                product.landing_cost = rate_per_unit
+                product.landing_cost = round(base_with_tcs, 2)
         else:
-            product.landing_cost = rate_per_unit
-
+            product.landing_cost = round(base_with_tcs, 2)
 
 # ─── HELPER: Calculate total bottles from item ───
 def _calc_total_bottles(item):

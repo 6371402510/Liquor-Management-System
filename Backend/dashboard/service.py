@@ -22,53 +22,62 @@ def parse_size_ml(size_str):
     return int(digits) if digits else 0
 
 
-
-def get_previous_month_remaining_mgr(db: Session, company_id: int, current_date: datetime.date) -> float:
-    """Calculate remaining MGR from previous month that should be carried forward"""
-    # Get the first day of current month
-    current_month_start = datetime(current_date.year, current_date.month, 1).date()
+def get_previous_month_remaining_mgr(db: Session, company_id: int, current_date) -> float:
+    """
+    Calculate MGR carryover from previous month.
     
-    # Get the last day of previous month
+    Returns:
+        Positive value = shortfall (added to next month target)
+        Negative value = surplus/excess (subtracted from next month target)
+        Zero = first month or exactly achieved
+    """
+    from datetime import datetime, timedelta
+
+    current_month_start = datetime(current_date.year, current_date.month, 1).date()
+
     if current_date.month == 1:
         previous_month_start = datetime(current_date.year - 1, 12, 1).date()
-        previous_month_end = datetime(current_date.year - 1, 12, 31).date()
+        previous_month_end   = datetime(current_date.year - 1, 12, 31).date()
     else:
         previous_month_start = datetime(current_date.year, current_date.month - 1, 1).date()
-        previous_month_end = datetime(current_date.year, current_date.month - 1, 1).replace(
-            day=1
-        ) - timedelta(days=1)
-        previous_month_end = previous_month_end.date() if hasattr(previous_month_end, 'date') else previous_month_end
+        previous_month_end   = current_month_start - timedelta(days=1)
 
-    # Get previous month's target from company
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         return 0.0
-    
-    # Previous month's target (could be stored in company table or a separate MGR tracking table)
-    previous_month_target = float(company.mger_targeted_value or 30890000.0)
-    
-    # Calculate previous month's achieved MGR
+
+    # Check if previous month had ANY purchase activity
+    has_previous_activity = (
+        db.query(Purchase.id)
+        .filter(
+            Purchase.company_id == company_id,
+            Purchase.created_at >= datetime.combine(previous_month_start, datetime.min.time()),
+            Purchase.created_at <= datetime.combine(previous_month_end, datetime.max.time()),
+        )
+        .first()
+    )
+
+    if not has_previous_activity:
+        return 0.0  # First month of operation
+
+    previous_month_target = float(company.mger_targeted_value or 0.0)
+
     previous_month_achieved = float(
         db.query(func.coalesce(func.sum(PurchaseItem.mger_value), 0))
         .join(Purchase, PurchaseItem.purchase_id == Purchase.id)
         .filter(
-            and_(
-                Purchase.company_id == company_id,
-                Purchase.created_at >= previous_month_start,
-                Purchase.created_at <= previous_month_end
-            )
+            Purchase.company_id == company_id,
+            Purchase.created_at >= datetime.combine(previous_month_start, datetime.min.time()),
+            Purchase.created_at <= datetime.combine(previous_month_end, datetime.max.time()),
         )
         .scalar() or 0
     )
-    
-    # Calculate remaining MGR from previous month
-    remaining_mgr = max(0, previous_month_target - previous_month_achieved)
-    
-    # Optional: Store previous month's remaining in a separate table for tracking
-    # You might want to create a MGRTracking table to store this history
-    
-    return remaining_mgr
 
+    # ─── CRITICAL FIX: Allow NEGATIVE carryover (surplus) ───
+    # Positive = shortfall (add to next month)
+    # Negative = surplus (subtract from next month)
+    carryover = previous_month_target - previous_month_achieved
+    return carryover  # ← Remove max(0, ...) to allow negative
 
 
 def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_date_str: Optional[str] = None):
@@ -95,7 +104,7 @@ def get_dashboard_data(db: Session, company_id: Optional[int] = None, target_dat
     # ═══════════════════════════════════════════════════════════════════════
     # FETCH COMPANY'S MGR TARGET WITH CARRYOVER LOGIC
     # ═══════════════════════════════════════════════════════════════════════
-    DEFAULT_MGR_TARGET = 30890000.0  # Fallback if company not found or value is 0
+    DEFAULT_MGR_TARGET = 0.0  # Fallback if company not found or value is 0
     
     company = None
     if company_id:

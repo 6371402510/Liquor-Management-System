@@ -73,6 +73,9 @@ export default function Sidebar({ open, onClose, desktopCollapsed }) {
       '/item-wise-sell-report': 'item-wise-sell-report',
       '/item-wise-purchase-report': 'item-wise-purchase-report',
       '/cash-bank-report': 'cash-bank-report',
+      '/company-stock-transfer': 'company-stock-transfer',
+      '/mgr-report': 'mgr-report',
+      '/company-transfer-report': 'company-transfer-report',
     }
 
     for (const [route, key] of Object.entries(menuMap)) {
@@ -127,6 +130,9 @@ export default function Sidebar({ open, onClose, desktopCollapsed }) {
         { to: '/counter-to-godown-transfer', label: 'Stock Transfer(C → G)', roles: ['ADMIN', 'MANAGER'] },
         { to: '/stock-transfer-report', label: 'Transfer Report (G → C)', roles: ['ADMIN', 'MANAGER'] },
         { to: '/counter-to-godown-report', label: 'Transfer Report (C → G)', roles: ['ADMIN', 'MANAGER'] },
+        { to: '/company-stock-transfer', label: 'Company Stock Transfer', roles: ['ADMIN', 'MANAGER'] },
+        { to: '/mgr-report', label: 'MGR Report', roles: ['ADMIN', 'MANAGER'] },
+        { to: '/company-transfer-report', label: 'Company Transfer Report', roles: ['ADMIN', 'MANAGER'] },
       ],
     },
     {

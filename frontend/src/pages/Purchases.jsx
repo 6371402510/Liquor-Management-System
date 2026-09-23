@@ -13,6 +13,7 @@ import { getPurchases, createPurchase, getPurchaseItems, updatePurchase,checkInv
 // import { getSuppliers,createSupplier } from '../apiservices/supplierapi'
 import { searchProducts, createProduct, updateProduct, getProductById } from '../apiservices/inventoryapi'
 import { getSuppliers } from '../apiservices/supplierapi'
+import { getCompanies } from '../apiservices/companyapi'
 import { fetchSuppliersSafe } from './supplierHelper'
 // ─────────────────────────────────────────────────────────────
 // 1. INVENTORY CONSTANTS & HELPERS
@@ -121,7 +122,7 @@ const calculateBLandLPL = (totalQty, bottleSize, productType) => {
 // 2. EXTRACTED PRODUCT MODAL COMPONENT
 // ─────────────────────────────────────────────────────────────
 
-const ProductModal = ({ isOpen, onClose, onSaveSuccess }) => {
+const ProductModal = ({ isOpen, onClose, onSaveSuccess,companyId }) => {
   const [form, setForm] = useState(emptyProductForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -176,7 +177,7 @@ const ProductModal = ({ isOpen, onClose, onSaveSuccess }) => {
     })
   }
 
-  const handleSave = async (e) => {
+ const handleSave = async (e) => {
     e.preventDefault()
     setSaving(true)
     setError('')
@@ -184,7 +185,7 @@ const ProductModal = ({ isOpen, onClose, onSaveSuccess }) => {
     const currentCompanyId = localStorage.getItem('selectedCompanyId')
     const payload = {
       ...form,
-      company_id: Number(currentCompanyId),
+      company_id: Number(companyId),
       purchase_rate: Number(form.purchase_rate) || 0, landing_cost: Number(form.landing_cost) || 0,
       mrp: Number(form.mrp) || 0, sale_price: Number(form.sale_price) || 0,
       discount_percent: Number(form.discount_percent) || 0, VAT_rate: Number(form.VAT_rate) || 0,
@@ -480,9 +481,15 @@ export default function Purchases() {
   const [editingItemIndex, setEditingItemIndex] = useState(null)
   // ─── NEW: Stock destination state ───
 const [stockDestination, setStockDestination] = useState('GODOWN')
+const [formCompanyId, setFormCompanyId] = useState(() => {
+  return localStorage.getItem('selectedCompanyId') || ''
+})
 
 
-
+const [companies, setCompanies] = useState([])
+const [selectedCompanyId, setSelectedCompanyId] = useState(() => {
+  return localStorage.getItem('selectedCompanyId') || ''
+})
 
 
 // ─── HANDLING EXPENSES STATE ───
@@ -515,7 +522,43 @@ const resetHandlingState = () => {
 // ─────────────────────────────────────────────────────────────
 // HANDLING EXPENSES ROW COMPONENT
 // ─────────────────────────────────────────────────────────────
+useEffect(() => {
+  fetchCompaniesList()
+}, [])
 
+const fetchCompaniesList = async () => {
+  try {
+    const data = await getCompanies()
+    setCompanies(data || [])
+    
+    // If no company is selected yet, but we have companies, select the first one
+    if (!selectedCompanyId && data?.length > 0) {
+      const firstCompany = data[0]
+      setSelectedCompanyId(String(firstCompany.id))
+      localStorage.setItem('selectedCompanyId', String(firstCompany.id))
+      localStorage.setItem('selectedCompanyName', firstCompany.companyName)
+    }
+  } catch (err) {
+    console.error('Failed to load companies', err)
+  }
+}
+
+
+// Keep form default in sync with the global active company (one-way)
+useEffect(() => {
+  if (selectedCompanyId) {
+    setFormCompanyId(selectedCompanyId)
+  }
+}, [selectedCompanyId])
+
+
+const handleFormCompanyChange = (companyId) => {
+  setFormCompanyId(companyId)
+  // Reset the current purchase's items list when switching target company
+  setItems([])
+  setExpandedItems({})
+  setExpandedId(null)
+}
 
   useEffect(() => {
     if (companyId) {
@@ -560,13 +603,29 @@ const resetHandlingState = () => {
   }, [filterProduct, filterBrand, filterCategory, filterMrp, purchases])
 
   const fetchPurchases = async () => {
-    setLoading(true); setError('')
-    try {
-      const data = await getPurchases(Number(companyId))
-      setPurchases(data || [])
-    } catch (err) { setError(err.message || 'Failed to load purchases') }
-    finally { setLoading(false) }
+  if (!selectedCompanyId) return
+  
+  setLoading(true)
+  setError('')
+  try {
+    const data = await getPurchases(Number(selectedCompanyId))  // ← CHANGED
+    setPurchases(data || [])
+  } catch (err) {
+    setError(err.message || 'Failed to load purchases')
+  } finally {
+    setLoading(false)
   }
+}
+
+// Update the useEffect dependency
+useEffect(() => {
+  if (selectedCompanyId) {
+    fetchPurchases()
+    fetchSuppliers()
+  }
+}, [selectedCompanyId])  // ← CHANGED from companyId
+
+
 
   const handleEditPurchase = async (purchase) => {
     try {
@@ -972,6 +1031,9 @@ const roundTaxAmount = () => {
 
  const handleSubmit = async (e) => {
   e.preventDefault()
+    if (!selectedCompanyId) {
+    return alert('Please select a company first')
+  }
   if (!selectedSupplier) return alert('Please select a supplier')
   if (items.length === 0) return alert('Please add at least one item')
 
@@ -981,7 +1043,7 @@ const roundTaxAmount = () => {
   
   const exists = await checkInvoiceExists(
     finalInvoiceNumber,
-    Number(companyId),
+    Number(selectedCompanyId),  // ← CHANGED
     editingPurchaseId || null
   )
   
@@ -1000,7 +1062,9 @@ const roundTaxAmount = () => {
   
  const payload = {
   invoice_number: finalInvoiceNumber,
-  company_id: Number(companyId),
+  
+
+  company_id: Number(selectedCompanyId),  // ← CHANGED
   supplier_id: Number(selectedSupplier),
   supplier_name: supplier?.name || '',
   purchase_date: billingDate || format(new Date(), 'yyyy-MM-dd'),
@@ -1035,7 +1099,7 @@ const roundTaxAmount = () => {
     
     return {
       product_id: item.productId,
-      company_id: Number(companyId),
+      company_id: Number(selectedCompanyId),  // ← CHANGED
       name: item.name, 
       brand: item.brand, 
       category: item.category,
@@ -1367,6 +1431,25 @@ const [isCheckingInvoice, setIsCheckingInvoice] = useState(false)
       {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
     </select>
   </div>
+
+
+
+  <div className="col-span-2">
+  <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">
+    Company / Shop *
+  </label>
+  <select
+    value={formCompanyId}
+    onChange={e => handleFormCompanyChange(e.target.value)}
+    required
+    className="input-field bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700"
+  >
+    <option value="">Select Company</option>
+    {companies.map(c => (
+      <option key={c.id} value={c.id}>{c.companyName}</option>
+    ))}
+  </select>
+</div>
   
   {/* ─── PURCHASE TYPE ─── */}
   <div className="col-span-2">
@@ -2002,11 +2085,12 @@ Description *</label>
         </div>
       )}
 
-      <ProductModal
-        isOpen={showProductModal}
-        onClose={() => setShowProductModal(false)}
-        onSaveSuccess={fetchPurchases}
-      />
+     <ProductModal
+  isOpen={showProductModal}
+  onClose={() => setShowProductModal(false)}
+  onSaveSuccess={fetchPurchases}
+  companyId={selectedCompanyId}  // ← ADD THIS
+/>
 
       {/* ─── PURCHASES LIST TABLE ─── */}
     <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
@@ -2017,11 +2101,14 @@ Description *</label>
           <th className="table-header text-left">Invoice No.</th>
           <th className="table-header text-left">Date</th>
           <th className="table-header text-left">Supplier</th>
+          <th className="table-header text-left">Company</th>   {/* ← NEW */}
           <th className="table-header text-left">Stock To</th>
+          
           <th className="table-header text-left">Description</th>  {/* ← ADD THIS */}
+          <th className="table-header text-right text-blue-600 dark:text-blue-400">Subtotal</th>
           <th className="table-header text-right">VAT</th>
           <th className="table-header text-right">TCS</th>
-          <th className="table-header text-right text-blue-600 dark:text-blue-400">Subtotal</th>
+          
           <th className="table-header text-right text-blue-600 dark:text-blue-400">Total Cost</th>
           <th className="table-header text-right">Handling</th>
           <th className="table-header text-right text-green-600 dark:text-green-400">Grand Total</th>
@@ -2057,6 +2144,12 @@ Description *</label>
                   }
                 </td>
                 <td className="table-cell text-gray-600 dark:text-gray-400">{p.supplier_name || '—'}</td>
+                <td className="table-cell">
+  <span className="font-medium text-gray-800 dark:text-gray-200">
+    {p.company_name || p.companyName || companies.find(c => c.id === p.company_id)?.companyName || '—'}
+  </span>
+</td>
+
                 <td className="px-3 py-3">
                   <span className={clsx(
                     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold",
@@ -2093,13 +2186,16 @@ Description *</label>
     </span> */}
   </div>
 </td>
-                <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
-                <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
 
-                {/* ── Subtotal (line items only, no taxes) ── */}
+
+  {/* ── Subtotal (line items only, no taxes) ── */}
                 <td className="table-cell text-right font-semibold text-blue-600 dark:text-blue-400">
                   ₹{Number(p.subtotal || 0).toFixed(2)}
                 </td>
+                <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
+                <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
+
+              
 
                 {/* ── Total Cost (subtotal + taxes, WITHOUT handling) ── */}
                 <td className="table-cell text-right font-semibold text-blue-700 dark:text-blue-400">
