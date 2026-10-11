@@ -108,3 +108,47 @@ export const getProductById = async (id) => {
   if (!res.ok) throw new Error('Failed to fetch product')
   return res.json()
 }
+
+// ─────────────────────────────────────────────
+// BULK CREATE: Add product to multiple companies
+// ─────────────────────────────────────────────
+export const createProductForAllCompanies = async (productData, companyIds) => {
+  const token = localStorage.getItem('token')
+
+  const res = await fetch(`${API_BASE}/products/bulk/`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      product_data: productData,
+      company_ids: companyIds,
+    }),
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || 'Failed to create product for all companies')
+  return data
+}
+
+
+
+export const updateProductEverywhere = async (id, productData) => {
+  const token = localStorage.getItem('token')
+
+  const res = await fetch(`${API_BASE}/products/${id}/sync`, {
+    method: 'PUT',
+    headers: {
+      accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(productData),
+  })
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || 'Failed to sync product across companies')
+  return data
+}

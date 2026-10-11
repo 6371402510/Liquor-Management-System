@@ -3,13 +3,15 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from database import get_db
-from .schema import ProductCreate, ProductUpdate, ProductResponse
+from .schema import ProductCreate, ProductUpdate, ProductResponse,  BulkProductCreate
+
 from .service import (
     get_products, 
     get_product, 
     create_product, 
     update_product, 
-    soft_delete_product
+    soft_delete_product,
+    update_product_everywhere,
 )
 from .model import Product
 
@@ -71,16 +73,36 @@ def read_product(product_id: int, db: Session = Depends(get_db)):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
-
 @router.post("/", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 def create_new_product(product_data: ProductCreate, db: Session = Depends(get_db)):
-    """Create a new product"""
+    """Create a new product (single company)"""
     try:
         product = create_product(db, product_data)
         return product
     except ValueError as e:
-        # Catches the specific ValueError from service.py 
-        # (e.g., "Item Code 'ITM001' already exists for this company.")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/bulk/", status_code=status.HTTP_201_CREATED)
+def create_product_for_all_companies(
+    payload: BulkProductCreate,          # ← fixed class name
+    db: Session = Depends(get_db),
+):
+    try:
+        results = create_product(
+            db,
+            payload.product_data,         # ← now matches schema
+            target_company_ids=payload.company_ids,
+        )
+        if isinstance(results, list):
+            return {
+                "created": len(results),
+                "products": [ProductResponse.model_validate(p) for p in results],
+            }
+        return {
+            "created": 1,
+            "products": [ProductResponse.model_validate(results)],
+        }
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.put("/{product_id}", response_model=ProductResponse)
@@ -102,3 +124,23 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="Product not found")
     return
+
+
+@router.put("/{product_id}/sync", response_model=ProductResponse)
+def update_product_across_companies(
+    product_id: int,
+    product_data: ProductUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    Update a product in the current company AND mirror the purchase-rate /
+    MRP / master-data fields to the same product in every other company.
+    """
+    try:
+        product, synced = update_product_everywhere(db, product_id, product_data)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        # Optional: return synced count in a header or restructure response
+        return product
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

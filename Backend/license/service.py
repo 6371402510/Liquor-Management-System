@@ -6,108 +6,143 @@ from sqlalchemy.orm import Session
 from .model import License
 
 
-DAY_OPTIONS = {15, 30}
+DAY_OPTIONS   = {15, 30}
 MONTH_OPTIONS = {3, 6, 12, 24, 36}
 
-# Pre-compute all valid encodings (handles both MzY and MZY)
-VALID_ENCODINGS = {}
+# ─── Allowed company limits (None = unlimited) ───
+COMPANY_OPTIONS = {1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 50, 100}
+
+
+def _encode(v: int) -> str:
+    """Encode a number to base64url, strip padding."""
+    return base64.urlsafe_b64encode(str(v).encode()).decode().rstrip('=')
+
+
+# ─── Pre-compute valid duration encodings ───
+VALID_DURATION_ENCODINGS = {}
 for _v in DAY_OPTIONS | MONTH_OPTIONS:
-    _raw = base64.urlsafe_b64encode(str(_v).encode()).decode()
-    _stripped = _raw.rstrip('=')
-    for _ver in (_stripped, _raw, _stripped.upper(), _raw.upper()):
-        VALID_ENCODINGS[_ver] = _v
+    _enc = _encode(_v)
+    for _ver in (_enc, _enc.upper()):
+        VALID_DURATION_ENCODINGS[_ver] = _v
 
 
-def generate_license_key(duration: int, duration_type: str = 'months') -> str:
+# ─── Pre-compute valid company-limit encodings ───
+VALID_COMPANY_ENCODINGS = {}
+for _v in COMPANY_OPTIONS:
+    _enc = _encode(_v)
+    for _ver in (_enc, _enc.upper()):
+        VALID_COMPANY_ENCODINGS[_ver] = _v
+
+
+def generate_license_key(
+    duration: int,
+    duration_type: str = 'months',
+    max_companies: int | None = None,
+) -> str:
+    """
+    Build a license key.
+
+    duration: 15/30 (days) or 3/6/12/24/36 (months)
+    duration_type: 'days' | 'months'
+    max_companies: None → unlimited, else must be in COMPANY_OPTIONS
+    """
     if duration_type == 'days' and duration not in DAY_OPTIONS:
         raise ValueError(f"Invalid day duration. Allowed: {DAY_OPTIONS}")
     if duration_type == 'months' and duration not in MONTH_OPTIONS:
         raise ValueError(f"Invalid month duration. Allowed: {MONTH_OPTIONS}")
+    if max_companies is not None and max_companies not in COMPANY_OPTIONS:
+        raise ValueError(f"Invalid company limit. Allowed: {COMPANY_OPTIONS} or None")
 
-    value_str = str(duration)
-    encoded = base64.urlsafe_b64encode(value_str.encode()).decode().rstrip('=')
     random_part = secrets.token_hex(6).upper()
+    duration_enc = _encode(duration)
 
-    key = f"{random_part[:6]}-{random_part[6:]}-{encoded}"
-    return key
+    if max_companies is None:
+        # Old 3-part format — unlimited companies (backward compatible)
+        return f"{random_part[:6]}-{random_part[6:]}-{duration_enc}"
+
+    # New 4-part format — includes company limit
+    company_enc = _encode(max_companies)
+    return f"{random_part[:6]}-{random_part[6:]}-{duration_enc}-{company_enc}"
 
 
 def initialize_license(db: Session):
-    existing_license = db.query(License).first()
-
-    if existing_license:
+    existing = db.query(License).first()
+    if existing:
         raise ValueError("License already initialized")
 
-    trial_license = License(
+    # Trial: 7 days, up to 1 company
+    trial = License(
         token=f"TRIAL-{secrets.token_hex(4).upper()}",
         start_date=date.today(),
         end_date=date.today() + timedelta(days=7),
         is_active=True,
+        max_companies=1,
     )
-
-    db.add(trial_license)
+    db.add(trial)
     db.commit()
-    db.refresh(trial_license)
-
-    return trial_license
+    db.refresh(trial)
+    return trial
 
 
 def get_active_license(db: Session):
-    return (
-        db.query(License)
-        .filter(License.is_active == True)
-        .first()
-    )
+    return db.query(License).filter(License.is_active == True).first()
 
 
 def activate_license(db: Session, license_key: str):
-    # Strip VICHAAR- prefix if present
-    parts = license_key.split('-')
-    if len(parts) == 4:
-        license_key = '-'.join(parts[1:])
+    raw = license_key.strip().upper()
 
-    # Extract encoded part (after last dash)
-    encoded_part = license_key.rsplit('-', 1)[-1]
+    # Strip optional VICHAAR- prefix
+    if raw.startswith("VICHAAR-"):
+        raw = raw[len("VICHAAR-"):]
 
-    # Look up in pre-computed valid encodings
-    value = VALID_ENCODINGS.get(encoded_part)
+    parts = raw.split('-')
 
+    if len(parts) == 3:
+        # Old format: XXXXXX-XXXXXX-DURATION  (unlimited companies)
+        duration_enc = parts[2]
+        company_enc  = None
+    elif len(parts) == 4:
+        # New format: XXXXXX-XXXXXX-DURATION-COMPANIES
+        duration_enc = parts[2]
+        company_enc  = parts[3]
+    else:
+        raise ValueError("Invalid license key format")
+
+    # ─── Resolve duration ───
+    value = VALID_DURATION_ENCODINGS.get(duration_enc)
     if value is None:
         raise ValueError("Invalid license key")
 
-    days = None
-    months = None
-
+    days = months = None
     if value in DAY_OPTIONS:
         days = value
     elif value in MONTH_OPTIONS:
         months = value
 
-    start_date = date.today()
-
-    if days:
-        end_date = start_date + timedelta(days=days)
+    # ─── Resolve company limit ───
+    if company_enc is None:
+        max_companies = None  # old key → unlimited
     else:
-        end_date = start_date + relativedelta(months=months)
+        max_companies = VALID_COMPANY_ENCODINGS.get(company_enc)
+        if max_companies is None:
+            raise ValueError("Invalid license key")
 
-    # Deactivate existing
-    active_license = (
-        db.query(License)
-        .filter(License.is_active == True)
-        .first()
-    )
-    if active_license:
-        active_license.is_active = False
+    start_date = date.today()
+    end_date = start_date + timedelta(days=days) if days else start_date + relativedelta(months=months)
+
+    # Deactivate previous
+    active = db.query(License).filter(License.is_active == True).first()
+    if active:
+        active.is_active = False
 
     new_license = License(
-        token=license_key,
+        token=raw,
         start_date=start_date,
         end_date=end_date,
         is_active=True,
+        max_companies=max_companies,
     )
-
     db.add(new_license)
     db.commit()
     db.refresh(new_license)
-
     return new_license

@@ -42,3 +42,11 @@ def create_transfer(payload: schema.CompanyTransferCreate, db: Session = Depends
         return t
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.get("/{transfer_id}/invoice", response_model=schema.CompanyTransferInvoice)
+def get_transfer_invoice(transfer_id: int, db: Session = Depends(get_db)):
+    try:
+        return service.build_transfer_invoice(db, transfer_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))

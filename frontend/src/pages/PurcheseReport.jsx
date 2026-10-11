@@ -35,7 +35,7 @@ function normalizeItem(item) {
     id: item.id,
     purchase_id: item.purchase_id,
     product_name: item.product_name ?? item.name ?? '',
-    short_name: item.short_name ?? item.shortName ?? '',   // ✅ ADD THIS LINE
+    short_name: item.short_name ?? item.short_name ?? '',   // ✅ ADD THIS LINE
     brand: item.brand ?? '',
     category: item.category ?? '',
     barcode: item.barcode ?? '',
@@ -112,6 +112,7 @@ export default function PurchaseReport() {
   const [filterMinAmount, setFilterMinAmount] = useState('')
   const [filterMaxAmount, setFilterMaxAmount] = useState('')
   const [filterStockDest, setFilterStockDest] = useState('ALL')
+  const [filterShortName, setFilterShortName] = useState('')
 
   // ─── UI State ───
   const [showFilters, setShowFilters] = useState(true)
@@ -173,7 +174,7 @@ export default function PurchaseReport() {
 
   // ─── Fetch items for all purchases when item-level filters are active ───
   useEffect(() => {
-    const hasItemFilter = filterProduct || filterBrand || filterCategory
+    const hasItemFilter = filterProduct || filterBrand || filterCategory|| filterShortName 
     if (!hasItemFilter || purchases.length === 0) return
 
     let cancelled = false
@@ -204,7 +205,7 @@ export default function PurchaseReport() {
 
     fetchMissingItems()
     return () => { cancelled = true }
-  }, [filterProduct, filterBrand, filterCategory, purchases])
+  }, [filterProduct, filterBrand, filterCategory,filterShortName, purchases])
 
   // ─── Clear All Filters ───
   const clearFilters = () => {
@@ -213,6 +214,7 @@ export default function PurchaseReport() {
     setFilterSupplier('')
     setFilterInvoice('')
     setFilterProduct('')
+     setFilterShortName('')   // ← ADD
     setFilterBrand('')
     setFilterCategory('')
     setFilterStatus('ALL')
@@ -224,43 +226,43 @@ export default function PurchaseReport() {
   }
 
   const hasActiveFilters = filterDateFrom || filterDateTo || filterSupplier ||
-    filterInvoice || filterProduct || filterBrand || filterCategory ||
+    filterInvoice || filterProduct || filterBrand || filterCategory ||filterShortName ||  
     filterStatus !== 'ALL' || filterVehicle || filterMinAmount || filterMaxAmount ||
     filterStockDest !== 'ALL'
 
   // ─── Filtering Logic ───
   const filteredPurchases = useMemo(() => {
-    return purchases.filter(p => {
-      const pDate = p.billing_date || p.purchase_date || ''
-      if (filterDateFrom && pDate < filterDateFrom) return false
-      if (filterDateTo && pDate > filterDateTo) return false
-      if (filterSupplier && String(p.supplier_id) !== filterSupplier) return false
-      if (filterInvoice && !(p.invoice_number || '').toLowerCase().includes(filterInvoice.toLowerCase())) return false
-      if (filterStatus !== 'ALL' && p.status !== filterStatus) return false
-      if (filterVehicle && !(p.vehicle_number || '').toLowerCase().includes(filterVehicle.toLowerCase())) return false
-      const amt = Number(p.total_amount) || 0
-      if (filterMinAmount && amt < Number(filterMinAmount)) return false
-      if (filterMaxAmount && amt > Number(filterMaxAmount)) return false
-      if (filterStockDest !== 'ALL' && (p.stock_destination || 'GODOWN') !== filterStockDest) return false
+  return purchases.filter(p => {
+    const pDate = p.billing_date || p.purchase_date || ''
+    if (filterDateFrom && pDate < filterDateFrom) return false
+    if (filterDateTo && pDate > filterDateTo) return false
+    if (filterSupplier && String(p.supplier_id) !== filterSupplier) return false
+    if (filterInvoice && !(p.invoice_number || '').toLowerCase().includes(filterInvoice.toLowerCase())) return false
+    if (filterStatus !== 'ALL' && p.status !== filterStatus) return false
+    if (filterVehicle && !(p.vehicle_number || '').toLowerCase().includes(filterVehicle.toLowerCase())) return false
+    const amt = Number(p.total_amount) || 0
+    if (filterMinAmount && amt < Number(filterMinAmount)) return false
+    if (filterMaxAmount && amt > Number(filterMaxAmount)) return false
+    if (filterStockDest !== 'ALL' && (p.stock_destination || 'GODOWN') !== filterStockDest) return false
 
-      const hasItemFilter = filterProduct || filterBrand || filterCategory
-      if (hasItemFilter) {
-        const pItems = expandedItems[p.id] || []
-        if (pItems.length === 0) return false
-        return pItems.some(item => {
-          const matchProduct = !filterProduct || (item.product_name || '').toLowerCase().includes(filterProduct.toLowerCase())
-          const matchCategory = !filterCategory || (item.category || '').toLowerCase().includes(filterCategory.toLowerCase())
-          const matchBrand = !filterBrand || (item.brand || '').toLowerCase().includes(filterBrand.toLowerCase())
-          return matchProduct && matchCategory && matchBrand
-        })
-      }
+    const hasItemFilter = filterProduct || filterBrand || filterCategory || filterShortName  // ← ADD
+    if (hasItemFilter) {
+      const pItems = expandedItems[p.id] || []
+      if (pItems.length === 0) return false
+      return pItems.some(item => {
+        const matchProduct   = !filterProduct   || (item.product_name || '').toLowerCase().includes(filterProduct.toLowerCase())
+        const matchCategory  = !filterCategory  || (item.category || '').toLowerCase().includes(filterCategory.toLowerCase())
+        const matchBrand     = !filterBrand     || (item.brand || '').toLowerCase().includes(filterBrand.toLowerCase())
+        const matchShortName = !filterShortName || (item.short_name || '').toLowerCase().includes(filterShortName.toLowerCase())  // ← ADD
+        return matchProduct && matchCategory && matchBrand && matchShortName  // ← ADD
+      })
+    }
 
-      return true
-    })
-  }, [purchases, filterDateFrom, filterDateTo, filterSupplier, filterInvoice,
-    filterProduct, filterBrand, filterCategory, filterStatus, filterVehicle,
-    filterMinAmount, filterMaxAmount, filterStockDest, expandedItems])
-
+    return true
+  })
+}, [purchases, filterDateFrom, filterDateTo, filterSupplier, filterInvoice,
+  filterProduct, filterBrand, filterCategory, filterShortName, filterStatus, filterVehicle,  // ← ADD
+  filterMinAmount, filterMaxAmount, filterStockDest, expandedItems])
   // ─── Sorting ───
   const sortedPurchases = useMemo(() => {
     const sorted = [...filteredPurchases].sort((a, b) => {
@@ -450,7 +452,7 @@ export default function PurchaseReport() {
     const map = {}
     filteredPurchases.forEach(p => {
       (expandedItems[p.id] || []).forEach(item => {
-        const key = item.short_name || item.product_name || 'Unknown'
+        const key = item.short_name || 'Unknown'
         if (!map[key]) map[key] = {
           name: key,
           product_name: item.product_name || '',
@@ -810,6 +812,18 @@ return (
           <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Category</label><input type="text" placeholder="Filter by category..." value={filterCategory} onChange={e => { setFilterCategory(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
           <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Vehicle No.</label><input type="text" placeholder="e.g. MH12AB1234" value={filterVehicle} onChange={e => { setFilterVehicle(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
           <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Min Amount ₹</label><input type="number" placeholder="0" value={filterMinAmount} onChange={e => { setFilterMinAmount(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
+          <div>
+  <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
+    Company 
+  </label>
+  <input
+    type="text"
+    placeholder="Filter by company name..."
+    value={filterShortName}
+    onChange={e => { setFilterShortName(e.target.value); setCurrentPage(1) }}
+    className="input-field text-xs"
+  />
+</div>
         </div>
         <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
           <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wide self-center mr-1">Quick:</span>

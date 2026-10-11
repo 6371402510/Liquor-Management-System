@@ -70,3 +70,11 @@ export const getCompanyTransferItems = async (transferId) => {
   if (!res.ok) throw new Error('Failed to fetch company transfer items')
   return res.json()
 }
+
+
+
+export const getCompanyTransferInvoice = async (transferId) => {
+  const res = await fetch(`${API_BASE}/company-transfers/${transferId}/invoice`)
+  if (!res.ok) throw new Error('Failed to load invoice')
+  return res.json()
+}

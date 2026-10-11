@@ -4,7 +4,7 @@ import {
   Store, Warehouse, TrendingUp, CreditCard, Banknote, Smartphone,
   Users, Receipt, RotateCcw, Filter, FileDown, Clock3, Calendar,
   Tag, Package, BarChart3, ArrowUpDown, AlertCircle, Loader as Loader2,
-  Pencil, SplitSquareHorizontal,User,X
+  Pencil, SplitSquareHorizontal,User,X,Trash2
 } from 'lucide-react'
 import clsx from 'clsx'
 import * as XLSX from 'xlsx'
@@ -13,7 +13,7 @@ import { writeFile } from '@tauri-apps/plugin-fs'
 import { format } from 'date-fns'
 
 import { getCounterSales } from '../apiservices/sales-counter'
-import { getPosProducts } from '../apiservices/sales-counter'
+import { getPosProducts ,  deleteSale} from '../apiservices/sales-counter'
 import { getGodownProducts, getGodownSales } from '../apiservices/godown-counter'
 
 const GROUP_BY_OPTIONS = [
@@ -85,6 +85,9 @@ export default function Reports() {
   const [salesType, setSalesType] = useState('ALL')
   const [paymentMode, setPaymentMode] = useState('ALL')
   const [discountFilter, setDiscountFilter] = useState('ALL')
+
+  const [deleteConfirm, setDeleteConfirm] = useState(null)  // stores the row to delete
+const [deleting, setDeleting] = useState(false)
 
 
    // ─── NEW: Customer Name Filter ───
@@ -309,12 +312,14 @@ export default function Reports() {
       if (['item', 'brand', 'category', 'size', 'short_name' ].includes(groupBy)) {
         row.items.forEach(item => {
           const key = getGroupKey(row, item)
-          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, mrp: 0, bills: new Set(),short_name: item.short_name || ''  }
+          if (!groups[key]) groups[key] = { qty: 0, amount: 0, discount: 0, mrp: 0, bills: new Set(),short_name: item.short_name || '' , dates: new Set(),        // ← ADD THIS
+          dateDetails: {}     }
           groups[key].qty += item.qty * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].amount += item.amount * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].discount += (item.discount || 0) * (row.transactionType === 'RETURN' ? -1 : 1)
           groups[key].bills.add(row.id)
-
+const saleDate = format(new Date(row.date), 'yyyy-MM-dd')
+      groups[key].dates.add(saleDate)
           if (groupBy === 'item') {
             groups[key].mrp = item.mrp || 0
             groups[key].item_code = item.item_code || ''
@@ -382,6 +387,8 @@ export default function Reports() {
       cashAmount: val.cashAmount || 0,
       upiAmount: val.upiAmount || 0,
       cardAmount: val.cardAmount || 0,
+      dates: val.dates ? Array.from(val.dates).sort() : [],
+  dateDetails: val.dateDetails || {},
     })).sort((a, b) => {
       if (groupBy === 'bill' && a.date && b.date) {
         return new Date(b.date) - new Date(a.date)
@@ -427,6 +434,26 @@ export default function Reports() {
         'Cash': row.cash,
         'Card': row.card,
       }
+
+
+       if (['item', 'brand', 'category', 'size', 'short_name'].includes(groupBy)) {
+      // Show date range (if multiple dates) or single date
+      if (row.dates && row.dates.length > 0) {
+        if (row.dates.length === 1) {
+          base['Date'] = row.dates[0]
+        } else {
+          base['Date Range'] = `${row.dates[0]} to ${row.dates[row.dates.length - 1]}`
+          base['Days Active'] = row.dates.length
+        }
+      }
+    }
+
+      if (['item', 'brand', 'category', 'size', 'short_name'].includes(groupBy)) {
+      base['Date From'] = dateFrom
+      base['Date To'] = dateTo
+    }
+
+
             if (groupBy === 'item') {
         base['Item Code'] = row.item_code || ''
         base['MRP'] = row.mrp || 0
@@ -520,6 +547,30 @@ export default function Reports() {
     )
   }
 
+
+
+  const handleDeleteSale = async () => {
+  if (!deleteConfirm?.dbId) return
+
+  setDeleting(true)
+  try {
+    await deleteSale(deleteConfirm.dbId)
+    setDeleteConfirm(null)
+    // Refresh the report
+    await fetchReportData()
+    // Also refresh products so stock counts update
+    const data = activeTab === 'counter'
+      ? await getPosProducts(Number(companyId), '')
+      : await getGodownProducts(Number(companyId), '')
+    const map = {}
+    ;(data || []).forEach(p => { map[p.id] = p })
+    setProductsMap(map)
+  } catch (err) {
+    alert(err.message || 'Failed to delete sale')
+  } finally {
+    setDeleting(false)
+  }
+}
   const renderPaymentDetails = (row) => {
     if (row.paymentDetails && row.paymentDetails.length > 1) {
       return (
@@ -858,6 +909,14 @@ const itemColSpan = ['item', 'brand', 'category', 'size', 'short_name'].includes
                             >
                               <Pencil className="w-3 h-3" /> Edit
                             </button>
+
+                             <button
+      onClick={(e) => { e.stopPropagation(); setDeleteConfirm(row) }}
+      className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-md bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors dark:bg-red-900/20 dark:text-red-400 dark:border-red-800 dark:hover:bg-red-900/40"
+      title="Delete this bill and restore stock"
+    >
+      <Trash2 className="w-3 h-3" /> Delete
+    </button>
                           </td>
                         </tr>
 
@@ -1041,6 +1100,90 @@ const itemColSpan = ['item', 'brand', 'category', 'size', 'short_name'].includes
           </div>
         </div>
       </div>
+
+
+      {deleteConfirm && (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+    onClick={() => !deleting && setDeleteConfirm(null)}
+  >
+    <div
+      className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md mx-4 overflow-hidden"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+          <Trash2 className="w-5 h-5 text-red-600 dark:text-red-400" />
+        </div>
+        <div>
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Delete Bill?</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            This action cannot be undone
+          </p>
+        </div>
+      </div>
+
+      <div className="p-5 space-y-3">
+        <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 space-y-1.5 text-xs">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Invoice:</span>
+            <span className="font-semibold text-gray-800 dark:text-gray-200">{deleteConfirm.group}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Customer:</span>
+            <span className="text-gray-800 dark:text-gray-200">
+              {deleteConfirm.customerName || deleteConfirm.customerId || 'Walk-in'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Items:</span>
+            <span className="text-gray-800 dark:text-gray-200">
+              {deleteConfirm.billItems?.length || 0} item(s)
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">Amount:</span>
+            <span className="font-bold text-emerald-600 dark:text-emerald-400">
+              ₹{Math.abs(deleteConfirm.amount || 0).toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+            Stock for all items in this bill will be <strong>restored to the counter</strong>.
+          </p>
+        </div>
+      </div>
+
+      <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2 bg-slate-50 dark:bg-slate-800/50">
+        <button
+          onClick={() => setDeleteConfirm(null)}
+          disabled={deleting}
+          className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleDeleteSale}
+          disabled={deleting}
+          className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+        >
+          {deleting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" /> Deleting...
+            </>
+          ) : (
+            <>
+              <Trash2 className="w-4 h-4" /> Delete Bill
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   )
 }

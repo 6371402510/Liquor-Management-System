@@ -19,7 +19,43 @@ def get_purchase(db: Session, purchase_id: int):
 
 
 def get_purchase_items(db: Session, purchase_id: int):
-    return db.query(PurchaseItem).filter(PurchaseItem.purchase_id == purchase_id).all()
+    """
+    Return PurchaseItem rows enriched with `short_name`.
+    Resolution order:
+      1. persisted PurchaseItem.short_name   (if column exists and is set)
+      2. Product.short_name for the linked product_id
+      3. Product.name fallback
+      4. None
+    """
+    items = (
+        db.query(PurchaseItem)
+        .filter(PurchaseItem.purchase_id == purchase_id)
+        .all()
+    )
+    if not items:
+        return []
+
+    # Batch-fetch referenced products in one query (avoids N+1)
+    product_ids = list({i.product_id for i in items if i.product_id})
+    products = {}
+    if product_ids:
+        rows = db.query(Product).filter(Product.id.in_(product_ids)).all()
+        products = {p.id: p for p in rows}
+
+    for it in items:
+        # Prefer persisted value (if your model has the column)
+        persisted = getattr(it, "short_name", None)
+
+        prod = products.get(it.product_id) if it.product_id else None
+        resolved = (
+            persisted
+            or (prod.short_name if prod else None)
+            or (prod.name if prod else None)
+        )
+        # Set as transient attribute so Pydantic from_attributes picks it up
+        it.short_name = resolved
+
+    return items
 
 
 # ─── HELPER: Apply stock to the correct location ───

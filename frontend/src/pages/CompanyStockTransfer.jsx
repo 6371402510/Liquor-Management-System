@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   Plus, X, Loader2, Trash2, Search, Warehouse, AlertCircle,
-  Store, ArrowRight, Building2,
+  Store, ArrowRight, Building2, FileText,
 } from 'lucide-react'
 import clsx from 'clsx'
 
-import { 
-  getCompanyTransfers, 
-  createCompanyTransfer, 
-  getCompanyTransferItems 
+import CompanyTransferInvoiceModal from './CompanyTransferInvoiceModal'
+import {
+  getCompanyTransfers,
+  createCompanyTransfer,
+  getCompanyTransferItems,
+  getCompanyTransferInvoice,
 } from '../apiservices/companyTransferapi'
 import { searchProducts } from '../apiservices/inventoryapi'
-import { getCompanies } from '../apiservices/companyapi' // adjust path
+import { getCompanies } from '../apiservices/companyapi'
 
 const SIZE_BOTTLES_MAP = {
   '90ml': 96, '180ml': 48, '200ml': 24, '250ml': 36, '275ml': 24, '300ml': 30,
@@ -46,62 +48,74 @@ export default function CompanyStockTransfer() {
   const [notes, setNotes] = useState('')
   const [vehicleNumber, setVehicleNumber] = useState('')
 
-const handleFromCompanyChange = (newFromId) => {
-  setFromCompanyId(newFromId)
+  // Invoice state
+  const [invoice, setInvoice] = useState(null)
+  const [loadingInvoice, setLoadingInvoice] = useState(false)
 
-  // Persist selection
-  if (newFromId) {
-    localStorage.setItem('selectedCompanyId', newFromId)
-    const match = companies.find((c) => Number(c.id) === Number(newFromId))
-    if (match) {
-      localStorage.setItem('selectedCompanyName', match.companyName)
+  const handleGenerateInvoice = async (transferId) => {
+    setLoadingInvoice(true)
+    try {
+      const data = await getCompanyTransferInvoice(transferId)
+      setInvoice(data)
+    } catch (err) {
+      alert('Failed to load invoice: ' + err.message)
+    } finally {
+      setLoadingInvoice(false)
     }
-  } else {
-    localStorage.removeItem('selectedCompanyId')
-    localStorage.removeItem('selectedCompanyName')
   }
 
-  // Reset destination if it equals new source
-  if (Number(newFromId) === Number(toCompanyId)) {
-    setToCompanyId('')
-  }
+  const handleFromCompanyChange = (newFromId) => {
+    setFromCompanyId(newFromId)
 
-  // Reset transfer items (they belong to previous source company's stock)
-  setItems([])
-  setSelectedProduct(null)
-  setSearchQuery('')
-  setTransferCases(0)
-  setTransferQty(0)
-  setBottlesPerCase(0)
-  setError('')
-}
+    if (newFromId) {
+      localStorage.setItem('selectedCompanyId', newFromId)
+      const match = companies.find((c) => Number(c.id) === Number(newFromId))
+      if (match) {
+        localStorage.setItem('selectedCompanyName', match.companyName)
+      }
+    } else {
+      localStorage.removeItem('selectedCompanyId')
+      localStorage.removeItem('selectedCompanyName')
+    }
+
+    if (Number(newFromId) === Number(toCompanyId)) {
+      setToCompanyId('')
+    }
+
+    setItems([])
+    setSelectedProduct(null)
+    setSearchQuery('')
+    setTransferCases(0)
+    setTransferQty(0)
+    setBottlesPerCase(0)
+    setError('')
+  }
 
   const loadCompanies = async () => {
-  try {
-    const data = await getCompanies()
+    try {
+      const data = await getCompanies()
 
-    let list = []
-    if (Array.isArray(data)) list = data
-    else if (Array.isArray(data?.companies)) list = data.companies
-    else if (Array.isArray(data?.data)) list = data.data
-    else if (Array.isArray(data?.items)) list = data.items
+      let list = []
+      if (Array.isArray(data)) list = data
+      else if (Array.isArray(data?.companies)) list = data.companies
+      else if (Array.isArray(data?.data)) list = data.data
+      else if (Array.isArray(data?.items)) list = data.items
 
-    setCompanies(list)
+      setCompanies(list)
 
-    // Only auto-set fromCompanyId if not already set
-    if (!fromCompanyId && list.length > 0) {
-      const stored = localStorage.getItem('selectedCompanyId')
-      const match = list.find((c) => Number(c.id) === Number(stored))
-      if (match) {
-        setFromCompanyId(String(match.id))
+      if (!fromCompanyId && list.length > 0) {
+        const stored = localStorage.getItem('selectedCompanyId')
+        const match = list.find((c) => Number(c.id) === Number(stored))
+        if (match) {
+          setFromCompanyId(String(match.id))
+        }
       }
-      // else: leave empty, let user pick from dropdown
+    } catch (err) {
+      console.error('❌ loadCompanies failed:', err)
+      setError('Failed to load companies: ' + (err?.message || err))
     }
-  } catch (err) {
-    console.error('❌ loadCompanies failed:', err)
-    setError('Failed to load companies: ' + (err?.message || err))
   }
-}
+
   useEffect(() => {
     loadCompanies()
   }, [])
@@ -119,7 +133,6 @@ const handleFromCompanyChange = (newFromId) => {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
-
 
   const fetchTransfers = async () => {
     setLoading(true)
@@ -278,27 +291,27 @@ const handleFromCompanyChange = (newFromId) => {
 
           {/* ─── COMPANY SELECTOR ─── */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg items-end">
-           <div className="md:col-span-5">
-  <label className="block text-xs font-medium mb-1 flex items-center gap-1">
-    <Building2 className="w-3 h-3 text-blue-500" /> From Company (Source Godown)
-  </label>
-  <select
-    value={fromCompanyId || ''}
-    onChange={(e) => handleFromCompanyChange(e.target.value)}
-    className="input-field"
-  >
-    <option value="">-- Select source company --</option>
-    {companies.length === 0 ? (
-      <option value="">⚠️ Loading companies...</option>
-    ) : (
-      companies.map((c) => (
-        <option key={c.id} value={c.id}>
-          {c.companyName}
-        </option>
-      ))
-    )}
-  </select>
-</div>
+            <div className="md:col-span-5">
+              <label className="block text-xs font-medium mb-1 flex items-center gap-1">
+                <Building2 className="w-3 h-3 text-blue-500" /> From Company (Source Godown)
+              </label>
+              <select
+                value={fromCompanyId || ''}
+                onChange={(e) => handleFromCompanyChange(e.target.value)}
+                className="input-field"
+              >
+                <option value="">-- Select source company --</option>
+                {companies.length === 0 ? (
+                  <option value="">⚠️ Loading companies...</option>
+                ) : (
+                  companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.companyName}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
             <div className="md:col-span-2 flex justify-center">
               <ArrowRight className="w-6 h-6 text-primary-500" />
             </div>
@@ -306,26 +319,26 @@ const handleFromCompanyChange = (newFromId) => {
               <label className="block text-xs font-medium mb-1 flex items-center gap-1">
                 <Store className="w-3 h-3 text-emerald-500" /> To Company (Destination Godown)
               </label>
-             <select
-  value={toCompanyId}
-  onChange={(e) => setToCompanyId(e.target.value)}
-  className="input-field"
->
-  <option value="">-- Select destination company --</option>
-  {companies.length === 0 ? (
-    <option value="">⚠️ Loading companies...</option>
-  ) : companies.filter((c) => Number(c.id) !== Number(fromCompanyId)).length === 0 ? (
-    <option value="">No other companies available</option>
-  ) : (
-    companies
-      .filter((c) => Number(c.id) !== Number(fromCompanyId))
-      .map((c) => (
-        <option key={c.id} value={c.id}>
-          {c.companyName}
-        </option>
-      ))
-  )}
-</select>
+              <select
+                value={toCompanyId}
+                onChange={(e) => setToCompanyId(e.target.value)}
+                className="input-field"
+              >
+                <option value="">-- Select destination company --</option>
+                {companies.length === 0 ? (
+                  <option value="">⚠️ Loading companies...</option>
+                ) : companies.filter((c) => Number(c.id) !== Number(fromCompanyId)).length === 0 ? (
+                  <option value="">No other companies available</option>
+                ) : (
+                  companies
+                    .filter((c) => Number(c.id) !== Number(fromCompanyId))
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.companyName}
+                      </option>
+                    ))
+                )}
+              </select>
             </div>
           </div>
 
@@ -526,18 +539,19 @@ const handleFromCompanyChange = (newFromId) => {
                 <th className="table-header text-left">To</th>
                 <th className="table-header text-center">Bottles</th>
                 <th className="table-header text-center">Status</th>
+                <th className="table-header text-center">Invoice</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-10">
+                  <td colSpan={7} className="text-center py-10">
                     <Loader2 className="w-6 h-6 animate-spin text-primary-500 mx-auto" />
                   </td>
                 </tr>
               ) : transfers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-10 text-sm text-gray-400">
+                  <td colSpan={7} className="text-center py-10 text-sm text-gray-400">
                     No transfers yet
                   </td>
                 </tr>
@@ -564,6 +578,16 @@ const handleFromCompanyChange = (newFromId) => {
                     <td className="table-cell text-center">
                       <span className="badge-success">{t.status}</span>
                     </td>
+                    <td className="table-cell text-center">
+                      <button
+                        onClick={() => handleGenerateInvoice(t.id)}
+                        disabled={loadingInvoice}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Generate Invoice
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -571,6 +595,14 @@ const handleFromCompanyChange = (newFromId) => {
           </table>
         </div>
       </div>
+
+      {/* ─── INVOICE MODAL ─── */}
+      {invoice && (
+        <CompanyTransferInvoiceModal
+          invoice={invoice}
+          onClose={() => setInvoice(null)}
+        />
+      )}
     </div>
   )
 }

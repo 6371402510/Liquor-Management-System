@@ -60,6 +60,7 @@ class PurchaseItem(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
 
     product_name = Column(String, nullable=False)
+    short_name = Column(String, nullable=True)   # ← ADD THIS
     brand = Column(String, nullable=True)
     category = Column(String, nullable=True)
     barcode = Column(String, nullable=True)

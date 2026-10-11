@@ -99,3 +99,21 @@ export const updateProductMrp = async (productId, companyId, newMrp) => {
   if (!res.ok) throw new Error(data.detail || 'Failed to update MRP')
   return data
 }
+
+
+export const extractSaleItems = (sale) =>
+  sale?.items || sale?.sale_items || sale?.lines || []
+
+export const deleteSale = async (saleId) => {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`${API_BASE}/sales/${saleId}`, {
+    method: 'DELETE',
+    headers: {
+      accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || 'Failed to delete sale')
+  return data
+}

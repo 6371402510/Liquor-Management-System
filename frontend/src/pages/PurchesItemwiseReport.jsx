@@ -13,7 +13,20 @@ import { getPurchases, getPurchaseItems } from '../apiservices/purchasesapi'
 
 // ─── Normalize item fields ───
 function normalizeItem(item) {
-  const total_bottles = Number(item.total_bottles ?? item.totalBottles ?? item.qty_bottles ?? item.qtyBottles) || 0
+  // Try every alias, then fall back to computed
+  let total_bottles = Number(
+    item.total_bottles ?? item.totalBottles ??
+    item.qty_bottles ?? item.qtyBottles
+  ) || 0
+
+  const qty_cases = Number(item.qty_cases ?? item.qtyCases) || 0
+  const bottles_per_case = Number(item.bottles_per_case ?? item.bottlesPerCase) || 0
+
+  // ✅ If DB stored 0, compute from cases × bottles_per_case
+  if (total_bottles === 0 && qty_cases > 0 && bottles_per_case > 0) {
+    total_bottles = qty_cases * bottles_per_case
+  }
+
   const purchase_rate_per_unit = Number(item.purchase_rate_per_unit ?? item.purchaseRatePerUnit) || 0
   const stored_total_cost = Number(item.total_cost) || 0
 
@@ -34,14 +47,14 @@ function normalizeItem(item) {
     category: item.category ?? '',
     bottle_size: item.bottle_size ?? '',
     traditional_name: item.traditional_name ?? '',
-    bottles_per_case: Number(item.bottles_per_case ?? item.bottlesPerCase) || 0,
+    bottles_per_case: bottles_per_case,
     mrp: Number(item.mrp) || 0,
     unit_cost: Number(item.unit_cost ?? item.purchaseRate) || 0,
     purchase_rate_per_unit: purchase_rate_per_unit,
     selling_rate: Number(item.selling_rate ?? item.sellingRate) || 0,
-    qty_cases: Number(item.qty_cases ?? item.qtyCases) || 0,
+    qty_cases: qty_cases,
     qty_bottles: Number(item.qty_bottles ?? item.qtyBottles) || 0,
-    total_bottles: total_bottles,
+    total_bottles: total_bottles,   // ✅ computed fallback
     qty_bulk_liters: Number(item.qty_bulk_liters ?? item.qtyBulkLiters) || 0,
     qty_lp_liters: Number(item.qty_lp_liters ?? item.qtyLPLiters) || 0,
     total_cost: total_cost,
@@ -85,6 +98,8 @@ export default function ItemWisePurchaseReport() {
   // Value display mode
   const [valueMode, setValueMode] = useState('bottles')
 
+  
+
   // ─── Company change listener ───
   useEffect(() => {
     const sync = () => {
@@ -108,65 +123,148 @@ export default function ItemWisePurchaseReport() {
     fetchAllData()
   }, [selectedMonth, companyId])
 
+
   const fetchAllData = async () => {
-    setLoading(true)
-    setError('')
-    setGodownItems([])
-    setCounterItems([])
-    try {
-      const m = parse(selectedMonth, 'yyyy-MM', new Date())
-      const from = format(startOfMonth(m), 'yyyy-MM-dd')
-      const to = format(endOfMonth(m), 'yyyy-MM-dd')
+  setLoading(true)
+  setError('')
+  setGodownItems([])
+  setCounterItems([])
+  try {
+    const m = parse(selectedMonth, 'yyyy-MM', new Date())
+    const from = format(startOfMonth(m), 'yyyy-MM-dd')
+    const to = format(endOfMonth(m), 'yyyy-MM-dd')
 
-      const allPurchases = await getPurchases(Number(companyId))
-      const purchaseList = Array.isArray(allPurchases) ? allPurchases : (allPurchases?.results || allPurchases?.data || [])
+    console.log('=== FETCH DEBUG ===')
+    console.log('companyId:', companyId, 'from:', from, 'to:', to)
 
-      // Filter by selected month
-      const monthPurchases = purchaseList.filter(p => {
-        const pDate = p.billing_date || p.purchase_date || ''
-        return pDate >= from && pDate <= to
-      })
+    const allPurchases = await getPurchases(Number(companyId))
+    console.log('allPurchases raw:', allPurchases)
 
-      setLoadingProgress(`Found ${monthPurchases.length} purchase(s). Loading items…`)
+    const purchaseList = Array.isArray(allPurchases)
+      ? allPurchases
+      : (allPurchases?.results || allPurchases?.data || [])
+    console.log('purchaseList length:', purchaseList.length)
+    console.log('purchaseList sample:', purchaseList[0])
 
-      const gItems = []
-      const cItems = []
+    const monthPurchases = purchaseList.filter(p => {
+      const raw = p.billing_date || p.purchase_date
+      if (!raw) return false
+      const pDate = typeof raw === 'string' ? raw.slice(0, 10) : format(new Date(raw), 'yyyy-MM-dd')
+      return pDate >= from && pDate <= to
+    })
+    console.log('monthPurchases length:', monthPurchases.length)
 
-      for (let i = 0; i < monthPurchases.length; i++) {
-        const p = monthPurchases[i]
-        const dest = (p.stock_destination || 'GODOWN').toUpperCase()
-        const pDate = p.billing_date || p.purchase_date || ''
+    setLoadingProgress(`Found ${monthPurchases.length} purchase(s). Loading items…`)
 
-        setLoadingProgress(`Loading items ${i + 1}/${monthPurchases.length}…`)
+    const gItems = []
+    const cItems = []
 
-        try {
-          const rawItems = await getPurchaseItems(p.id)
-          // ✅ Attach purchase date directly to each item
-          const items = (rawItems || []).map(normalizeItem).map(item => ({
-            ...item,
-            _date: pDate,
-          }))
+    for (let i = 0; i < monthPurchases.length; i++) {
+      const p = monthPurchases[i]
+      const dest = (p.stock_destination || 'GODOWN').toUpperCase()
 
-          if (dest === 'COUNTER') {
-            cItems.push(...items)
-          } else {
-            gItems.push(...items)
-          }
-        } catch (err) {
-          console.warn(`Failed to load items for purchase ${p.id}:`, err)
-        }
+      const rawDate = p.billing_date || p.purchase_date || ''
+      const pDate = typeof rawDate === 'string'
+        ? rawDate.slice(0, 10)
+        : format(new Date(rawDate), 'yyyy-MM-dd')
+
+      setLoadingProgress(`Loading items ${i + 1}/${monthPurchases.length}…`)
+
+      try {
+        const rawItems = await getPurchaseItems(p.id)
+        console.log(`Purchase ${p.id} items raw:`, rawItems)
+
+        const items = (rawItems || []).map(normalizeItem).map(item => ({
+          ...item,
+          _date: pDate,
+        }))
+        console.log(`Purchase ${p.id} normalized items:`, items)
+
+        if (dest === 'COUNTER') cItems.push(...items)
+        else gItems.push(...items)
+      } catch (err) {
+        console.warn(`Failed to load items for purchase ${p.id}:`, err)
       }
-
-      setGodownItems(gItems)
-      setCounterItems(cItems)
-      setLoadingProgress('')
-    } catch (err) {
-      setError(err.message || 'Failed to load purchase data')
-    } finally {
-      setLoading(false)
-      setLoadingProgress('')
     }
+
+    console.log('gItems:', gItems)
+    console.log('cItems:', cItems)
+
+    setGodownItems(gItems)
+    setCounterItems(cItems)
+    setLoadingProgress('')
+  } catch (err) {
+    console.error('fetchAllData error:', err)
+    setError(err.message || 'Failed to load purchase data')
+  } finally {
+    setLoading(false)
+    setLoadingProgress('')
   }
+}
+
+//   const fetchAllData = async () => {
+//     setLoading(true)
+//     setError('')
+//     setGodownItems([])
+//     setCounterItems([])
+//     try {
+//       const m = parse(selectedMonth, 'yyyy-MM', new Date())
+//       const from = format(startOfMonth(m), 'yyyy-MM-dd')
+//       const to = format(endOfMonth(m), 'yyyy-MM-dd')
+
+//       const allPurchases = await getPurchases(Number(companyId))
+//       const purchaseList = Array.isArray(allPurchases) ? allPurchases : (allPurchases?.results || allPurchases?.data || [])
+
+//       // Filter by selected month
+//       const monthPurchases = purchaseList.filter(p => {
+//   const raw = p.billing_date || p.purchase_date
+//   if (!raw) return false
+//   // Force to yyyy-MM-dd string regardless of what the API returns
+//   const pDate = typeof raw === 'string' ? raw.slice(0, 10) : format(new Date(raw), 'yyyy-MM-dd')
+//   return pDate >= from && pDate <= to
+// })
+
+//       setLoadingProgress(`Found ${monthPurchases.length} purchase(s). Loading items…`)
+
+//       const gItems = []
+//       const cItems = []
+
+//       for (let i = 0; i < monthPurchases.length; i++) {
+//   const p = monthPurchases[i]
+//   const dest = (p.stock_destination || 'GODOWN').toUpperCase()
+
+//   // ✅ Always a plain yyyy-MM-dd string
+//   const rawDate = p.billing_date || p.purchase_date || ''
+//   const pDate = typeof rawDate === 'string'
+//     ? rawDate.slice(0, 10)
+//     : format(new Date(rawDate), 'yyyy-MM-dd')
+
+//   setLoadingProgress(`Loading items ${i + 1}/${monthPurchases.length}…`)
+
+//   try {
+//     const rawItems = await getPurchaseItems(p.id)
+//     const items = (rawItems || []).map(normalizeItem).map(item => ({
+//       ...item,
+//       _date: pDate,
+//     }))
+
+//     if (dest === 'COUNTER') cItems.push(...items)
+//     else gItems.push(...items)
+//   } catch (err) {
+//     console.warn(`Failed to load items for purchase ${p.id}:`, err)
+//   }
+// }
+
+//       setGodownItems(gItems)
+//       setCounterItems(cItems)
+//       setLoadingProgress('')
+//     } catch (err) {
+//       setError(err.message || 'Failed to load purchase data')
+//     } finally {
+//       setLoading(false)
+//       setLoadingProgress('')
+//     }
+//   }
 
   // ─── Build matrix from items (uses item._date, no purchaseMap needed) ───
   const buildMatrix = useCallback((items) => {
@@ -180,11 +278,15 @@ export default function ItemWisePurchaseReport() {
 
       // ✅ Use _date attached during fetch — no .find() needed
       let dayKey = null
-      if (item._date) {
-        try {
-          dayKey = format(new Date(item._date + 'T00:00:00'), 'yyyy-MM-dd')
-        } catch { /* skip */ }
-      }
+if (item._date) {
+  try {
+    // Handles both "2024-01-15" and Date objects safely
+    const d = item._date instanceof Date
+      ? item._date
+      : new Date(String(item._date).slice(0, 10) + 'T00:00:00')
+    if (!isNaN(d.getTime())) dayKey = format(d, 'yyyy-MM-dd')
+  } catch { /* skip */ }
+}
 
       if (dayKey && mat[name][dayKey] !== undefined) {
         mat[name][dayKey].bottles += item.total_bottles || 0

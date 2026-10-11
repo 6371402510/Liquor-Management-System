@@ -248,3 +248,106 @@ def create_company_transfer(db: Session, data: CompanyTransferCreate):
     except Exception as e:
         db.rollback()
         raise e
+
+
+
+def _generate_invoice_number(db: Session, transfer: CompanyStockTransfer) -> str:
+    """Generate invoice number based on transfer."""
+    # Format: INV-CST-YYYYMMDD-XXXX
+    date_part = transfer.transfer_date.strftime("%Y%m%d") if transfer.transfer_date else datetime.now().strftime("%Y%m%d")
+    seq = str(transfer.id).zfill(4)
+    return f"INV-{transfer.transfer_number}"
+
+
+# ─────────────────────────────────────────────
+# BUILD INVOICE FROM TRANSFER
+# ─────────────────────────────────────────────
+def build_transfer_invoice(db: Session, transfer_id: int) -> dict:
+    """Build a complete invoice payload from a transfer."""
+    transfer = get_company_transfer(db, transfer_id)
+    if not transfer:
+        raise ValueError("Transfer not found")
+
+    items = get_company_transfer_items(db, transfer_id)
+
+    # Fetch company details (for address / GST / phone)
+    from_company = db.query(Company).filter(Company.id == transfer.from_company_id).first()
+    to_company = db.query(Company).filter(Company.id == transfer.to_company_id).first()
+
+    invoice_items = []
+    subtotal = 0.0
+    total_cases = 0
+    total_units = 0
+
+    for it in items:
+        # Fetch source product to get rate (purchase_rate or landing_cost or mrp)
+        product = db.query(Product).filter(Product.id == it.from_product_id).first()
+
+        bpc = it.bottles_per_case or (product.bottles_per_case if product else 0) or 1
+        cases = it.cases or 0
+
+        # If cases not provided, derive from quantity
+        if cases == 0 and it.quantity > 0 and bpc > 0:
+            cases = it.quantity // bpc
+
+        units = it.quantity or 0
+
+        # Rate per case: use product purchase_rate * bottles_per_case
+        # Fallback chain: landing_cost -> purchase_rate -> sale_price -> mrp -> 0
+        rate_per_bottle = 0.0
+        if product:
+            rate_per_bottle = (
+                product.landing_cost
+                or product.purchase_rate
+                or product.sale_price
+                or product.mrp
+                or 0.0
+            )
+
+        rate_per_case = round(rate_per_bottle * bpc, 2)
+
+        # Amount = cases * rate_per_case (or units * rate_per_bottle)
+        if cases > 0:
+            amount = round(cases * rate_per_case, 2)
+        else:
+            amount = round(units * rate_per_bottle, 2)
+
+        subtotal += amount
+        total_cases += cases
+        total_units += units
+
+        invoice_items.append({
+            "product_name": it.product_name,
+            "bottle_size": it.bottle_size,
+            "rate_per_case": rate_per_case,
+            "quantity_cases": cases,
+            "quantity_units": units,
+            "total_amount": amount,
+        })
+
+    return {
+        "invoice_number": _generate_invoice_number(db, transfer),
+        "transfer_number": transfer.transfer_number,
+        "transfer_date": transfer.transfer_date,
+
+        "from_company_id": transfer.from_company_id,
+        "from_company_name": transfer.from_company_name,
+        "from_company_address": getattr(from_company, "address", None) if from_company else None,
+        "from_company_gst": getattr(from_company, "gst_number", None) if from_company else None,
+        "from_company_phone": getattr(from_company, "phone", None) if from_company else None,
+
+        "to_company_id": transfer.to_company_id,
+        "to_company_name": transfer.to_company_name,
+        "to_company_address": getattr(to_company, "address", None) if to_company else None,
+        "to_company_gst": getattr(to_company, "gst_number", None) if to_company else None,
+        "to_company_phone": getattr(to_company, "phone", None) if to_company else None,
+
+        "vehicle_number": transfer.vehicle_number,
+        "notes": transfer.notes,
+
+        "items": invoice_items,
+        "subtotal": round(subtotal, 2),
+        "total_cases": total_cases,
+        "total_units": total_units,
+        "grand_total": round(subtotal, 2),
+    }

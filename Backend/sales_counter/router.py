@@ -11,7 +11,8 @@ from .service import (
     get_sales_report_service,
     get_sale_by_id,
     update_sale,
-    update_product_mrp,  # ← NEW import
+    update_product_mrp, 
+     delete_sale, # ← NEW import
 )
 from .model import Sale
 from inventory.schema import ProductResponse
@@ -90,3 +91,14 @@ def update_mrp_endpoint(request: UpdateMrpRequest, db: Session = Depends(get_db)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update MRP: {str(e)}")
+
+
+@router.delete("/{sale_id}")
+def delete_sale_endpoint(sale_id: int, db: Session = Depends(get_db)):
+    try:
+        return delete_sale(db, sale_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete sale: {str(e)}")

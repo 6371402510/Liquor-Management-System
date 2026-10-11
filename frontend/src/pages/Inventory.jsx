@@ -8,8 +8,8 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 
 // Import API functions
-import { getProducts, createProduct, updateProduct, deleteProduct } from '../apiservices/inventoryapi'
-
+import { getProducts, createProduct, updateProduct, deleteProduct , createProductForAllCompanies, updateProductEverywhere} from '../apiservices/inventoryapi'
+import { getCompanies } from '../apiservices/companyapi' 
 // ─── Dropdown Constants ───
 const CATEGORIES = ['WHISKY', 'RUM', 'VODKA', 'GIN', 'BEER', 'WINE', 'BRANDY','SCOTCH WHISKY', 'OTHER']
 
@@ -441,6 +441,23 @@ const [lastPurchaseRate, setLastPurchaseRate] = useState(0)
   const [companyId, setCompanyId] = useState(() => localStorage.getItem('selectedCompanyId') || null)
   const companyName = localStorage.getItem('selectedCompanyName') || 'Unknown Company'
 
+
+  const [applyToAllCompanies, setApplyToAllCompanies] = useState(false)
+const [allCompanies, setAllCompanies] = useState([])
+const [syncToAllCompanies, setSyncToAllCompanies] = useState(false)
+
+useEffect(() => {
+  const fetchCompanies = async () => {
+    try {
+      const data = await getCompanies()
+      setAllCompanies(data || [])
+    } catch (err) {
+      console.error('Failed to fetch companies:', err)
+      setAllCompanies([])
+    }
+  }
+  fetchCompanies()
+}, [])
   // Listen for localStorage changes
   useEffect(() => {
     const syncCompanyId = () => {
@@ -895,101 +912,134 @@ const updateLandingCostsFromLastPurchase = async () => {
 
 
 
-   const handleExcelUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    
-    if (!companyId) {
-      alert('Please select a company first before importing.')
+  const handleExcelUpload = async (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+
+  if (!companyId) {
+    alert('Please select a company first before importing.')
+    return
+  }
+
+  // Ask user
+  const addToAll = confirm(
+    `Import products to ALL ${allCompanies.length} companies?\n\n` +
+    `OK = Add to all companies\n` +
+    `Cancel = Add only to "${companyName}"`
+  )
+
+  const reader = new FileReader()
+  reader.onload = async (evt) => {
+    const bstr = evt.target.result
+    const wb = XLSX.read(bstr, { type: 'binary', cellDates: true })
+    const wsname = wb.SheetNames[0]
+    const ws = wb.Sheets[wsname]
+    const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' })
+
+    if (data.length === 0) {
+      alert('No data found in the Excel file.')
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = async (evt) => {
-      const bstr = evt.target.result
-      const wb = XLSX.read(bstr, { type: 'binary', cellDates: true })
-      const wsname = wb.SheetNames[0]
-      const ws = wb.Sheets[wsname]
-      const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' })
-      
-      if (data.length === 0) {
-        alert('No data found in the Excel file.')
-        return
-      }
+    setLoading(true)
+    let successCount = 0
+    let failCount = 0
+    const errors = []
 
-      setLoading(true)
-      let successCount = 0
-      let failCount = 0
-      const errors = []
+    const companyIds = addToAll
+      ? allCompanies.map(c => c.id)
+      : [Number(companyId)]
 
-      // Loop through all rows
-      for (let i = 0; i < data.length; i++) {
-        const payload = mapRowToProduct(data[i])
-        
-        try {
+    for (let i = 0; i < data.length; i++) {
+      const payload = mapRowToProduct(data[i])
+
+      try {
+        if (addToAll && companyIds.length > 1) {
+          await createProductForAllCompanies(payload, companyIds)
+        } else {
           await createProduct(payload)
-          successCount++
-        } catch (err) {
-          failCount++
-          // Capture the error and row number for the summary
-          errors.push(`Row ${i + 2}: ${err.message || 'Unknown error'}`)
         }
+        successCount++
+      } catch (err) {
+        failCount++
+        errors.push(`Row ${i + 2}: ${err.message || 'Unknown error'}`)
       }
-
-      setLoading(false)
-      fetchProducts() // Refresh the table with new products
-      
-      // Show Import Summary
-      let summaryMessage = `Import Complete!\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}`
-      if (errors.length > 0 && errors.length <= 5) {
-        summaryMessage += `\n\nErrors:\n${errors.join('\n')}`
-      } else if (errors.length > 5) {
-        summaryMessage += `\n\nFirst 5 errors:\n${errors.slice(0, 5).join('\n')}\n...and ${errors.length - 5} more.`
-      }
-      
-      alert(summaryMessage)
     }
-    
-    reader.readAsBinaryString(file)
-    e.target.value = '' // Reset file input
+
+    setLoading(false)
+    fetchProducts()
+
+    let summaryMessage = `Import Complete!\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}`
+    if (addToAll) {
+      summaryMessage = `Import Complete (ALL ${companyIds.length} companies)!\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}`
+    }
+    if (errors.length > 0 && errors.length <= 5) {
+      summaryMessage += `\n\nErrors:\n${errors.join('\n')}`
+    } else if (errors.length > 5) {
+      summaryMessage += `\n\nFirst 5 errors:\n${errors.slice(0, 5).join('\n')}\n...and ${errors.length - 5} more.`
+    }
+
+    alert(summaryMessage)
   }
+
+  reader.readAsBinaryString(file)
+  e.target.value = ''
+}
 
   const handleSave = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    setError('')
+  e.preventDefault()
+  setSaving(true)
+  setError('')
 
-    const payload = {
-      ...form,
-      company_id: Number(companyId),
-      purchase_rate: Number(form.purchase_rate) || 0, landing_cost: Number(form.landing_cost) || 0,
-      mrp: Number(form.mrp) || 0, sale_price: Number(form.sale_price) || 0,
-      discount_percent: Number(form.discount_percent) || 0, VAT_rate: Number(form.VAT_rate) || 0,
-      margin_percent: Number(form.margin_percent) || 0, opening_stock: Number(form.opening_stock) || 0,
-      current_stock: Number(form.current_stock) || 0,
-      godown_stock: Number(form.godown_stock) || 0,
-      counter_stock: Number(form.counter_stock) || 0,
-      reorder_level: Number(form.reorder_level) || 0,
-      maximum_stock: Number(form.maximum_stock) || 0, damage_stock: Number(form.damage_stock) || 0,
-      reserved_stock: Number(form.reserved_stock) || 0, barcode_print_qty: Number(form.barcode_print_qty) || 1,
-      bottles_per_case: Number(form.bottles_per_case) || 0,
-      store_id: form.store_id || null,
-    }
-
-    try {
-      if (editingId) {
-        await updateProduct(editingId, payload)
-      } else {
-        await createProduct(payload)
-      }
-      setShowModal(false)
-      fetchProducts()
-    } catch (err) {
-      setError(err.message || 'Failed to save product. Check if Item Code/Barcode already exists.')
-    } finally {
-      setSaving(false)
-    }
+  const payload = {
+    ...form,
+    company_id: Number(companyId),
+    purchase_rate: Number(form.purchase_rate) || 0,
+    landing_cost: Number(form.landing_cost) || 0,
+    mrp: Number(form.mrp) || 0,
+    sale_price: Number(form.sale_price) || 0,
+    discount_percent: Number(form.discount_percent) || 0,
+    VAT_rate: Number(form.VAT_rate) || 0,
+    margin_percent: Number(form.margin_percent) || 0,
+    opening_stock: Number(form.opening_stock) || 0,
+    current_stock: Number(form.current_stock) || 0,
+    godown_stock: Number(form.godown_stock) || 0,
+    counter_stock: Number(form.counter_stock) || 0,
+    reorder_level: Number(form.reorder_level) || 0,
+    maximum_stock: Number(form.maximum_stock) || 0,
+    damage_stock: Number(form.damage_stock) || 0,
+    reserved_stock: Number(form.reserved_stock) || 0,
+    barcode_print_qty: Number(form.barcode_print_qty) || 1,
+    bottles_per_case: Number(form.bottles_per_case) || 0,
+    store_id: form.store_id || null,
   }
+
+ try {
+  if (editingId) {
+    if (syncToAllCompanies) {
+      const updated = await updateProductEverywhere(editingId, payload)
+      alert(`✅ Product updated and synced to all companies.`)
+    } else {
+      await updateProduct(editingId, payload)
+    }
+  } else if (applyToAllCompanies && allCompanies.length > 0) {
+    const companyIds = allCompanies.map(c => c.id)
+    await createProductForAllCompanies(payload, companyIds)
+    alert(`✅ Product added to all ${companyIds.length} companies!`)
+  } else {
+    await createProduct(payload)
+  }
+
+  setShowModal(false)
+  setApplyToAllCompanies(false)
+  setSyncToAllCompanies(false)
+  fetchProducts()
+} catch (err) {
+  setError(err.message || 'Failed to save product.')
+} finally {
+  setSaving(false)
+}
+}
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this product?')) return
@@ -1309,10 +1359,10 @@ const updateLandingCostsFromLastPurchase = async () => {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead>
+            <thead className='sticky '>
               <tr className="border-b border-gray-100 dark:border-gray-800">
                 {[{ label: 'Item Code', field: 'item_code' },
-                  { label: 'Product', field: 'name' },
+                  { label: 'Product', field: 'name' }, 
                   
                   { label: 'Godown', field: 'godown_stock' },
                   { label: 'Counter', field: 'counter_stock' },
@@ -1449,7 +1499,42 @@ const updateLandingCostsFromLastPurchase = async () => {
                 <X className="w-4 h-4" />
               </button>
             </div>
+{!editingId && (
+  <div className="mx-6 mt-4 flex items-center gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+    <input
+      type="checkbox"
+      id="applyAll"
+      checked={applyToAllCompanies}
+      onChange={e => setApplyToAllCompanies(e.target.checked)}
+      className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+    />
+    <label htmlFor="applyAll" className="text-sm text-amber-700 dark:text-amber-400 cursor-pointer">
+      <strong>Add this product to ALL {allCompanies.length} companies</strong>
+      <span className="block text-xs text-amber-600 dark:text-amber-500 mt-0.5">
+        The product will be created in every company with the same item code.
+      </span>
+    </label>
+  </div>
+)}
 
+{editingId && (
+  <div className="mx-6 mt-4 flex items-center gap-2 p-3 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+    <input
+      type="checkbox"
+      id="syncAll"
+      checked={syncToAllCompanies}
+      onChange={e => setSyncToAllCompanies(e.target.checked)}
+      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+    />
+    <label htmlFor="syncAll" className="text-sm text-indigo-700 dark:text-indigo-400 cursor-pointer">
+      <strong>Sync Purchase Rate / MRP / Master Data to ALL companies</strong>
+      <span className="block text-xs text-indigo-600 dark:text-indigo-500 mt-0.5">
+        Matches by <code>item_code</code>. Sale price, stock, and reorder level
+        stay local to each store.
+      </span>
+    </label>
+  </div>
+)}
             {error && (
               <div className="mx-6 mt-4 flex items-center gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
                 <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
@@ -1499,7 +1584,7 @@ const updateLandingCostsFromLastPurchase = async () => {
                     <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
                   </div>
                               <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Company/Supplier</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Company/ Supplier</label>
                     <CompanySupplierDropdown
                       value={form.short_name}
                       onChange={(val) => setForm(f => ({ ...f, short_name: val }))}

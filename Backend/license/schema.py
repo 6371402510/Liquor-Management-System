@@ -1,6 +1,5 @@
 from datetime import date, datetime
 from typing import Optional
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -14,6 +13,7 @@ class LicenseResponse(BaseModel):
     start_date: date
     end_date: date
     is_active: bool
+    max_companies: Optional[int] = None   # ← NEW
     created_at: datetime
     updated_at: Optional[datetime]
 

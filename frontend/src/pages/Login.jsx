@@ -280,6 +280,16 @@ export default function Login() {
 
             {/* ─── LICENSE SECTION ──────────────────────────── */}
             <div className="mt-6 rounded-xl bg-white/10 border border-white/20 overflow-hidden">
+              {license?.max_companies != null && (
+                <p className="text-gray-500 text-[10px] mt-0.5 tracking-wide">
+                  Max Companies: {license.max_companies}
+                </p>
+              )}
+              {license?.max_companies == null && license && (
+                <p className="text-gray-500 text-[10px] mt-0.5 tracking-wide">
+                  Max Companies: Unlimited
+                </p>
+              )}
               {licenseLoading ? (
                 <div className="flex items-center justify-center gap-2 px-6 py-4">
                   <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />
@@ -615,7 +625,7 @@ export default function Login() {
       {/* ═══════════════════════════════════════════════════════
           ACTIVATION MODAL
           ═══════════════════════════════════════════════════════ */}
-            {/* ═══════════════════════════════════════════════════════
+      {/* ═══════════════════════════════════════════════════════
           ACTIVATION MODAL
           ═══════════════════════════════════════════════════════ */}
       {showActivateModal && (

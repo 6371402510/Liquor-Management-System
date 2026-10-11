@@ -79,6 +79,11 @@ class ProductUpdate(ProductBase):
     sort_key: Optional[str] = None
     unit: Optional[str] = None
 
+
+class BulkProductCreate(BaseModel):
+    product_data: ProductCreate      # ← renamed from "product"
+    company_ids: list[int]
+
 class ProductResponse(ProductBase):
     id: int
     item_id: Optional[int] = None

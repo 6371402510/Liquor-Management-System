@@ -24,19 +24,18 @@ def list_companies(
 
 @router.post("/", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 def create_new_company(
-    company_data: CompanyCreate, 
+    company_data: CompanyCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin) # Only Admins create shops
-):
-    # Assign ownership to the logged-in Admin
-    company = create_company(db, company_data, owner_id=current_user.id)
-    if not company:
-        raise HTTPException(status_code=400, detail="Company with this GSTIN/License already exists")
-    return company
-
-# (Keep update and delete, but add dependency: current_user: User = Depends(require_admin))
-
-
+    current_user: User = Depends(require_admin)
+                                                ):
+    try:
+        company = create_company(db, company_data, owner_id=current_user.id)
+        if not company:
+            raise HTTPException(status_code=400, detail="Company with this GSTIN/License already exists")
+        return company
+    except ValueError as e:
+        # ← catches "Company limit reached…"
+        raise HTTPException(status_code=403, detail=str(e))
 @router.put("/{company_id}", response_model=CompanyResponse)
 def update_existing_company(
     company_id: int,

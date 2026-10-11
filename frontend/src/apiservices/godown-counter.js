@@ -102,3 +102,7 @@ export const updateProductMrp = async (productId, companyId, newMrp) => {
   if (!res.ok) throw new Error(data.detail || 'Failed to update MRP')
   return data
 }
+
+
+export const extractGodownSaleItems = (sale) =>
+  sale?.items || sale?.sale_items || sale?.lines || []

@@ -98,7 +98,7 @@ export default function MGRReport() {
       'Achievement %': reportData.stats.percentage,
       'Days Left': reportData.stats.days_left,
       'Daily Target Needed': reportData.stats.daily_target_needed,
-      'Total MGR (All Time)': reportData.stats.total_mgr_all_time,
+      'Total MGer(All Time)': reportData.stats.total_mgr_all_time,
       'Purchase Count': reportData.stats.purchase_count,
     }]
     const ws1 = XLSX.utils.json_to_sheet(summaryData)
@@ -122,7 +122,7 @@ export default function MGRReport() {
       'Invoice No.': p.invoice_number,
       'Billing Date': p.billing_date || '',
       'Supplier': p.supplier_name || '',
-      'MGR Value': p.mgr_value,
+      'MGER Value': p.mgr_value,
       'Created At': p.created_at ? format(new Date(p.created_at), 'dd MMM yyyy HH:mm') : '',
     }))
     const ws3 = XLSX.utils.json_to_sheet(purchaseData)
@@ -156,7 +156,7 @@ export default function MGRReport() {
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
         <AlertCircle className="w-12 h-12 text-amber-500" />
         <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">No Company Selected</h3>
-        <p className="text-sm text-gray-500 text-center max-w-md">Please select a company to view MGR reports.</p>
+        <p className="text-sm text-gray-500 text-center max-w-md">Please select a company to view MGER reports.</p>
       </div>
     )
   }
@@ -169,7 +169,7 @@ export default function MGRReport() {
           <div>
             <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
               <Target className="w-5 h-5 text-emerald-500" />
-              MGR Report
+              MGER Report
             </h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Monthly Government Revenue tracking with carryover
@@ -316,7 +316,7 @@ export default function MGRReport() {
           <div className="card p-4 border dark:border-slate-700">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
-                MGR Achievement Progress
+                MGER Achievement Progress
               </span>
               <span className="text-xs text-gray-500">
                 {reportData.current_month}
@@ -524,7 +524,7 @@ export default function MGRReport() {
               {reportData.purchase_breakdown.length === 0 ? (
                 <div className="p-10 text-center">
                   <Package className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-                  <p className="text-sm text-gray-400 dark:text-gray-500">No purchases with MGR value this month</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">No purchases with MGER value this month</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -535,7 +535,7 @@ export default function MGRReport() {
                         <th className="p-3 text-left font-semibold">Invoice No.</th>
                         <th className="p-3 text-left font-semibold">Billing Date</th>
                         <th className="p-3 text-left font-semibold">Supplier</th>
-                        <th className="p-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">MGR Value</th>
+                        <th className="p-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">MGER Value</th>
                         <th className="p-3 text-right font-semibold">Cumulative</th>
                       </tr>
                     </thead>

@@ -148,7 +148,7 @@ def get_operations_dashboard_data(db: Session, date_from: Optional[str] = None, 
 
         # Calculate Taxes based on COGS
         store_vat = store_cogs * 0.35                       # VAT at 35% of Purchase Rate
-        store_tcs = (store_cogs + store_vat) * 0.027        # TCS at 2.7% of (Purchase Rate + VAT)
+        store_tcs = (store_cogs + store_vat) * 0.02        #  TCS  = (COGS + VAT) × 2%
 
         # New Profit Formula
         store_profit = store_sales - store_cogs - store_vat - store_tcs - store_expense

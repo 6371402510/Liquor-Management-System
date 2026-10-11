@@ -1,5 +1,8 @@
 import { useState, useEffect, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { getLicenseStatus } from '../apiservices/license'
+import clsx from 'clsx'
+
 import {
   Building2, Clock, Plus, ChevronDown, ChevronUp, Save, Loader2,
   ShieldCheck, Settings, Landmark, ArrowLeft, LayoutDashboard, AlertCircle, Edit3, Trash2, Target
@@ -40,12 +43,21 @@ export default function Companies() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [expandedId, setExpandedId] = useState(null)
+   const [maxCompanies, setMaxCompanies] = useState(null)
+
 
   const navigate = useNavigate()
 
   useEffect(() => {
     fetchCompanies()
+     getLicenseStatus()
+      .then(d => setMaxCompanies(d.max_companies ?? null))
+      .catch(() => setMaxCompanies(null))
   }, [])
+
+  const limitReached =
+    maxCompanies !== null && companies.length >= maxCompanies
+
 
   const fetchCompanies = async () => {
     setLoading(true)
@@ -151,11 +163,32 @@ export default function Companies() {
           <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Company Management</h2>
         </div>
 
-        {!showForm && (
-          <button onClick={() => { handleCancelForm(); setShowForm(true); }} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Add Company
-          </button>
-        )}
+       {!showForm && (
+  <button
+    onClick={() => {
+      if (limitReached) {
+        alert(`Your license allows a maximum of ${maxCompanies} companies. Please upgrade to add more.`)
+        return
+      }
+      handleCancelForm()
+      setShowForm(true)
+    }}
+    disabled={limitReached}
+    className={clsx(
+      "btn-primary flex items-center gap-2",
+      limitReached && "opacity-40 cursor-not-allowed"
+    )}
+    title={limitReached ? `Limit: ${maxCompanies} companies` : "Add Company"}
+  >
+    <Plus className="w-4 h-4" />
+    Add Company
+    {maxCompanies !== null && (
+      <span className="ml-1 text-xs bg-white/20 px-1.5 py-0.5 rounded">
+        {companies.length}/{maxCompanies}
+      </span>
+    )}
+  </button>
+)}
       </div>
 
       {/* Global Error Message */}
@@ -382,7 +415,15 @@ export default function Companies() {
           </form>
         </div>
       )}
-
+{limitReached && !showForm && (
+  <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+    <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+    <p className="text-sm text-amber-700 dark:text-amber-400">
+      You've reached your license limit of <strong>{maxCompanies}</strong> compan
+      {maxCompanies === 1 ? 'y' : 'ies'}. Delete one or activate a new license key to add more.
+    </p>
+  </div>
+)}
       {/* COMPANY LIST PAGE */}
       {!showForm && (
         <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">

@@ -154,3 +154,31 @@ def update_product_mrp(db: Session, product_id: int, company_id: int, new_mrp: f
         "new_mrp": new_mrp,
         "sale_price": product.sale_price,
     }
+
+
+
+
+def delete_sale(db: Session, sale_id: int):
+    db_sale = db.query(Sale).filter(Sale.id == sale_id).first()
+    if not db_sale:
+        raise ValueError(f"Sale with ID {sale_id} not found")
+
+    # ─── Restore stock for all items before deleting ───
+    old_items = db.query(SaleItem).filter(SaleItem.sale_id == sale_id).all()
+    for old_item in old_items:
+        product = db.query(Product).filter(Product.id == old_item.product_id).first()
+        if product:
+            product.counter_stock = (product.counter_stock or 0) + old_item.quantity
+            product.current_stock = (product.godown_stock or 0) + (product.counter_stock or 0)
+            db.add(product)
+
+    # ─── Delete sale (cascade will remove items) ───
+    db.delete(db_sale)
+    db.commit()
+
+    return {
+        "success": True,
+        "deleted_sale_id": sale_id,
+        "invoice_number": db_sale.invoice_number,
+        "items_restored": len(old_items),
+    }

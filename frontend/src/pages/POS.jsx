@@ -438,44 +438,44 @@ export default function POS() {
     .filter(item => selectedItems.includes(item.scanId))
     .reduce((sum, item) => sum + ((item.sale_price - (item.discount || 0)) * (item.quantity || 1)), 0);
 
-const handleBarcodeInput = async () => {
-  const input = barcodeValue.trim();
-  if (!input) return;
+  const handleBarcodeInput = async () => {
+    const input = barcodeValue.trim();
+    if (!input) return;
 
-  // ─── 1st: Try exact barcode match ───
-  let product = products.find(p => p.barcode === input);
+    // ─── 1st: Try exact barcode match ───
+    let product = products.find(p => p.barcode === input);
 
-  // ─── 2nd: Try exact sort_key match (the NEW feature) ───
-  if (!product) {
-    product = products.find(p => p.sort_key === input);
-  }
-
-  // ─── 3rd: Try local DB barcode ───
-  if (!product) {
-    try {
-      product = await db.products.where('barcode').equals(input).first();
-    } catch (err) {
-      console.error("Local DB search failed:", err);
+    // ─── 2nd: Try exact sort_key match (the NEW feature) ───
+    if (!product) {
+      product = products.find(p => p.sort_key === input);
     }
-  }
 
-  // ─── 4th: Try local DB sort_key ───
-  if (!product) {
-    try {
-      product = await db.products.where('sort_key').equals(input).first();
-    } catch (err) {
-      console.error("Local DB sort_key search failed:", err);
+    // ─── 3rd: Try local DB barcode ───
+    if (!product) {
+      try {
+        product = await db.products.where('barcode').equals(input).first();
+      } catch (err) {
+        console.error("Local DB search failed:", err);
+      }
     }
-  }
 
-  if (product) {
-    addToCart(product);
-  } else {
-    alert('Product not found or not in counter stock');
-  }
+    // ─── 4th: Try local DB sort_key ───
+    if (!product) {
+      try {
+        product = await db.products.where('sort_key').equals(input).first();
+      } catch (err) {
+        console.error("Local DB sort_key search failed:", err);
+      }
+    }
 
-  setBarcodeValue('');
-};
+    if (product) {
+      addToCart(product);
+    } else {
+      alert('Product not found or not in counter stock');
+    }
+
+    setBarcodeValue('');
+  };
 
   const clearPersistedSale = () => {
     // ─── ADDED: Check if we need to restore backup ───
@@ -764,17 +764,17 @@ const handleBarcodeInput = async () => {
       }
 
       const printGroups = {};
-let totalAmountCalc = 0;
-itemsToPrint.forEach(item => {
-    if (!printGroups[item.productId]) {
-        printGroups[item.productId] = { name: item.name, sale_price: item.sale_price, qty: 0, totalDiscount: 0, lineTotal: 0 };
-    }
-    const itemQty = item.quantity || 1;  // ✅ Get actual quantity
-    printGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
-    printGroups[item.productId].totalDiscount += (item.discount || 0) * itemQty;  // ✅ Multiply discount by qty
-    printGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
-    totalAmountCalc += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
-});
+      let totalAmountCalc = 0;
+      itemsToPrint.forEach(item => {
+        if (!printGroups[item.productId]) {
+          printGroups[item.productId] = { name: item.name, sale_price: item.sale_price, qty: 0, totalDiscount: 0, lineTotal: 0 };
+        }
+        const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+        printGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+        printGroups[item.productId].totalDiscount += (item.discount || 0) * itemQty;  // ✅ Multiply discount by qty
+        printGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
+        totalAmountCalc += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
+      });
 
       let itemsHtml = '';
 
@@ -785,7 +785,9 @@ itemsToPrint.forEach(item => {
 
         itemsHtml += `
         <div style="margin-bottom:6px;">
-          <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.name}</div>
+          <div style="font-weight:bold; text-transform:uppercase; font-size:12px; white-space:normal; word-wrap:break-word;">
+  ${g.name}
+</div>
           <div style="display:flex; justify-content:space-between; font-size:11px;">
             <span>₹${g.sale_price.toFixed(2)} x ${g.qty}</span>
             <span>₹${(g.sale_price * g.qty).toFixed(2)}</span>
@@ -868,9 +870,17 @@ itemsToPrint.forEach(item => {
 
             <!-- Header -->
             <div style="text-align:center; margin-bottom:5px;">
-              <h2 style="margin:0; font-size:16px; text-transform:uppercase; letter-spacing:1px;">${companyName}</h2>
-              ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal;">${cAddress}</p>` : ''}
-              ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px;">Email: ${cEmail}</p>` : ''}
+             <h2 style="
+  margin:0;
+  font-size:16px;
+  text-transform:uppercase;
+  letter-spacing:1px;
+  line-height:1.3;
+">
+  ${companyName.replace(/\s{2,}/g, '<br>')}
+</h2>
+              ${cAddress ? `<p style="margin:2px 0 0 0; font-size:10px; white-space:normal; font-weight:bold">${cAddress}</p>` : ''}
+              ${cEmail ? `<p style="margin:2px 0 0 0; font-size:10px; font-weight:bold;">Email: ${cEmail}</p>` : ''}
               ${cExcise ? `<p style="margin:2px 0 0 0; font-size:11px; font-weight:bold;">Shop Lic No: ${cExcise}</p>` : ''}
 
               <p style="margin:4px 0 0 0; font-size:10px; font-weight:bold;">SALE BILL</p>
@@ -879,10 +889,10 @@ itemsToPrint.forEach(item => {
 
             <!-- Info -->
             <div style="font-size:11px; margin-bottom:5px;">
-              <div style="display:flex; justify-content:space-between;"><span>Bill No:</span><span>${invoiceNumber}</span></div>
-              <div style="display:flex; justify-content:space-between;"><span>Date:</span><span>${printDate}</span></div>
-              <div style="display:flex; justify-content:space-between;"><span>Customer:</span><span>${cName}</span></div>
-              ${cPhone !== 'N/A' ? `<div style="display:flex; justify-content:space-between;"><span>Phone:</span><span>${cPhone}</span></div>` : ''}
+              <div style="display:flex; justify-content:space-between;"><span>Bill No:</span><span style="font-weight:bold;">${invoiceNumber}</span></div>
+              <div style="display:flex; justify-content:space-between;"><span>Date:</span><span style="font-weight:bold;">${printDate}</span></div>
+              <div style="display:flex; justify-content:space-between;"><span>Customer:</span><span style="font-weight:bold;">${cName}</span></div>
+              ${cPhone !== 'N/A' ? `<div style="display:flex; justify-content:space-between;"><span>Phone:</span><span style="font-weight:bold;">${cPhone}</span></div>` : ''}
             </div>
 
             <div style="border-top:1px dashed #000; border-bottom:1px dashed #000; margin:8px 0; padding:4px 0; font-weight:bold; display:flex; justify-content:space-between; font-size:11px;">
@@ -912,10 +922,10 @@ itemsToPrint.forEach(item => {
             <!-- Footer -->
              <div style="border-top:1px dashed #000; margin-top:15px; padding-top:5px; text-align:center; font-size:9px; line-height: 1.4;">
               <p style="margin:0 0 4px 0; font-weight:bold;">Goods once sold will not be taken back.</p>
-              <p style="margin:0 0 4px 0;">Please check items before leaving.</p>
+              <p style="margin:0 0 4px 0; font-weight:bold">Please check items before leaving.</p>
               <p style="margin:0 0 4px 0; font-weight:bold;">Liquor consumption is injurious to health.</p>
-              <p style="margin:0 0 4px 0;">Do not drink and drive.</p>
-              <p style="margin:0 0 4px 0;">Subject to local jurisdiction.</p>
+              <p style="margin:0 0 4px 0; font-weight:bold">Do not drink and drive.</p>
+              <p style="margin:0 0 4px 0; font-weight:bold">Subject to local jurisdiction.</p>
               <p style="margin:8px 0 0 0; font-weight:bold;">Thank You. Visit Again.</p>
             </div>
 
@@ -962,21 +972,21 @@ itemsToPrint.forEach(item => {
 
     // 2. Group items safely (prevent NaN errors)
     const waGroups = {};
-itemsToSend.forEach(item => {
-    if (!waGroups[item.productId]) {
+    itemsToSend.forEach(item => {
+      if (!waGroups[item.productId]) {
         waGroups[item.productId] = {
-            name: item.name || 'Item',
-            sale_price: Number(item.sale_price) || 0,
-            qty: 0,
-            totalDiscount: 0,
-            lineTotal: 0
+          name: item.name || 'Item',
+          sale_price: Number(item.sale_price) || 0,
+          qty: 0,
+          totalDiscount: 0,
+          lineTotal: 0
         };
-    }
-    const itemQty = item.quantity || 1;  // ✅ Get actual quantity
-    waGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
-    waGroups[item.productId].totalDiscount += (Number(item.discount) || 0) * itemQty;  // ✅ Multiply by qty
-    waGroups[item.productId].lineTotal += ((Number(item.sale_price) || 0) - (Number(item.discount) || 0)) * itemQty;  // ✅ Multiply by qty
-});
+      }
+      const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+      waGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+      waGroups[item.productId].totalDiscount += (Number(item.discount) || 0) * itemQty;  // ✅ Multiply by qty
+      waGroups[item.productId].lineTotal += ((Number(item.sale_price) || 0) - (Number(item.discount) || 0)) * itemQty;  // ✅ Multiply by qty
+    });
 
     // 3. Build Bill HTML (exact same style as your thermal print bill)
     let itemsHtml = '';
@@ -1113,14 +1123,14 @@ itemsToSend.forEach(item => {
     const invoiceNumber = generateInvoiceNumber(companyId);
 
     const pdfGroups = {};
-cart.forEach(item => {
-    if (!pdfGroups[item.productId]) {
+    cart.forEach(item => {
+      if (!pdfGroups[item.productId]) {
         pdfGroups[item.productId] = { name: item.name, sale_price: item.sale_price, qty: 0, totalDiscount: 0 };
-    }
-    const itemQty = item.quantity || 1;  // ✅ Get actual quantity
-    pdfGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
-    pdfGroups[item.productId].totalDiscount += (item.discount || 0) * itemQty;  // ✅ Multiply by qty
-});
+      }
+      const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+      pdfGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+      pdfGroups[item.productId].totalDiscount += (item.discount || 0) * itemQty;  // ✅ Multiply by qty
+    });
 
     let itemsHtml = '';
 
@@ -1451,27 +1461,27 @@ cart.forEach(item => {
             </div>
 
             {/* Selected Items Preview */}
-           <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 max-h-40 overflow-y-auto space-y-2">
-  <p className="text-[10px] font-bold text-gray-500">Selected Items</p>
-  {(() => {
-    const selectedCartItems = cart.filter(i => selectedItems.includes(i.scanId));
-    const modalGroups = {};
-    selectedCartItems.forEach(item => {
-      if (!modalGroups[item.productId]) {
-        modalGroups[item.productId] = { name: item.name, qty: 0, lineTotal: 0 };
-      }
-      const itemQty = item.quantity || 1;  // ✅ Get actual quantity
-      modalGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
-      modalGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
-    });
-    return Object.entries(modalGroups).map(([id, g]) => (
-      <div key={id} className="flex justify-between text-xs">
-        <span className="text-gray-700 dark:text-gray-300">{g.name} x{g.qty}</span>
-        <span className="font-semibold">₹{g.lineTotal.toFixed(2)}</span>
-      </div>
-    ));
-  })()}
-</div>
+            <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700 max-h-40 overflow-y-auto space-y-2">
+              <p className="text-[10px] font-bold text-gray-500">Selected Items</p>
+              {(() => {
+                const selectedCartItems = cart.filter(i => selectedItems.includes(i.scanId));
+                const modalGroups = {};
+                selectedCartItems.forEach(item => {
+                  if (!modalGroups[item.productId]) {
+                    modalGroups[item.productId] = { name: item.name, qty: 0, lineTotal: 0 };
+                  }
+                  const itemQty = item.quantity || 1;  // ✅ Get actual quantity
+                  modalGroups[item.productId].qty += itemQty;  // ✅ Use actual quantity
+                  modalGroups[item.productId].lineTotal += (item.sale_price - (item.discount || 0)) * itemQty;  // ✅ Multiply by qty
+                });
+                return Object.entries(modalGroups).map(([id, g]) => (
+                  <div key={id} className="flex justify-between text-xs">
+                    <span className="text-gray-700 dark:text-gray-300">{g.name} x{g.qty}</span>
+                    <span className="font-semibold">₹{g.lineTotal.toFixed(2)}</span>
+                  </div>
+                ));
+              })()}
+            </div>
 
             {/* Print Button */}
             <button

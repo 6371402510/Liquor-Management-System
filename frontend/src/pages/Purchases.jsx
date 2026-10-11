@@ -1553,7 +1553,7 @@ Description *</label>
 </div>
   
   <div className="col-span-1">
-    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice Date</label>
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice date</label>
     <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} className="input-field" />
   </div>
   
