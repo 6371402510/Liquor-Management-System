@@ -99,3 +99,18 @@ export const checkInvoiceExists = async (invoiceNumber, companyId, excludePurcha
   const data = await res.json()
   return data.exists
 }
+
+
+
+export const getAllPurchases = async () => {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`${API_BASE}/purchases/`, {
+    method: 'GET',
+    headers: {
+      accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  if (!res.ok) throw new Error('Failed to fetch all purchases')
+  return res.json()
+}
