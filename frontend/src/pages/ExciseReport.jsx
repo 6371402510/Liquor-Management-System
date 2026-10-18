@@ -8,11 +8,12 @@ import { format, addDays, differenceInDays } from 'date-fns'
 import * as XLSX from 'xlsx'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
+import { getPurchasesReportData } from '../apiservices/purchasesapi'
 
 import { getProducts } from '../apiservices/inventoryapi'
 import { getPurchases, getPurchaseItems } from '../apiservices/purchasesapi'
-import { getCounterSales } from '../apiservices/sales-counter'
-import { getGodownSales } from '../apiservices/godown-counter'
+import { getCounterSales, extractSaleItems } from '../apiservices/sales-counter'
+import { getGodownSales, extractGodownSaleItems } from '../apiservices/godown-counter'
 
 // ─── Helpers ───
 const isTauri = () => '__TAURI_INTERNALS__' in window
@@ -29,6 +30,20 @@ const downloadAsBlob = (data, fileName) => {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+}
+
+// Normalize any date-ish value → 'yyyy-MM-dd'
+const toYMD = (val) => {
+    if (!val) return ''
+    if (typeof val === 'string') {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val
+        if (/^\d{4}-\d{2}-\d{2}T/.test(val)) return val.slice(0, 10)
+    }
+    try {
+        return format(new Date(val), 'yyyy-MM-dd')
+    } catch {
+        return ''
+    }
 }
 
 // ─── Column Group Definitions ───
@@ -61,49 +76,46 @@ export default function ExciseSizeWiseReport() {
     // ─── Table Data ───
     const [dailyMovements, setDailyMovements] = useState({})
 
-    // ─── Derived: All unique sizes sorted numerically ───
-
-
+    // ─── Filtered products by type ───
     const filteredProducts = useMemo(() => {
         if (filterProductType === 'ALL') return products
         return products.filter(p => p.product_type === filterProductType)
     }, [products, filterProductType])
 
-
+    // ─── All unique sizes sorted numerically ───
     const allSizes = useMemo(() => {
         const sizes = [...new Set(filteredProducts.map(p => p.bottle_size).filter(Boolean))]
         return sizes.sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))
     }, [filteredProducts])
 
-    // ─── Dynamic Product Types (like ExciseReport) ───
-const productTypes = useMemo(() => {
-    const types = [...new Set(products.map(p => p.product_type).filter(Boolean))]
-    return types.sort()
-}, [products])
+    // ─── Dynamic Product Types ───
+    const productTypes = useMemo(() => {
+        const types = [...new Set(products.map(p => p.product_type).filter(Boolean))]
+        return types.sort()
+    }, [products])
 
-    // ─── Active sizes (after filter) ───
+    // ─── Active sizes (after size filter) ───
     const activeSizes = filterSize === 'ALL' ? allSizes : allSizes.filter(s => s === filterSize)
 
-    // ─── Product → Size lookup ───
+    // ─── Product → Size lookup (built from ALL products) ───
     const productSizeMap = useMemo(() => {
         const map = {}
-        filteredProducts.forEach(p => { if (p.bottle_size) map[p.id] = p.bottle_size })
+        products.forEach(p => { if (p.bottle_size) map[p.id] = p.bottle_size })
         return map
-    }, [filteredProducts])
+    }, [products])
 
     // ─── Size-wise opening stock (from product.opening_stock) ───
     const sizeOpeningStock = useMemo(() => {
         const map = {}
-        allSizes.forEach(s => map[s] = 0)
+        allSizes.forEach(s => { map[s] = 0 })
         filteredProducts.forEach(p => {
             const s = p.bottle_size
-            if (s && map[s] !== undefined) map[s] += Number(p.opening_stock) || 0
+            if (s && map[s] !== undefined) {
+                map[s] += Number(p.opening_stock) || 0
+            }
         })
         return map
     }, [filteredProducts, allSizes])
-
-    // ─── Filtered products by type ───
-
 
     // ─── Date range ───
     const dateRange = useMemo(() => {
@@ -151,177 +163,168 @@ const productTypes = useMemo(() => {
     useEffect(() => {
         if (!companyId || products.length === 0 || dateRange.length === 0) return
         calculateMovements()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filterDateFrom, filterDateTo, products, companyId])
 
-    const calculateMovements = async () => {
-        setCalculating(true)
-        try {
-            // Initialize daily map
-            const daily = {}
-            dateRange.forEach(d => {
-                daily[d] = {}
-                allSizes.forEach(s => { daily[d][s] = { purchase: 0, sale: 0 } })
-            })
+ const calculateMovements = async () => {
+    setCalculating(true)
+    try {
+        const sizeSet = new Set()
+        products.forEach(p => { if (p.bottle_size) sizeSet.add(p.bottle_size) })
+        const allProductSizes = [...sizeSet]
 
-            // Fetch purchases
-            const purchases = await getPurchases(Number(companyId), filterDateFrom, filterDateTo).catch(() => [])
-
-            // Fetch sales
-            const [counterSales, godownSales] = await Promise.all([
-                getCounterSales(Number(companyId), filterDateFrom, filterDateTo).catch(() => []),
-                getGodownSales(Number(companyId), filterDateFrom, filterDateTo).catch(() => [])
-            ])
-
-            // Fetch purchase items in parallel
-            const purchaseItemArrays = await Promise.all(
-                purchases.map(p => getPurchaseItems(p.id, Number(companyId)).catch(() => []))
-            )
-
-            // Try to dynamically import sale item fetchers
-            let fetchCounterItems = async () => []
-            let fetchGodownItems = async () => []
-            try {
-                const mod = await import('../apiservices/sales-counter')
-                if (mod.getCounterSaleItems) fetchCounterItems = (id) => mod.getCounterSaleItems(id, Number(companyId))
-            } catch { /* API not available */ }
-            try {
-                const mod = await import('../apiservices/godown-counter')
-                if (mod.getGodownSaleItems) fetchGodownItems = (id) => mod.getGodownSaleItems(id, Number(companyId))
-            } catch { /* API not available */ }
-
-            // Fetch sale items in parallel
-            const [counterItemArrays, godownItemArrays] = await Promise.all([
-                Promise.all(counterSales.map(s => fetchCounterItems(s.id).catch(() => []))),
-                Promise.all(godownSales.map(s => fetchGodownItems(s.id).catch(() => [])))
-            ])
-
-            // Aggregate purchases by date + size
-            purchases.forEach((p, idx) => {
-                const pDate = p.billing_date || p.purchase_date || ''
-                if (!daily[pDate]) return
-                    ; (purchaseItemArrays[idx] || []).forEach(item => {
-                        const size = productSizeMap[item.product_id]
-                        if (size && daily[pDate][size]) {
-                            daily[pDate][size].purchase += Number(item.total_bottles ?? item.totalBottles ?? item.quantity ?? 0) || 0
-                        }
-                    })
-            })
-
-            // Aggregate sales by date + size
-            const allSales = [
-                ...counterSales.map((s, i) => ({ date: s.sale_date || s.created_at, items: counterItemArrays[i] || [] })),
-                ...godownSales.map((s, i) => ({ date: s.sale_date || s.created_at, items: godownItemArrays[i] || [] }))
-            ]
-            allSales.forEach(sale => {
-                const sDate = sale.date ? format(new Date(sale.date), 'yyyy-MM-dd') : ''
-                if (!daily[sDate]) return
-                    ; (sale.items || []).forEach(item => {
-                        const size = productSizeMap[item.product_id]
-                        if (size && daily[sDate][size]) {
-                            daily[sDate][size].sale += Number(item.quantity ?? item.total_bottles ?? item.totalBottles ?? 0) || 0
-                        }
-                    })
-            })
-
-            setDailyMovements(daily)
-        } catch (err) {
-            console.error('Error calculating movements:', err)
-        } finally { setCalculating(false) }
-    }
-
-    // ─── Calculate rows with opening/closing ───
-   const calculatedRows = useMemo(() => {
-
-    const prevClosing = {}
-
-    // start with zero stock
-    allSizes.forEach(size => {
-        prevClosing[size] = 0
-    })
-
-
-    return dateRange.map((date, index) => {
-
-        const dayData = dailyMovements[date] || {}
-
-        const row = { date }
-
-
-        let tOpen = 0
-        let tPurchase = 0
-        let tSale = 0
-        let tClosing = 0
-
-
-        allSizes.forEach(size => {
-
-
-            // First date opening = 0
-            // Next dates = previous closing
-            const opening = index === 0
-                ? 0
-                : prevClosing[size]
-
-
-            const purchase =
-                dayData[size]?.purchase || 0
-
-
-            const total =
-                opening + purchase
-
-
-            const sale =
-                dayData[size]?.sale || 0
-
-
-            const closing =
-                Math.max(0, total - sale)
-
-
-
-            row[`${size}_opening`] = opening
-            row[`${size}_purchase`] = purchase
-            row[`${size}_total`] = total
-            row[`${size}_sale`] = sale
-            row[`${size}_closing`] = closing
-
-
-
-            // carry forward
-            prevClosing[size] = closing
-
-
-
-            tOpen += opening
-            tPurchase += purchase
-            tSale += sale
-            tClosing += closing
-
+        const daily = {}
+        dateRange.forEach(d => {
+            daily[d] = {}
+            allProductSizes.forEach(s => { daily[d][s] = { purchase: 0, sale: 0 } })
         })
 
+        // ── Purchases (single call, includes items) ──
+        const purchases = await getPurchasesReportData(
+            Number(companyId), filterDateFrom, filterDateTo
+        ).catch(err => {
+            console.error('[ExciseSizeWise] getPurchasesReportData failed:', err)
+            return []
+        })
 
-        row.total_opening = tOpen
-        row.total_purchase = tPurchase
+        // ── Sales ──
+        const [counterSales, godownSales] = await Promise.all([
+            getCounterSales(Number(companyId), filterDateFrom, filterDateTo).catch(() => []),
+            getGodownSales(Number(companyId), filterDateFrom, filterDateTo).catch(() => []),
+        ])
 
-        // total stock = opening + purchase
-        row.total_total = tOpen + tPurchase
+        // ── Helper: resolve size from an item ──
+        const resolveSize = (item) => {
+            if (item.product_id && productSizeMap[item.product_id]) {
+                return productSizeMap[item.product_id]
+            }
+            if (item.bottle_size) return item.bottle_size
+            if (item.product_name) {
+                const m = products.find(
+                    p => p.name === item.product_name || p.short_name === item.product_name
+                )
+                if (m?.bottle_size) return m.bottle_size
+            }
+            return null
+        }
 
-        row.total_sale = tSale
+        // ── Aggregate purchases ──
+        let unmatched = 0
+        purchases.forEach(p => {
+            const pDate = toYMD(p.billing_date || p.purchase_date)
+            if (!pDate || !daily[pDate]) return
 
-        // closing
-        row.total_closing = tClosing
+            ;(p.items || []).forEach(item => {
+                const size = resolveSize(item)
+                if (!size || !daily[pDate][size]) { unmatched++; return }
 
+                let bottles = Number(item.total_bottles ?? 0) || 0
+                if (bottles === 0 && item.qty_cases && item.bottles_per_case) {
+                    bottles = Number(item.qty_cases) * Number(item.bottles_per_case)
+                }
+                if (bottles === 0 && item.qty_bottles) {
+                    bottles = Number(item.qty_bottles)
+                }
 
-        return row
+                daily[pDate][size].purchase += bottles
+            })
+        })
 
+        // ── Aggregate sales ──
+        const allSales = [
+            ...counterSales.map(s => ({
+                date: s.sale_date || s.billing_date || s.created_at,
+                items: extractSaleItems(s),
+            })),
+            ...godownSales.map(s => ({
+                date: s.sale_date || s.billing_date || s.created_at,
+                items: extractGodownSaleItems(s),
+            })),
+        ]
+
+        allSales.forEach(sale => {
+    const sDate = toYMD(sale.date)
+    if (!sDate || !daily[sDate]) return
+    ;(sale.items || []).forEach(item => {
+        const size = resolveSize(item)
+        if (!size || !daily[sDate][size]) return
+
+        console.log('[SALE DEBUG]', {
+            sale_id: sale.id,
+            invoice: sale.invoice_number,
+            date: sDate,
+            product_id: item.product_id,
+            product_name: item.product_name,
+            quantity_from_db: item.quantity,
+            resolved_size: size,
+            sale_object_keys: Object.keys(item),
+        })
+
+        const qty = Number(item.quantity ?? 0) || 0
+        daily[sDate][size].sale += qty
     })
+})
 
-}, [
-    dateRange,
-    dailyMovements,
-    allSizes
-])
+        console.log('[ExciseSizeWise] DONE — purchases:', purchases.length,
+                    '| counterSales:', counterSales.length,
+                    '| godownSales:', godownSales.length,
+                    '| unmatchedItems:', unmatched)
+
+        setDailyMovements(daily)
+    } catch (err) {
+        console.error('Error calculating movements:', err)
+    } finally {
+        setCalculating(false)
+    }
+}
+    // ─── Calculate rows with opening/closing ───
+    const calculatedRows = useMemo(() => {
+        const prevClosing = {}
+        allSizes.forEach(size => { prevClosing[size] = 0 })
+
+        return dateRange.map((date, index) => {
+            const dayData = dailyMovements[date] || {}
+            const row = { date }
+
+            let tOpen = 0
+            let tPurchase = 0
+            let tSale = 0
+            let tClosing = 0
+
+            allSizes.forEach(size => {
+                // First date → product opening_stock ; else → previous closing
+                const opening = index === 0
+                    ? (sizeOpeningStock[size] || 0)
+                    : (prevClosing[size] || 0)
+
+                const purchase = dayData[size]?.purchase || 0
+                const total = opening + purchase
+                const sale = dayData[size]?.sale || 0
+                const closing = Math.max(0, total - sale)
+
+                row[`${size}_opening`] = opening
+                row[`${size}_purchase`] = purchase
+                row[`${size}_total`] = total
+                row[`${size}_sale`] = sale
+                row[`${size}_closing`] = closing
+
+                prevClosing[size] = closing
+
+                tOpen += opening
+                tPurchase += purchase
+                tSale += sale
+                tClosing += closing
+            })
+
+            row.total_opening = tOpen
+            row.total_purchase = tPurchase
+            row.total_total = tOpen + tPurchase
+            row.total_sale = tSale
+            row.total_closing = tClosing
+
+            return row
+        })
+    }, [dateRange, dailyMovements, allSizes, sizeOpeningStock])
 
     // ─── Totals row ───
     const totalsRow = useMemo(() => {
@@ -342,7 +345,7 @@ const productTypes = useMemo(() => {
         setFilterDateFrom(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'))
         setFilterDateTo(format(new Date(), 'yyyy-MM-dd'))
         setFilterSize('ALL')
-        setFilterProductType('ALL')  // ← added
+        setFilterProductType('ALL')
     }
 
     // ─── Export Excel with merged headers ───
@@ -353,7 +356,6 @@ const productTypes = useMemo(() => {
         const ws = {}
         const merges = []
 
-        // Helper to set cell
         const setCell = (r, c, val, style = {}) => {
             const addr = XLSX.utils.encode_cell({ r, c })
             ws[addr] = { t: typeof val === 'number' ? 'n' : 's', v: val }
@@ -415,7 +417,6 @@ const productTypes = useMemo(() => {
             tc++
         })
 
-        // Set range & merges
         ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: tr, c: tc - 1 } })
         ws['!merges'] = merges
         ws['!cols'] = [{ wch: 14 }, ...Array(tc - 1).fill(null).map(() => ({ wch: 13 }))]
@@ -498,17 +499,13 @@ const productTypes = useMemo(() => {
                             <label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Period To</label>
                             <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} className="input-field text-xs" />
                         </div>
-
-                        {/* ← NEW FIELD */}
-                      {/* ← UPDATED (dynamic, same pattern as ExciseReport) */}
-<div>
-    <label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Product Type</label>
-    <select value={filterProductType} onChange={e => setFilterProductType(e.target.value)} className="input-field text-xs">
-        <option value="ALL">All Types</option>
-        {productTypes.map(t => <option key={t}>{t}</option>)}
-    </select>
-</div>
-
+                        <div>
+                            <label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Product Type</label>
+                            <select value={filterProductType} onChange={e => setFilterProductType(e.target.value)} className="input-field text-xs">
+                                <option value="ALL">All Types</option>
+                                {productTypes.map(t => <option key={t}>{t}</option>)}
+                            </select>
+                        </div>
                         <div>
                             <label className="block text-[10px] font-medium text-gray-500 mb-1 uppercase">Bottle Size</label>
                             <select value={filterSize} onChange={e => setFilterSize(e.target.value)} className="input-field text-xs">
@@ -525,153 +522,127 @@ const productTypes = useMemo(() => {
                         </div>
                     </div>
 
-                        {/* Quick Date Presets */}
-                        <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-                            <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wide self-center mr-1">Quick:</span>
-                            {[
-                                { label: 'This Month', from: format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'), to: format(new Date(), 'yyyy-MM-dd') },
-                                { label: 'Last Month', from: format(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1), 'yyyy-MM-dd'), to: format(new Date(new Date().getFullYear(), new Date().getMonth(), 0), 'yyyy-MM-dd') },
-                                { label: 'This Quarter', from: format(new Date(new Date().getFullYear(), Math.floor(new Date().getMonth() / 3) * 3, 1), 'yyyy-MM-dd'), to: format(new Date(), 'yyyy-MM-dd') },
-                                { label: 'This Year', from: format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd'), to: format(new Date(), 'yyyy-MM-dd') },
-                            ].map(preset => (
-                                <button key={preset.label} type="button" onClick={() => { setFilterDateFrom(preset.from); setFilterDateTo(preset.to) }}
-                                    className={clsx("text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors",
-                                        filterDateFrom === preset.from && filterDateTo === preset.to
-                                            ? "bg-indigo-100 dark:bg-indigo-900/40 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300"
-                                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-                                    )}>
-                                    {preset.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    
-      )}
-
-                    {/* ─── Size Legend ─── */}
-                    <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wide">Sizes:</span>
-                        {activeSizes.map(s => (
-                            <span key={s} className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-400 border border-slate-200 dark:border-slate-700">{s}</span>
+                    {/* Quick Date Presets */}
+                    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+                        <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wide self-center mr-1">Quick:</span>
+                        {[
+                            { label: 'This Month', from: format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'), to: format(new Date(), 'yyyy-MM-dd') },
+                            { label: 'Last Month', from: format(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1), 'yyyy-MM-dd'), to: format(new Date(new Date().getFullYear(), new Date().getMonth(), 0), 'yyyy-MM-dd') },
+                            { label: 'This Quarter', from: format(new Date(new Date().getFullYear(), Math.floor(new Date().getMonth() / 3) * 3, 1), 'yyyy-MM-dd'), to: format(new Date(), 'yyyy-MM-dd') },
+                            { label: 'This Year', from: format(new Date(new Date().getFullYear(), 0, 1), 'yyyy-MM-dd'), to: format(new Date(), 'yyyy-MM-dd') },
+                        ].map(preset => (
+                            <button key={preset.label} type="button" onClick={() => { setFilterDateFrom(preset.from); setFilterDateTo(preset.to) }}
+                                className={clsx("text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors",
+                                    filterDateFrom === preset.from && filterDateTo === preset.to
+                                        ? "bg-indigo-100 dark:bg-indigo-900/40 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300"
+                                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                                )}>
+                                {preset.label}
+                            </button>
                         ))}
-                        <span className="text-[10px] text-gray-400 ml-1">({activeSizes.length} sizes × {dateRange.length} days)</span>
                     </div>
+                </div>
+            )}
 
-                    {/* ─── Main Table ─── */}
-                    <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
-                        {calculating && (
-                            <div className="w-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs text-center py-2 font-medium flex items-center justify-center gap-2">
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Calculating size-wise movements...
-                            </div>
-                        )}
+            {/* ─── Size Legend ─── */}
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wide">Sizes:</span>
+                {activeSizes.map(s => (
+                    <span key={s} className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-gray-400 border border-slate-200 dark:border-slate-700">{s}</span>
+                ))}
+                <span className="text-[10px] text-gray-400 ml-1">({activeSizes.length} sizes × {dateRange.length} days)</span>
+            </div>
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-xs border-collapse">
-                                {/* ─── Header Row 1: Column Groups ─── */}
-                                <thead>
-                                    <tr className="border-b-2 border-gray-300 dark:border-gray-600">
-                                        <th rowSpan={2} className="p-3 text-left font-bold text-gray-700 dark:text-gray-200 bg-slate-50 dark:bg-slate-800/80 sticky left-0 z-10 min-w-[110px] border-r border-gray-200 dark:border-gray-700">
-                                            <div className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Date</div>
-                                        </th>
-                                        {COLUMN_GROUPS.map(group => (
-                                            <th
-                                                key={group.key}
-                                                colSpan={activeSizes.length + 1}
-                                                className={clsx("p-2.5 text-center font-bold text-xs uppercase tracking-wider border-l border-gray-200 dark:border-gray-700", group.headerBg, group.headerColor)}
-                                            >
-                                                {group.label}
+            {/* ─── Main Table ─── */}
+            <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
+                {calculating && (
+                    <div className="w-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs text-center py-2 font-medium flex items-center justify-center gap-2">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Calculating size-wise movements...
+                    </div>
+                )}
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs border-collapse">
+                        {/* Header Row 1: Column Groups */}
+                        <thead>
+                            <tr className="border-b-2 border-gray-300 dark:border-gray-600">
+                                <th rowSpan={2} className="p-3 text-left font-bold text-gray-700 dark:text-gray-200 bg-slate-50 dark:bg-slate-800/80 sticky left-0 z-10 min-w-[110px] border-r border-gray-200 dark:border-gray-700">
+                                    <div className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Date</div>
+                                </th>
+                                {COLUMN_GROUPS.map(group => (
+                                    <th
+                                        key={group.key}
+                                        colSpan={activeSizes.length + 1}
+                                        className={clsx("p-2.5 text-center font-bold text-xs uppercase tracking-wider border-l border-gray-200 dark:border-gray-700", group.headerBg, group.headerColor)}
+                                    >
+                                        {group.label}
+                                    </th>
+                                ))}
+                            </tr>
+
+                            {/* Header Row 2: Sizes */}
+                            <tr className="border-b border-gray-200 dark:border-gray-700 bg-slate-50/50 dark:bg-slate-800/30">
+                                {COLUMN_GROUPS.map(group => (
+                                    <Fragment key={`sub-${group.key}`}>
+                                        {activeSizes.map(size => (
+                                            <th key={size} className={clsx("p-2 text-center font-semibold text-[10px] uppercase tracking-wide border-l border-gray-100 dark:border-gray-700/50", group.headerBg)}>
+                                                {size}
                                             </th>
                                         ))}
-                                    </tr>
+                                        <th className={clsx("p-2 text-center font-bold text-[10px] uppercase tracking-wide border-l-2 border-gray-300 dark:border-gray-600", group.headerBg, group.headerColor)}>
+                                            Total
+                                        </th>
+                                    </Fragment>
+                                ))}
+                            </tr>
+                        </thead>
 
-                                    {/* ─── Header Row 2: Sizes ─── */}
-                                    <tr className="border-b border-gray-200 dark:border-gray-700 bg-slate-50/50 dark:bg-slate-800/30">
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={1 + COLUMN_GROUPS.length * (activeSizes.length + 1)} className="text-center py-12">
+                                        <Loader2 className="w-6 h-6 animate-spin text-primary-500 mx-auto" />
+                                    </td>
+                                </tr>
+                            ) : calculatedRows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={1 + COLUMN_GROUPS.length * (activeSizes.length + 1)} className="text-center py-12 text-sm text-gray-400">
+                                        No data found
+                                    </td>
+                                </tr>
+                            ) : (
+                                calculatedRows.map((row) => (
+                                    <tr key={row.date} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors">
+                                        <td className="p-2.5 font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 sticky left-0 z-10 border-r border-gray-100 dark:border-gray-800 whitespace-nowrap">
+                                            {format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy')}
+                                        </td>
+
                                         {COLUMN_GROUPS.map(group => (
-                                            <Fragment key={`sub-${group.key}`}>
+                                            <Fragment key={`data-${group.key}-${row.date}`}>
                                                 {activeSizes.map(size => (
-                                                    <th key={size} className={clsx("p-2 text-center font-semibold text-[10px] uppercase tracking-wide border-l border-gray-100 dark:border-gray-700/50", group.headerBg)}>
-                                                        {size}
-                                                    </th>
+                                                    <td key={size} className={clsx("p-2 text-right tabular-nums border-l border-gray-50 dark:border-gray-800/50", group.cellBg)}>
+                                                        {(row[`${size}_${group.key}`] || 0).toLocaleString()}
+                                                    </td>
                                                 ))}
-                                                <th className={clsx("p-2 text-center font-bold text-[10px] uppercase tracking-wide border-l-2 border-gray-300 dark:border-gray-600", group.headerBg, group.headerColor)}>
-                                                    Total
-                                                </th>
+                                                <td className={clsx("p-2 text-right font-bold tabular-nums border-l-2 border-gray-200 dark:border-gray-700", group.cellBg)}>
+                                                    {(row[`total_${group.key}`] || 0).toLocaleString()}
+                                                </td>
                                             </Fragment>
                                         ))}
                                     </tr>
-                                </thead>
-
-                                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                                    {loading ? (
-                                        <tr>
-                                            <td colSpan={1 + COLUMN_GROUPS.length * (activeSizes.length + 1)} className="text-center py-12">
-                                                <Loader2 className="w-6 h-6 animate-spin text-primary-500 mx-auto" />
-                                            </td>
-                                        </tr>
-                                    ) : calculatedRows.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={1 + COLUMN_GROUPS.length * (activeSizes.length + 1)} className="text-center py-12 text-sm text-gray-400">
-                                                No data found
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        calculatedRows.map((row) => (
-                                            <tr key={row.date} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors">
-                                                {/* Date cell - sticky */}
-                                                <td className="p-2.5 font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 sticky left-0 z-10 border-r border-gray-100 dark:border-gray-800 whitespace-nowrap">
-                                                    {format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy')}
-                                                </td>
-
-                                                {COLUMN_GROUPS.map(group => (
-                                                    <Fragment key={`data-${group.key}-${row.date}`}>
-                                                        {activeSizes.map(size => (
-                                                            <td key={size} className={clsx("p-2 text-right tabular-nums border-l border-gray-50 dark:border-gray-800/50", group.cellBg)}>
-                                                                {(row[`${size}_${group.key}`] || 0).toLocaleString()}
-                                                            </td>
-                                                        ))}
-                                                        <td className={clsx("p-2 text-right font-bold tabular-nums border-l-2 border-gray-200 dark:border-gray-700", group.cellBg)}>
-                                                            {(row[`total_${group.key}`] || 0).toLocaleString()}
-                                                        </td>
-                                                    </Fragment>
-                                                ))}
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-
-                                {/* ─── Totals Footer ─── */}
-                                {/* {!loading && calculatedRows.length > 0 && (
-                                    <tfoot>
-                                        <tr className="bg-slate-200 dark:bg-slate-700 border-t-2 border-slate-400 dark:border-slate-500 font-bold text-xs">
-                                            <td className="p-2.5 text-gray-800 dark:text-gray-100 sticky left-0 z-10 border-r border-gray-300 dark:border-gray-600">
-                                                TOTAL
-                                            </td>
-                                            {COLUMN_GROUPS.map(group => (
-                                                <Fragment key={`total-${group.key}`}>
-                                                    {activeSizes.map(size => (
-                                                        <td key={size} className="p-2 text-right tabular-nums border-l border-gray-300 dark:border-gray-600">
-                                                            {(totalsRow[`${size}_${group.key}`] || 0).toLocaleString()}
-                                                        </td>
-                                                    ))}
-                                                    <td className={clsx("p-2 text-right tabular-nums border-l-2 border-slate-400 dark:border-slate-500 bg-slate-300 dark:bg-slate-600", group.headerColor)}>
-                                                        {(totalsRow[`total_${group.key}`] || 0).toLocaleString()}
-                                                    </td>
-                                                </Fragment>
-                                            ))}
-                                        </tr>
-                                    </tfoot>
-                                )} */}
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* ─── Footer Info ─── */}
-                    {!loading && calculatedRows.length > 0 && (
-                        <div className="text-[10px] text-gray-400 text-right">
-                            {calculatedRows.length} rows × {(activeSizes.length + 1) * COLUMN_GROUPS.length + 1} columns
-                        </div>
-                    )}
+                                ))
+                            )}
+                        </tbody>
+                    </table>
                 </div>
-            )
-            }
+            </div>
+
+            {/* ─── Footer Info ─── */}
+            {!loading && calculatedRows.length > 0 && (
+                <div className="text-[10px] text-gray-400 text-right">
+                    {calculatedRows.length} rows × {(activeSizes.length + 1) * COLUMN_GROUPS.length + 1} columns
+                </div>
+            )}
+        </div>
+    )
+}

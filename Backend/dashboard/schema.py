@@ -19,7 +19,7 @@ class DashboardStats(BaseModel):
     # ═══════════════════════════════════════════════════════════
     # MGR STATUS FIELDS
     # ═══════════════════════════════════════════════════════════
-    monthly_mgr_target: float = 30890000.0  # Total target (base + carryover)
+    monthly_mgr_target: float = 0.0  # Total target (base + carryover)
     achieved_mgr: float = 0                 # MGR achieved this month
     to_be_achieved_mgr: float = 0           # Remaining MGR to achieve
     mgr_percentage: float = 0               # Achievement percentage

@@ -1470,7 +1470,7 @@ Description *</label>
 </div>
   
   <div className="col-span-1">
-    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice Date</label>
+    <label className="block text-md font-semibold text-black-600 dark:text-gray-400 mb-1">Invoice date</label>
     <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} className="input-field" />
   </div>
   
@@ -2019,9 +2019,10 @@ Description *</label>
           <th className="table-header text-left">Supplier</th>
           <th className="table-header text-left">Stock To</th>
           <th className="table-header text-left">Description</th>  {/* ← ADD THIS */}
+          <th className="table-header text-right text-blue-600 dark:text-blue-400">Subtotal</th>
           <th className="table-header text-right">VAT</th>
           <th className="table-header text-right">TCS</th>
-          <th className="table-header text-right text-blue-600 dark:text-blue-400">Subtotal</th>
+          
           <th className="table-header text-right text-blue-600 dark:text-blue-400">Total Cost</th>
           <th className="table-header text-right">Handling</th>
           <th className="table-header text-right text-green-600 dark:text-green-400">Grand Total</th>
@@ -2093,13 +2094,16 @@ Description *</label>
     </span> */}
   </div>
 </td>
-                <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
-                <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
 
-                {/* ── Subtotal (line items only, no taxes) ── */}
+
+  {/* ── Subtotal (line items only, no taxes) ── */}
                 <td className="table-cell text-right font-semibold text-blue-600 dark:text-blue-400">
                   ₹{Number(p.subtotal || 0).toFixed(2)}
                 </td>
+                <td className="table-cell text-right">₹{Number(p.vat_amount).toFixed(2)}</td>
+                <td className="table-cell text-right">₹{Number(p.tcs_amount || 0).toFixed(2)}</td>
+
+              
 
                 {/* ── Total Cost (subtotal + taxes, WITHOUT handling) ── */}
                 <td className="table-cell text-right font-semibold text-blue-700 dark:text-blue-400">

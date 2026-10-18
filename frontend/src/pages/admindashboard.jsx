@@ -79,7 +79,7 @@ export default function AdminDashboard() {
     new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n || 0);
 
   const VAT_RATE = 0.35;
-  const TCS_RATE = 0.027;
+  const TCS_RATE = 0.02;  
 
   const calcTaxedValue = (baseCost) => {
     if (!includeTax) return baseCost;
@@ -295,7 +295,7 @@ export default function AdminDashboard() {
               </button>
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                 Incl. Tax <br />
-                <span className="text-[10px] opacity-75">(VAT 35% + TCS 2.7%)</span>
+                <span className="text-[10px] opacity-75">(VAT 35% + TCS 2%)</span>
               </span>
             </div>
           </div>

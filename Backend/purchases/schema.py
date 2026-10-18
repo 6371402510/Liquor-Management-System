@@ -9,6 +9,7 @@ class PurchaseItemBase(BaseModel):
     product_id: Optional[int] = None
     company_id: Optional[int] = None
     product_name: str = Field(alias="name")
+    short_name: Optional[str] = Field(default=None, alias="short_name")   # ← ADD THIS
     brand: Optional[str] = None
     category: Optional[str] = None
     barcode: Optional[str] = None

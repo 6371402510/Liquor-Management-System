@@ -1,10 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE
 
-export const getPurchases = async (companyId = null) => {
+export const getPurchases = async (companyId = null, skip = 0, limit = 100000) => {
   const token = localStorage.getItem('token')
 
   const params = new URLSearchParams()
   if (companyId) params.append('company_id', companyId)
+  params.append('skip', skip)
+  params.append('limit', limit)
 
   const url = `${API_BASE}/purchases/?${params.toString()}`
 
@@ -19,6 +21,7 @@ export const getPurchases = async (companyId = null) => {
   if (!res.ok) throw new Error('Failed to fetch purchases')
   return res.json()
 }
+
 
 export const createPurchase = async (purchaseData) => {
   const token = localStorage.getItem('token')
@@ -98,4 +101,24 @@ export const checkInvoiceExists = async (invoiceNumber, companyId, excludePurcha
   if (!res.ok) throw new Error('Failed to check invoice')
   const data = await res.json()
   return data.exists
+}
+
+
+
+export const getPurchasesReportData = async (companyId, dateFrom, dateTo) => {
+  const token = localStorage.getItem('token')
+  const params = new URLSearchParams()
+  params.append('company_id', companyId)
+  if (dateFrom) params.append('date_from', dateFrom)
+  if (dateTo) params.append('date_to', dateTo)
+
+  const res = await fetch(`${API_BASE}/purchases/report-data/?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  if (!res.ok) throw new Error('Failed to fetch purchase report data')
+  return res.json()
 }

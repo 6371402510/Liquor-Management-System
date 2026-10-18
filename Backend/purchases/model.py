@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, Date, Text, ForeignKey
 from sqlalchemy.sql import func
 from database import Base
+from sqlalchemy.orm import relationship 
 
 class Purchase(Base):
     __tablename__ = "purchases"
@@ -46,7 +47,7 @@ class Purchase(Base):
 
     created_at = Column(Date, server_default=func.current_date())
     updated_at = Column(Date, onupdate=func.current_date())
-
+    items = relationship("PurchaseItem", backref="purchase", cascade="all, delete-orphan")
 
 
 
@@ -60,6 +61,7 @@ class PurchaseItem(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
 
     product_name = Column(String, nullable=False)
+    short_name = Column(String, nullable=True)   # ← ADD THIS
     brand = Column(String, nullable=True)
     category = Column(String, nullable=True)
     barcode = Column(String, nullable=True)
@@ -86,3 +88,7 @@ class PurchaseItem(Base):
     opening_stock = Column(Integer, default=0)
     min_stock = Column(Integer, default=0)
     total_cost = Column(Float, default=0.0)
+
+
+
+    

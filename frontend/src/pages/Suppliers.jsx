@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Plus, CreditCard as Edit2, Trash2, X, Loader as Loader2, Search, Truck, Phone, Mail, AlertCircle } from 'lucide-react'
-import { getSuppliers, updateSupplier, deleteSupplier } from '../apiservices/supplierapi'
+import {createSupplier, getSuppliers, updateSupplier, deleteSupplier } from '../apiservices/supplierapi'
 import { fetchSuppliersSafe } from './supplierHelper'
 // Import API functions
 // import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../apiservices/supplierapi'

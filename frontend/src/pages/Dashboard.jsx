@@ -128,7 +128,7 @@ export default function Dashboard() {
   const mgrPct = mgr_status?.percentage || 0
   const mgrAchieved = mgr_status?.achieved || 0
   
-  const mgrTarget = mgr_status?.monthly_target || 30890000
+  const mgrTarget = mgr_status?.monthly_target || 0
   const mgrToBe = mgr_status?.to_be_achieved || 0
   const daysLeft = Math.max(0, new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate())
   const dailyTargetNeeded = daysLeft > 0 ? mgrToBe / daysLeft : 0
@@ -169,7 +169,7 @@ export default function Dashboard() {
       sub: `${stats.todayOrders} orders`,
     },
     {
-      label: 'Monthly Expenses',
+      label: 'Expenses',
       value: `₹${fmt(stats.monthExpenses)}`,
       icon: Wallet,
       color: 'bg-red-500',
@@ -270,7 +270,7 @@ export default function Dashboard() {
         <Target className="w-5 h-5 text-white" />
       </div>
       <div>
-        <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">MGR Status — Monthly Target</h3>
+        <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">MGER Status — Monthly Target</h3>
         <p className="text-[11px] text-gray-400 dark:text-gray-500">Monitored by Excise Department</p>
       </div>
     </div>
@@ -342,7 +342,7 @@ export default function Dashboard() {
     <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-800/50">
       <div className="flex items-center gap-2 mb-2">
         <TrendingUp className="w-4 h-4 text-blue-500" />
-        <p className="text-[11px] font-semibold text-blue-500 uppercase tracking-wider">Achieved MGR</p>
+        <p className="text-[11px] font-semibold text-blue-500 uppercase tracking-wider">Achieved MGER</p>
       </div>
       <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
         {fmtCurrency(mgrAchieved)}

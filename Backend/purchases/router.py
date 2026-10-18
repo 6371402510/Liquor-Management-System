@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from .service import get_purchases_with_items
+from datetime import date
 
 from database import get_db
 from .schema import PurchaseCreate, PurchaseResponse, PurchaseItemResponse,PurchaseUpdate
@@ -101,3 +103,45 @@ def check_invoice_exists(
     """Check if an invoice number already exists"""
     exists = check_invoice_number_exists(db, invoice_number, exclude_purchase_id)
     return {"exists": exists}
+
+
+
+
+@router.get("/report-data/")
+def report_data(
+    company_id: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns purchases with items in a single call, filtered by date range.
+    Much faster than fetching items one-by-one from the frontend.
+    """
+    purchases = get_purchases_with_items(
+        db, company_id=company_id, date_from=date_from, date_to=date_to
+    )
+    
+    result = []
+    for p in purchases:
+        result.append({
+            "id": p.id,
+            "billing_date": p.billing_date.isoformat() if p.billing_date else None,
+            "purchase_date": p.purchase_date.isoformat() if p.purchase_date else None,
+            "invoice_number": p.invoice_number,
+            "stock_destination": p.stock_destination,
+            "items": [
+                {
+                    "product_id": it.product_id,
+                    "product_name": it.product_name,
+                    "short_name": it.short_name,
+                    "bottle_size": it.bottle_size,
+                    "bottles_per_case": it.bottles_per_case,
+                    "qty_cases": it.qty_cases,
+                    "qty_bottles": it.qty_bottles,
+                    "total_bottles": it.total_bottles,
+                }
+                for it in p.items
+            ],
+        })
+    return result
