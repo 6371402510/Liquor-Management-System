@@ -23,9 +23,13 @@ function normalizeItem(item) {
   const bottles_per_case = Number(item.bottles_per_case ?? item.bottlesPerCase) || 0
 
   // ✅ If DB stored 0, compute from cases × bottles_per_case
-  if (total_bottles === 0 && qty_cases > 0 && bottles_per_case > 0) {
+ if (total_bottles === 0) {
+  if (qty_cases > 0 && bottles_per_case > 0) {
     total_bottles = qty_cases * bottles_per_case
+  } else if (Number(item.qty_bottles ?? item.qtyBottles) > 0) {
+    total_bottles = Number(item.qty_bottles ?? item.qtyBottles)
   }
+}
 
   const purchase_rate_per_unit = Number(item.purchase_rate_per_unit ?? item.purchaseRatePerUnit) || 0
   const stored_total_cost = Number(item.total_cost) || 0

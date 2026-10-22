@@ -434,13 +434,29 @@ export default function Purchases() {
   const { user } = useAuth()
   const isAdmin = user?.role?.toUpperCase() === 'ADMIN'
 
-  // ─── SINGLE SOURCE OF TRUTH FOR COMPANY (for the form) ───
+  // ───────────────────────────────────────────────────────────
+  // COMPANY STATE
+  // ───────────────────────────────────────────────────────────
+  // `activeCompanyId` = app-wide active company (drives navbar).
+  //                    Read-only here — this page NEVER writes it.
+  // `selectedCompanyId` = the company THIS purchase belongs to.
+  //                    Independent form-level state. Never written back
+  //                    to localStorage so the navbar stays stable.
+  const [activeCompanyId] = useState(
+    () => localStorage.getItem('selectedCompanyId') || ''
+  )
+
+  const [companies, setCompanies] = useState([])
+
+  // The company the NEW purchase will be created under.
+  // Initialize from the active company (if any) but decouple afterwards.
   const [selectedCompanyId, setSelectedCompanyId] = useState(
     () => localStorage.getItem('selectedCompanyId') || ''
   )
-  const [companies, setCompanies] = useState([])
 
-  // Derived name (reacts to state, not localStorage)
+  // Display name for the "New purchase → {companyName}" badge — uses the
+  // form-level company (selectedCompanyId), NOT the app-wide one, so it
+  // reflects where the new purchase will actually be created.
   const companyName =
     companies.find(c => String(c.id) === String(selectedCompanyId))?.companyName
     || localStorage.getItem('selectedCompanyName')
@@ -499,7 +515,10 @@ export default function Purchases() {
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
   const [filterType, setFilterType] = useState('ALL')
-  const [filterCompany, setFilterCompany] = useState('ALL')   // ← NEW
+  // List filter — view-only. Defaults to the app-wide active company.
+  const [filterCompany, setFilterCompany] = useState(
+    () => localStorage.getItem('selectedCompanyId') || 'ALL'
+  )
 
   const [editingPurchaseId, setEditingPurchaseId] = useState(null)
   const [editingItemIndex, setEditingItemIndex] = useState(null)
@@ -530,7 +549,7 @@ export default function Purchases() {
   // ─────────────────────────────────────────────────────────
   useEffect(() => {
     fetchCompaniesList()
-    fetchPurchases()       // ← all companies
+    fetchPurchases()
     fetchSuppliers()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -539,11 +558,19 @@ export default function Purchases() {
     try {
       const data = await getCompanies()
       setCompanies(data || [])
-      if (!selectedCompanyId && data?.length > 0) {
+
+      // Bootstrap: if this page loads and nothing is stored yet, fall back
+      // to the first company so the page is usable. NOTE: this only writes
+      // when NO active company exists yet — it never overwrites a choice the
+      // user made on the Companies page, so the navbar stays stable.
+      if (!activeCompanyId && data?.length > 0) {
         const first = data[0]
+        // Do NOT write to localStorage here — the Companies page owns
+        // the app-wide active company. Just seed the local form/filter.
         setSelectedCompanyId(String(first.id))
-        localStorage.setItem('selectedCompanyId', String(first.id))
-        localStorage.setItem('selectedCompanyName', first.companyName)
+        setFilterCompany(prev =>
+          prev && prev !== 'ALL' ? prev : String(first.id)
+        )
       }
     } catch (err) {
       console.error('Failed to load companies', err)
@@ -591,8 +618,7 @@ export default function Purchases() {
     setLoading(true)
     setError('')
     try {
-      // Fetch ALL purchases across all companies
-      const data = await getPurchases()   // no company_id → backend returns all
+      const data = await getPurchases()   // all companies
       setPurchases(data || [])
     } catch (err) {
       setError(err.message || 'Failed to load purchases')
@@ -612,6 +638,9 @@ export default function Purchases() {
 
   // ─────────────────────────────────────────────────────────
   // COMPANY SWITCH (inside the form)
+  // IMPORTANT: this NO LONGER writes to localStorage.
+  // Only the purchase being created/edited changes company.
+  // The navbar's active company is untouched.
   // ─────────────────────────────────────────────────────────
   const handleFormCompanyChange = (newId) => {
     if (items.length > 0) {
@@ -621,9 +650,7 @@ export default function Purchases() {
       if (!ok) return
     }
     setSelectedCompanyId(String(newId))
-    localStorage.setItem('selectedCompanyId', String(newId))
-    const c = companies.find(x => String(x.id) === String(newId))
-    if (c) localStorage.setItem('selectedCompanyName', c.companyName)
+    setFilterCompany(String(newId))
 
     // Reset form only (list stays global)
     setItems([])
@@ -636,15 +663,15 @@ export default function Purchases() {
 
   // ─────────────────────────────────────────────────────────
   // EDIT PURCHASE
+  // IMPORTANT: also does NOT write to localStorage.
   // ─────────────────────────────────────────────────────────
   const handleEditPurchase = async (purchase) => {
     try {
-      // Switch the active company to match the purchase being edited
+      // Load the purchase's company into the FORM only — the navbar's
+      // active company is not touched.
       if (purchase.company_id && String(purchase.company_id) !== String(selectedCompanyId)) {
         setSelectedCompanyId(String(purchase.company_id))
-        localStorage.setItem('selectedCompanyId', String(purchase.company_id))
-        const c = companies.find(x => String(x.id) === String(purchase.company_id))
-        if (c) localStorage.setItem('selectedCompanyName', c.companyName)
+        setFilterCompany(String(purchase.company_id))
       }
 
       const rawItems = await getPurchaseItems(purchase.id)
@@ -786,7 +813,7 @@ export default function Purchases() {
   }
 
   // ─────────────────────────────────────────────────────────
-  // PRODUCT SEARCH (scoped to selected company)
+  // PRODUCT SEARCH (scoped to selectedCompanyId)
   // ─────────────────────────────────────────────────────────
   const handleSearchChange = async (val) => {
     setSearchQuery(val)
@@ -1115,7 +1142,8 @@ export default function Purchases() {
   const clearFilters = () => {
     setFilterProduct(''); setFilterBrand(''); setFilterCategory('')
     setFilterMrp(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterType('ALL')
-    setFilterCompany('ALL')
+    // Reset back to the app-wide active company (view-only)
+    setFilterCompany(activeCompanyId || 'ALL')
   }
 
   const loadItems = async (id) => {
@@ -1131,7 +1159,7 @@ export default function Purchases() {
   }
 
   const filteredPurchases = purchases.filter(p => {
-    // ─── Company filter ───
+    // ─── Company filter (view-only) ───
     if (filterCompany !== 'ALL' && String(p.company_id) !== String(filterCompany)) {
       return false
     }
@@ -1264,7 +1292,7 @@ export default function Purchases() {
             </select>
           </div>
 
-          {(filterCompany !== 'ALL' || filterType !== 'ALL' || filterDateFrom || filterDateTo) && (
+          {(filterCompany !== String(activeCompanyId) || filterType !== 'ALL' || filterDateFrom || filterDateTo) && (
             <button
               type="button"
               onClick={clearFilters}

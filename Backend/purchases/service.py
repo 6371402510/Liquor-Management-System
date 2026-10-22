@@ -141,6 +141,28 @@ def _calc_total_bottles(item):
     return total_bottles
 
 
+def _resolve_total_bottles(item_dict: dict) -> int:
+    """
+    Compute a trustworthy `total_bottles` from whichever fields are present.
+    Order of preference:
+      1. explicit total_bottles
+      2. qty_cases * bottles_per_case
+      3. qty_bottles (direct bottles entry)
+    """
+    qty_cases        = item_dict.get("qty_cases") or 0
+    bottles_per_case = item_dict.get("bottles_per_case") or 0
+    qty_bottles      = item_dict.get("qty_bottles") or 0
+    tb               = item_dict.get("total_bottles") or 0
+
+    if tb > 0:
+        return int(tb)
+    if qty_cases > 0 and bottles_per_case > 0:
+        return int(qty_cases * bottles_per_case)
+    if qty_bottles > 0:
+        return int(qty_bottles)
+    return 0
+
+
 # ─────────────────────────────────────────────────────────────
 # CREATE
 # ─────────────────────────────────────────────────────────────
@@ -179,7 +201,10 @@ def create_purchase(db: Session, purchase_data: PurchaseCreate):
         for item_data in purchase_data.items:
             item_dict = item_data.model_dump(by_alias=False)
             item_dict["purchase_id"] = db_purchase.id
-            item_dict["company_id"]  = company_id   # force company scope
+            item_dict["company_id"]  = company_id
+
+            # ✅ Always persist a trustworthy total_bottles
+            item_dict["total_bottles"] = _resolve_total_bottles(item_dict)
 
             db_item = PurchaseItem(**item_dict)
             db.add(db_item)
@@ -189,7 +214,7 @@ def create_purchase(db: Session, purchase_data: PurchaseCreate):
                 db, item_data.product_id, company_id
             )
             if product:
-                total_bottles = _calc_total_bottles(item_data)
+                total_bottles = item_dict["total_bottles"]  # use resolved value
                 _apply_stock(product, total_bottles, destination, is_add=True)
 
                 if (product.opening_stock or 0) == 0:
@@ -276,6 +301,9 @@ def update_purchase(db: Session, purchase_id: int, purchase_data: PurchaseCreate
         item_dict["purchase_id"] = db_purchase.id
         item_dict["company_id"]  = new_company_id
 
+        # ✅ Always persist a trustworthy total_bottles
+        item_dict["total_bottles"] = _resolve_total_bottles(item_dict)
+
         db_item = PurchaseItem(**item_dict)
         db.add(db_item)
 
@@ -283,7 +311,7 @@ def update_purchase(db: Session, purchase_id: int, purchase_data: PurchaseCreate
             db, item_data.product_id, new_company_id
         )
         if product:
-            total_bottles = _calc_total_bottles(item_data)
+            total_bottles = item_dict["total_bottles"]  # use resolved value
             _apply_stock(product, total_bottles, new_destination, is_add=True)
             _update_product_rate(product, item_data, total_bottles, db_purchase)
 
