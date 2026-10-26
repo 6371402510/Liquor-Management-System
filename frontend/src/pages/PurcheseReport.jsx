@@ -15,7 +15,7 @@ import { writeFile } from '@tauri-apps/plugin-fs'
 // Import API functions
 import { getPurchases, getPurchaseItems, getAllPurchases } from '../apiservices/purchasesapi'
 import { getSuppliers } from '../apiservices/supplierapi'
-import { getCompanies } from '../apiservices/companyapi' // ← adjust path if needed
+import { getCompanies } from '../apiservices/companyapi'
 
 // ─── Helper: Normalize API response field names ───
 function normalizeItem(item) {
@@ -36,10 +36,12 @@ function normalizeItem(item) {
     id: item.id,
     purchase_id: item.purchase_id,
     product_name: item.product_name ?? item.name ?? '',
+    // ✅ || so empty strings fall through
     short_name:
-      item.short_name ??
-      item.shortName ??
-      item.company_short_name ??
+      item.short_name ||
+      item.shortName ||
+      item.company_short_name ||
+      item.companyShortName ||
       '',
     brand: item.brand ?? '',
     category: item.category ?? '',
@@ -104,7 +106,7 @@ export default function PurchaseReport() {
   const [expandedId, setExpandedId] = useState(null)
   const [loadingItems, setLoadingItems] = useState(false)
 
-  // ─── NEW: All-Companies mode ───
+  // ─── All-Companies mode ───
   const [showAllCompanies, setShowAllCompanies] = useState(false)
   const [allCompanyPurchases, setAllCompanyPurchases] = useState([])
   const [loadingAll, setLoadingAll] = useState(false)
@@ -126,8 +128,8 @@ export default function PurchaseReport() {
   const [filterMinAmount, setFilterMinAmount] = useState('')
   const [filterMaxAmount, setFilterMaxAmount] = useState('')
   const [filterStockDest, setFilterStockDest] = useState('ALL')
-  const [filterShortName, setFilterShortName] = useState('')
-  const [filterCompany, setFilterCompany] = useState('') // ← used only in all-companies mode
+  const [filterShortName, setFilterShortName] = useState('')   // product company short name
+  const [filterCompany, setFilterCompany] = useState('')       // all-companies mode only
 
   // ─── UI State ───
   const [showFilters, setShowFilters] = useState(true)
@@ -166,60 +168,50 @@ export default function PurchaseReport() {
     }
   }
 
-  // ─── NEW: Fetch purchases across ALL companies ───
- // ─── NEW: Fetch purchases across ALL companies ───
-const fetchAllCompaniesPurchases = async () => {
-  setLoadingAll(true)
-  setError('')
-  try {
-    const [data, companies] = await Promise.all([
-      getAllPurchases(),
-      getCompanies(),
-    ])
+  // ─── Fetch purchases across ALL companies ───
+  const fetchAllCompaniesPurchases = async () => {
+    setLoadingAll(true)
+    setError('')
+    try {
+      const [data, companies] = await Promise.all([
+        getAllPurchases(),
+        getCompanies(),
+      ])
 
-    // ─── Build id → name map robustly ───
-    const map = {}
-    ;(companies || []).forEach(c => {
-      // Try every possible name field, and key by BOTH string and number id
-      const displayName =
-        c.name ??
-        c.company_name ??
-        c.companyName ??
-        c.title ??
-        c.short_name ??
-        c.label ??
-        null
+      const map = {}
+      ;(companies || []).forEach(c => {
+        const displayName =
+          c.name ??
+          c.company_name ??
+          c.companyName ??
+          c.title ??
+          c.short_name ??
+          c.label ??
+          null
+        if (displayName == null) return
+        const idKey = c.id != null ? String(c.id) : null
+        if (idKey) map[idKey] = displayName
+      })
 
-      if (displayName == null) return
+      setCompaniesMap(map)
 
-      // Normalise id to string key
-      const idKey = c.id != null ? String(c.id) : null
-      if (idKey) map[idKey] = displayName
-    })
+      const tagged = (data || []).map(p => {
+        const idKey = p.company_id != null ? String(p.company_id) : null
+        const resolvedName = idKey ? map[idKey] : null
+        return {
+          ...p,
+          _company_name: resolvedName || `Company #${p.company_id ?? '—'}`,
+        }
+      })
 
-    console.log('[All Companies] map:', map)          // ← verify in console
-    console.log('[All Companies] sample purchase:', (data || [])[0])  // ← check company_id
-
-    setCompaniesMap(map)
-
-    const tagged = (data || []).map(p => {
-      const idKey = p.company_id != null ? String(p.company_id) : null
-      const resolvedName = idKey ? map[idKey] : null
-      return {
-        ...p,
-        _company_name: resolvedName || `Company #${p.company_id ?? '—'}`,
-      }
-    })
-
-    setAllCompanyPurchases(tagged)
-  } catch (err) {
-    setError(err.message || 'Failed to load all companies purchases')
-  } finally {
-    setLoadingAll(false)
+      setAllCompanyPurchases(tagged)
+    } catch (err) {
+      setError(err.message || 'Failed to load all companies purchases')
+    } finally {
+      setLoadingAll(false)
+    }
   }
-}
 
-  // ─── NEW: Toggle all-companies mode ───
   const toggleAllCompanies = () => {
     setShowAllCompanies(prev => {
       const next = !prev
@@ -257,10 +249,12 @@ const fetchAllCompaniesPurchases = async () => {
   // ─── Unified self-healing item loader ───
   const activeSource = showAllCompanies ? allCompanyPurchases : purchases
 
-  useEffect(() => {
-    const hasItemFilter = filterProduct || filterBrand || filterCategory || filterShortName
-    const needsItems = activeTab !== 'detail' || hasItemFilter
+  const hasItemFilter = Boolean(
+    filterProduct || filterBrand || filterCategory || filterShortName
+  )
 
+  useEffect(() => {
+    const needsItems = activeTab !== 'detail' || hasItemFilter
     if (!needsItems || activeSource.length === 0) return
 
     const missing = activeSource.filter(
@@ -310,10 +304,9 @@ const fetchAllCompaniesPurchases = async () => {
 
   // ─── Loading indicator for item-level filters ───
   const loadingItemFilters = useMemo(() => {
-    const hasItemFilter = filterProduct || filterBrand || filterCategory || filterShortName
     if (!hasItemFilter) return false
     return activeSource.some(p => expandedItems[p.id] === undefined)
-  }, [filterProduct, filterBrand, filterCategory, filterShortName, activeSource, expandedItems])
+  }, [hasItemFilter, activeSource, expandedItems])
 
   // ─── Clear All Filters ───
   const clearFilters = () => {
@@ -339,14 +332,33 @@ const fetchAllCompaniesPurchases = async () => {
     filterStatus !== 'ALL' || filterVehicle || filterMinAmount || filterMaxAmount ||
     filterStockDest !== 'ALL' || filterCompany
 
-  // ─── Filtering Logic ───
+  // ─── NEW: item-level filter helper (applied per-item in aggregations) ───
+  const filterItems = useCallback((items) => {
+    if (!hasItemFilter) return items
+    return items.filter(item => {
+      if (filterProduct && !(item.product_name || '').toLowerCase().includes(filterProduct.toLowerCase())) return false
+      if (filterCategory && !(item.category || '').toLowerCase().includes(filterCategory.toLowerCase())) return false
+      if (filterBrand && !(item.brand || '').toLowerCase().includes(filterBrand.toLowerCase())) return false
+      if (filterShortName) {
+        const q = filterShortName.trim().toLowerCase()
+        const shortName = (item.short_name || '').trim().toLowerCase()
+        const ok =
+          shortName.includes(q) ||
+          (item.product_name || '').toLowerCase().includes(q) ||
+          (item.brand || '').toLowerCase().includes(q)
+        if (!ok) return false
+      }
+      return true
+    })
+  }, [hasItemFilter, filterProduct, filterCategory, filterBrand, filterShortName])
+
+  // ─── Filtering Logic (purchase-level) ───
   const filteredPurchases = useMemo(() => {
     return activeSource.filter(p => {
       const pDate = p.billing_date || p.purchase_date || ''
       if (filterDateFrom && pDate < filterDateFrom) return false
       if (filterDateTo && pDate > filterDateTo) return false
 
-      // Supplier filter differs based on mode
       if (filterSupplier) {
         if (showAllCompanies) {
           if (!(p.supplier_name || '').toLowerCase().includes(String(filterSupplier).toLowerCase())) return false
@@ -363,23 +375,16 @@ const fetchAllCompaniesPurchases = async () => {
       if (filterMaxAmount && amt > Number(filterMaxAmount)) return false
       if (filterStockDest !== 'ALL' && (p.stock_destination || 'GODOWN') !== filterStockDest) return false
 
-      // Company-name filter (all-companies mode)
       if (showAllCompanies && filterCompany) {
         if (!(p._company_name || '').toLowerCase().includes(filterCompany.toLowerCase())) return false
       }
 
-      const hasItemFilter = filterProduct || filterBrand || filterCategory || filterShortName
+      // Item-level filter: keep purchase if AT LEAST ONE item matches
       if (hasItemFilter) {
         const pItems = expandedItems[p.id]
-        if (pItems === undefined) return true
+        if (pItems === undefined) return true      // keep visible while loading
         if (pItems.length === 0) return false
-        return pItems.some(item => {
-          const matchProduct = !filterProduct || (item.product_name || '').toLowerCase().includes(filterProduct.toLowerCase())
-          const matchCategory = !filterCategory || (item.category || '').toLowerCase().includes(filterCategory.toLowerCase())
-          const matchBrand = !filterBrand || (item.brand || '').toLowerCase().includes(filterBrand.toLowerCase())
-          const matchShortName = !filterShortName || (item.short_name || '').toLowerCase().includes(filterShortName.toLowerCase())
-          return matchProduct && matchCategory && matchBrand && matchShortName
-        })
+        return filterItems(pItems).length > 0
       }
 
       return true
@@ -387,7 +392,8 @@ const fetchAllCompaniesPurchases = async () => {
   }, [
     activeSource, showAllCompanies, filterDateFrom, filterDateTo, filterSupplier, filterInvoice,
     filterProduct, filterBrand, filterCategory, filterShortName, filterStatus,
-    filterVehicle, filterMinAmount, filterMaxAmount, filterStockDest, filterCompany, expandedItems
+    filterVehicle, filterMinAmount, filterMaxAmount, filterStockDest, filterCompany,
+    expandedItems, hasItemFilter, filterItems
   ])
 
   // ─── Sorting ───
@@ -449,9 +455,10 @@ const fetchAllCompaniesPurchases = async () => {
     const godownCount = godownPurchases.length
     const counterCount = counterPurchases.length
 
+    // ─── item-level totals (filtered) ───
     let totalBottles = 0, totalCases = 0, totalBulkLiters = 0, itemCostSum = 0
-    Object.values(expandedItems).forEach(items => {
-      items.forEach(item => {
+    filteredPurchases.forEach(p => {
+      filterItems(expandedItems[p.id] || []).forEach(item => {
         totalBottles += item.total_bottles || 0
         totalCases += item.qty_cases || 0
         totalBulkLiters += item.qty_bulk_liters || 0
@@ -465,7 +472,7 @@ const fetchAllCompaniesPurchases = async () => {
       uniqueSuppliers, receivedCount, returnCount, totalBottles, totalCases, totalBulkLiters, itemCostSum,
       godownCount, godownAmount, counterCount, counterAmount
     }
-  }, [filteredPurchases, expandedItems])
+  }, [filteredPurchases, expandedItems, filterItems])
 
   // ─── Aggregation: By Supplier ───
   const bySupplier = useMemo(() => {
@@ -479,23 +486,21 @@ const fetchAllCompaniesPurchases = async () => {
       map[key].tcs += Number(p.tcs_amount) || 0
       map[key].handling += Number(p.total_handling) || 0
 
-      const pItems = expandedItems[p.id] || []
-      if (pItems.length > 0) {
-        pItems.forEach(item => {
-          map[key].mger += Number(item.mger_value) || 0
-        })
-      }
+      const pItems = filterItems(expandedItems[p.id] || [])
+      pItems.forEach(item => {
+        map[key].mger += Number(item.mger_value) || 0
+      })
 
       map[key].total += Number(p.total_amount) || 0
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
-  }, [filteredPurchases, expandedItems])
+  }, [filteredPurchases, expandedItems, filterItems])
 
-  // ─── Aggregation: By Category ───
+  // ─── Aggregation: By Category (item-level filtered) ───
   const byCategory = useMemo(() => {
     const map = {}
     filteredPurchases.forEach(p => {
-      (expandedItems[p.id] || []).forEach(item => {
+      filterItems(expandedItems[p.id] || []).forEach(item => {
         const key = item.category || 'Uncategorized'
         if (!map[key]) map[key] = { name: key, count: 0, bottles: 0, cases: 0, cost: 0, bulkLiters: 0 }
         map[key].count++
@@ -506,13 +511,13 @@ const fetchAllCompaniesPurchases = async () => {
       })
     })
     return Object.values(map).sort((a, b) => b.cost - a.cost)
-  }, [filteredPurchases, expandedItems])
+  }, [filteredPurchases, expandedItems, filterItems])
 
-  // ─── Aggregation: By Brand ───
+  // ─── Aggregation: By Brand (item-level filtered) ───
   const byBrand = useMemo(() => {
     const map = {}
     filteredPurchases.forEach(p => {
-      (expandedItems[p.id] || []).forEach(item => {
+      filterItems(expandedItems[p.id] || []).forEach(item => {
         const key = item.brand || 'Unknown Brand'
         if (!map[key]) map[key] = { name: key, count: 0, bottles: 0, cases: 0, cost: 0, bulkLiters: 0 }
         map[key].count++
@@ -523,18 +528,18 @@ const fetchAllCompaniesPurchases = async () => {
       })
     })
     return Object.values(map).sort((a, b) => b.cost - a.cost)
-  }, [filteredPurchases, expandedItems])
+  }, [filteredPurchases, expandedItems, filterItems])
 
-  // ─── Aggregation: By Product ───
+  // ─── Aggregation: By Product (item-level filtered) ───
   const byProduct = useMemo(() => {
     const map = {}
     filteredPurchases.forEach(p => {
-      (expandedItems[p.id] || []).forEach(item => {
+      filterItems(expandedItems[p.id] || []).forEach(item => {
         const key = `${item.product_name}|${item.bottle_size}|${item.brand}`
         if (!map[key]) map[key] = {
           name: item.product_name || 'Unknown', brand: item.brand || '', category: item.category || '',
-          bottle_size: item.bottle_size || '', bottles_per_case: item.bottles_per_case || 0, mrp: item.mrp, count: 0, bottles: 0, cases: 0,
-          cost: 0, bulkLiters: 0, lpLiters: 0
+          bottle_size: item.bottle_size || '', bottles_per_case: item.bottles_per_case || 0, mrp: item.mrp,
+          count: 0, bottles: 0, cases: 0, cost: 0, bulkLiters: 0, lpLiters: 0,
         }
         map[key].count++
         map[key].bottles += item.total_bottles || 0
@@ -545,13 +550,13 @@ const fetchAllCompaniesPurchases = async () => {
       })
     })
     return Object.values(map).sort((a, b) => b.cost - a.cost)
-  }, [filteredPurchases, expandedItems])
+  }, [filteredPurchases, expandedItems, filterItems])
 
-  // ─── Aggregation: By Short Name (Company) ───
+  // ─── Aggregation: By Short Name (item-level filtered) ───
   const byShortName = useMemo(() => {
     const map = {}
     filteredPurchases.forEach(p => {
-      (expandedItems[p.id] || []).forEach(item => {
+      filterItems(expandedItems[p.id] || []).forEach(item => {
         const key = item.short_name || 'Unknown'
         if (!map[key]) map[key] = {
           name: key,
@@ -577,7 +582,7 @@ const fetchAllCompaniesPurchases = async () => {
       })
     })
     return Object.values(map).sort((a, b) => b.cost - a.cost)
-  }, [filteredPurchases, expandedItems])
+  }, [filteredPurchases, expandedItems, filterItems])
 
   // ─── Export to Excel ───
   const handleExportExcel = async () => {
@@ -585,9 +590,9 @@ const fetchAllCompaniesPurchases = async () => {
 
     const wb = XLSX.utils.book_new()
 
-    // ─── Sheet 1: Purchase Summary ───
+    // Sheet 1: Purchase Summary (with filtered MGER)
     const summaryData = filteredPurchases.map(p => {
-      const pItems = expandedItems[p.id] || []
+      const pItems = filterItems(expandedItems[p.id] || [])
       const totalMger = pItems.reduce((s, i) => s + (Number(i.mger_value) || 0), 0)
 
       return {
@@ -612,10 +617,10 @@ const fetchAllCompaniesPurchases = async () => {
     const ws1 = XLSX.utils.json_to_sheet(summaryData)
     XLSX.utils.book_append_sheet(wb, ws1, 'Purchase Summary')
 
-    // ─── Sheet 2: Item Details ───
+    // Sheet 2: Item Details (filtered items only)
     const itemData = []
     filteredPurchases.forEach(p => {
-      const items = expandedItems[p.id] || []
+      const items = filterItems(expandedItems[p.id] || [])
       if (items.length === 0) {
         itemData.push({
           ...(showAllCompanies ? { 'Company': p._company_name } : {}),
@@ -634,6 +639,7 @@ const fetchAllCompaniesPurchases = async () => {
             'Supplier': p.supplier_name || '',
             'Description': p.purchase_side === 'BEER' ? 'Beer' : 'Liquor',
             'Product': item.product_name || '',
+            'Short Name': item.short_name || '',
             'Brand': item.brand || '',
             'Category': item.category || '',
             'Bottle Size': item.bottle_size || '',
@@ -652,7 +658,7 @@ const fetchAllCompaniesPurchases = async () => {
     const ws2 = XLSX.utils.json_to_sheet(itemData)
     XLSX.utils.book_append_sheet(wb, ws2, 'Item Details')
 
-    // ─── Sheet 3: By Supplier ───
+    // Sheet 3: By Supplier
     const supplierData = bySupplier.map(s => ({
       'Supplier': s.name,
       'No. of Purchases': s.count,
@@ -666,7 +672,7 @@ const fetchAllCompaniesPurchases = async () => {
     const ws3 = XLSX.utils.json_to_sheet(supplierData)
     XLSX.utils.book_append_sheet(wb, ws3, 'By Supplier')
 
-    // ─── Sheet 4: By Product ───
+    // Sheet 4: By Product
     const productData = byProduct.map(p => ({
       'Product': p.name,
       'Brand': p.brand,
@@ -684,7 +690,7 @@ const fetchAllCompaniesPurchases = async () => {
     const ws4 = XLSX.utils.json_to_sheet(productData)
     XLSX.utils.book_append_sheet(wb, ws4, 'By Product')
 
-    // ─── Sheet 5: By Short Name (Company) ───
+    // Sheet 5: By Company
     const shortNameData = byShortName.map(s => ({
       'Company': s.name,
       'Product': s.product_name,
@@ -703,7 +709,7 @@ const fetchAllCompaniesPurchases = async () => {
     const ws5 = XLSX.utils.json_to_sheet(shortNameData)
     XLSX.utils.book_append_sheet(wb, ws5, 'By Company')
 
-    // ─── Save File ───
+    // Save File
     const dateLabel = filterDateFrom && filterDateTo
       ? `_${filterDateFrom}_to_${filterDateTo}`
       : `_${new Date().toISOString().slice(0, 10)}`
@@ -802,7 +808,6 @@ const fetchAllCompaniesPurchases = async () => {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {/* ─── NEW: All Companies toggle ─── */}
           <button
             type="button"
             onClick={toggleAllCompanies}
@@ -915,7 +920,6 @@ const fetchAllCompaniesPurchases = async () => {
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Date From</label><input type="date" value={filterDateFrom} onChange={e => { setFilterDateFrom(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Date To</label><input type="date" value={filterDateTo} onChange={e => { setFilterDateTo(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
 
-            {/* Supplier filter — text in all-companies mode, dropdown in single-company mode */}
             <div>
               <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Supplier</label>
               {showAllCompanies ? (
@@ -950,7 +954,6 @@ const fetchAllCompaniesPurchases = async () => {
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Vehicle No.</label><input type="text" placeholder="e.g. MH12AB1234" value={filterVehicle} onChange={e => { setFilterVehicle(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
             <div><label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Min Amount ₹</label><input type="number" placeholder="0" value={filterMinAmount} onChange={e => { setFilterMinAmount(e.target.value); setCurrentPage(1) }} className="input-field text-xs" /></div>
 
-            {/* Company-name filter — only visible in all-companies mode */}
             {showAllCompanies && (
               <div>
                 <label className="block text-[10px] font-medium text-indigo-500 dark:text-indigo-400 mb-1 uppercase tracking-wide">Company</label>
@@ -964,13 +967,14 @@ const fetchAllCompaniesPurchases = async () => {
               </div>
             )}
 
+            {/* Short Name / Product Company filter */}
             <div>
               <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-                Company
+                Short Name (Product Company)
               </label>
               <input
                 type="text"
-                placeholder="Filter by company name..."
+                placeholder="Filter by short name..."
                 value={filterShortName}
                 onChange={e => { setFilterShortName(e.target.value); setCurrentPage(1) }}
                 className="input-field text-xs"
@@ -1018,9 +1022,7 @@ const fetchAllCompaniesPurchases = async () => {
         <div className="card p-10 text-center border dark:border-slate-700"><Package className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" /><p className="text-sm text-gray-400 dark:text-gray-500">{hasActiveFilters ? 'No purchases match the selected filters' : 'No purchases recorded yet'}</p></div>
       ) : (
         <>
-          {/* ═══════════════════════════════════════════════════════════════
-              DETAIL TAB
-          ═══════════════════════════════════════════════════════════════ */}
+          {/* ═══ DETAIL TAB ═══ */}
           {activeTab === 'detail' && (
             <div className="space-y-3">
               <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
@@ -1029,9 +1031,7 @@ const fetchAllCompaniesPurchases = async () => {
                     <thead>
                       <tr className="border-b border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-800/50">
                         {showAllCompanies && (
-                          <th className="p-2.5 text-left font-semibold text-indigo-600 dark:text-indigo-400">
-                            Company
-                          </th>
+                          <th className="p-2.5 text-left font-semibold text-indigo-600 dark:text-indigo-400">Company</th>
                         )}
                         <th className="p-2.5 text-left font-semibold cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-700/50" onClick={() => handleSort('invoice_number')}>
                           <div className="flex items-center gap-1">Invoice {getSortIcon(sortField === 'invoice_number' ? sortDir : '')}</div>
@@ -1114,7 +1114,7 @@ const fetchAllCompaniesPurchases = async () => {
                             <td className="p-2.5 text-center text-gray-500 text-[11px]">{p.vehicle_number || '—'}</td>
                             <td className="p-2.5 text-right">
                               {(() => {
-                                const totalMger = (expandedItems[p.id] || []).reduce((s, i) => s + (Number(i.mger_value) || 0), 0)
+                                const totalMger = filterItems(expandedItems[p.id] || []).reduce((s, i) => s + (Number(i.mger_value) || 0), 0)
                                 return totalMger > 0
                                   ? <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{totalMger.toFixed(2)}</span>
                                   : <span className="text-gray-300 dark:text-gray-600">—</span>
@@ -1156,7 +1156,7 @@ const fetchAllCompaniesPurchases = async () => {
                             </td>
                           </tr>
 
-                          {/* ─── Expanded Items ─── */}
+                          {/* Expanded Items — filtered by item-level filters */}
                           {expandedId === p.id && expandedItems[p.id] && (
                             <tr key={`${p.id}-items`} className="bg-gray-50/50 dark:bg-gray-800/20">
                               <td colSpan={showAllCompanies ? 15 : 14} className="px-6 py-3">
@@ -1178,12 +1178,12 @@ const fetchAllCompaniesPurchases = async () => {
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                                    {(expandedItems[p.id] || []).map((item, idx) => (
+                                    {(filterItems(expandedItems[p.id] || [])).map((item, idx) => (
                                       <tr key={item.id || idx} className="hover:bg-white dark:hover:bg-gray-800/50 transition-colors">
                                         <td className="py-1.5 text-gray-400">{idx + 1}</td>
                                         <td className="py-1.5">
                                           <div className="font-medium text-gray-700 dark:text-gray-300">{item.product_name}</div>
-                                          <div className="text-[10px] text-gray-400">{item.brand} {item.category ? `• ${item.category}` : ''}</div>
+                                          <div className="text-[10px] text-gray-400">{item.short_name ? `${item.short_name} • ` : ''}{item.brand} {item.category ? `• ${item.category}` : ''}</div>
                                         </td>
                                         <td className="py-1.5 text-center text-gray-500">{item.bottle_size || '—'}</td>
                                         <td className="py-1.5 text-center font-medium text-blue-600 dark:text-blue-400">
@@ -1205,7 +1205,7 @@ const fetchAllCompaniesPurchases = async () => {
                                       </tr>
                                     ))}
                                     {(() => {
-                                      const items = expandedItems[p.id] || []
+                                      const items = filterItems(expandedItems[p.id] || [])
                                       const subCases = items.reduce((s, i) => s + (i.qty_cases || 0), 0)
                                       const subBottles = items.reduce((s, i) => s + (i.total_bottles || 0), 0)
                                       const subBulk = items.reduce((s, i) => s + (i.qty_bulk_liters || 0), 0)
@@ -1236,7 +1236,6 @@ const fetchAllCompaniesPurchases = async () => {
                 </div>
               </div>
 
-              {/* ─── Pagination ─── */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-2">
                   <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -1271,9 +1270,7 @@ const fetchAllCompaniesPurchases = async () => {
             </div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════════
-              BY SUPPLIER TAB
-          ═══════════════════════════════════════════════════════════════ */}
+          {/* ═══ BY SUPPLIER TAB ═══ */}
           {activeTab === 'bySupplier' && (
             <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
               <div className="overflow-x-auto">
@@ -1324,9 +1321,7 @@ const fetchAllCompaniesPurchases = async () => {
             </div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════════
-              BY CATEGORY TAB
-          ═══════════════════════════════════════════════════════════════ */}
+          {/* ═══ BY CATEGORY TAB ═══ */}
           {activeTab === 'byCategory' && (
             <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
               <div className="overflow-x-auto">
@@ -1366,9 +1361,7 @@ const fetchAllCompaniesPurchases = async () => {
             </div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════════
-              BY BRAND TAB
-          ═══════════════════════════════════════════════════════════════ */}
+          {/* ═══ BY BRAND TAB ═══ */}
           {activeTab === 'byBrand' && (
             <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
               <div className="overflow-x-auto">
@@ -1408,9 +1401,7 @@ const fetchAllCompaniesPurchases = async () => {
             </div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════════
-              BY PRODUCT TAB
-          ═══════════════════════════════════════════════════════════════ */}
+          {/* ═══ BY PRODUCT TAB ═══ */}
           {activeTab === 'byProduct' && (
             <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
               <div className="overflow-x-auto">
@@ -1465,9 +1456,7 @@ const fetchAllCompaniesPurchases = async () => {
             </div>
           )}
 
-          {/* ═══════════════════════════════════════════════════════════════
-              BY SHORT NAME TAB
-          ═══════════════════════════════════════════════════════════════ */}
+          {/* ═══ BY SHORT NAME TAB ═══ */}
           {activeTab === 'byShortName' && (
             <div className="card overflow-hidden border dark:border-slate-700 shadow-sm">
               <div className="overflow-x-auto">
