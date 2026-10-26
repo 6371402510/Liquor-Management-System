@@ -956,7 +956,7 @@ export default function PurchaseReport() {
 
             {showAllCompanies && (
               <div>
-                <label className="block text-[10px] font-medium text-indigo-500 dark:text-indigo-400 mb-1 uppercase tracking-wide">Company</label>
+                <label className="block text-[10px] font-medium text-indigo-500 dark:text-indigo-400 mb-1 uppercase tracking-wide">Shop-Company</label>
                 <input
                   type="text"
                   placeholder="Filter by company name..."
@@ -970,11 +970,11 @@ export default function PurchaseReport() {
             {/* Short Name / Product Company filter */}
             <div>
               <label className="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-                Short Name (Product Company)
+                Product Company
               </label>
               <input
                 type="text"
-                placeholder="Filter by short name..."
+                placeholder="Filter by product company..."
                 value={filterShortName}
                 onChange={e => { setFilterShortName(e.target.value); setCurrentPage(1) }}
                 className="input-field text-xs"
